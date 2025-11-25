@@ -8,17 +8,17 @@ import { Label } from "@/components/ui/label";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, differenceInYears } from "date-fns";
-import { 
-  CalendarIcon, 
-  UserCircle, 
-  Phone, 
-  Calendar as CalendarIcon2, 
-  Clock, 
-  Users, 
-  Home, 
-  ArrowLeft, 
-  CheckCircle, 
-  Link as LinkIcon, 
+import {
+  CalendarIcon,
+  UserCircle,
+  Phone,
+  Calendar as CalendarIcon2,
+  Clock,
+  Users,
+  Home,
+  ArrowLeft,
+  CheckCircle,
+  Link as LinkIcon,
   Unlink,
   CalendarClock
 } from "lucide-react";
@@ -89,20 +89,20 @@ export default function ProfilePage() {
           formData.append(key, String(value));
         }
       });
-      
+
       if (imageFile) {
         formData.append("profileImageFile", imageFile);
       }
-      
+
       const res = await fetch("/api/profile", {
         method: "POST",
         body: formData,
       });
-      
+
       if (!res.ok) {
-        throw new Error("Falha ao atualizar perfil");
+        throw new Error("Falha ao atualizar perfil, pois a extensão da imagem não é permitida");
       }
-      
+
       return await res.json();
     },
     onSuccess: () => {
@@ -169,7 +169,7 @@ export default function ProfilePage() {
     onSuccess: (data) => {
       // Abre a URL de autenticação do Google em uma nova janela
       window.open(data.authUrl, "_blank");
-      
+
       toast({
         title: "Redirecionando para o Google",
         description: "Uma nova janela foi aberta para você autorizar o acesso ao Google Calendar.",
@@ -189,7 +189,7 @@ export default function ProfilePage() {
     const urlParams = new URLSearchParams(window.location.search);
     const googleCalendarConnected = urlParams.get("googleCalendarConnected");
     const googleCalendarError = urlParams.get("googleCalendarError");
-    
+
     if (googleCalendarConnected === "true") {
       toast({
         title: "Conectado ao Google Calendar",
@@ -234,7 +234,7 @@ export default function ProfilePage() {
           <span>Voltar ao Dashboard</span>
         </Button>
       </div>
-      
+
       {/* Notificação de sucesso */}
       {showSuccess && (
         <div className="bg-green-50 border border-green-200 text-green-700 rounded-md p-4 mb-6 flex justify-between items-center">
@@ -243,9 +243,9 @@ export default function ProfilePage() {
             <span>Perfil atualizado com sucesso!</span>
           </div>
           <div className="flex space-x-2">
-            <Button 
-              variant="ghost" 
-              size="sm" 
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => navigate("/")}
               className="flex items-center gap-1"
             >
@@ -262,12 +262,12 @@ export default function ProfilePage() {
           </div>
         </div>
       )}
-      
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Seção esquerda - Perfil e Integrações */}
         <div className="md:col-span-2">
-          <Tabs 
-            defaultValue="personal" 
+          <Tabs
+            defaultValue="personal"
             value={activeTab}
             onValueChange={setActiveTab}
             className="mb-6"
@@ -276,7 +276,7 @@ export default function ProfilePage() {
               <TabsTrigger value="personal">Dados Pessoais</TabsTrigger>
               <TabsTrigger value="integrations">Integrações</TabsTrigger>
             </TabsList>
-            
+
             <TabsContent value="personal">
               <Card>
                 <CardHeader>
@@ -291,7 +291,7 @@ export default function ProfilePage() {
                       <div className="flex flex-col items-center mb-6">
                         <Avatar className="w-24 h-24 mb-4">
                           <AvatarImage src={imagePreview || undefined} />
-                          <AvatarFallback 
+                          <AvatarFallback
                             showPsychologySymbol={user?.role === "psychologist"}
                             className={`text-2xl font-semibold ${user?.role === "psychologist" ? "bg-primary/10" : ""}`}
                           >
@@ -302,11 +302,11 @@ export default function ProfilePage() {
                           <Label htmlFor="picture" className="cursor-pointer text-primary font-medium">
                             Alterar imagem de perfil (60x60px)
                           </Label>
-                          <Input 
-                            id="picture" 
-                            type="file" 
-                            accept="image/*" 
-                            className="hidden" 
+                          <Input
+                            id="picture"
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
                             onChange={handleImageChange}
                           />
                         </div>
@@ -396,9 +396,9 @@ export default function ProfilePage() {
                         />
                       </div>
 
-                      <Button 
-                        type="submit" 
-                        className="w-full" 
+                      <Button
+                        type="submit"
+                        className="w-full"
                         disabled={updateProfileMutation.isPending || !form.formState.isDirty}
                       >
                         {updateProfileMutation.isPending ? "Salvando..." : "Salvar alterações"}
@@ -408,7 +408,7 @@ export default function ProfilePage() {
                 </CardContent>
               </Card>
             </TabsContent>
-            
+
             <TabsContent value="integrations">
               <Card>
                 <CardHeader>
@@ -431,7 +431,7 @@ export default function ProfilePage() {
                           </p>
                         </div>
                       </div>
-                      
+
                       {googleCalendarStatus?.authenticated ? (
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-green-600 font-medium flex items-center">
@@ -439,20 +439,20 @@ export default function ProfilePage() {
                           </span>
                         </div>
                       ) : (
-                        <Button 
+                        <Button
                           onClick={() => connectGoogleCalendarMutation.mutate()}
                           disabled={connectGoogleCalendarMutation.isPending}
                           className="flex items-center gap-2"
                         >
                           <LinkIcon className="h-4 w-4" />
-                          {connectGoogleCalendarMutation.isPending 
-                            ? "Conectando..." 
+                          {connectGoogleCalendarMutation.isPending
+                            ? "Conectando..."
                             : "Conectar"
                           }
                         </Button>
                       )}
                     </div>
-                    
+
                     {googleCalendarStatus?.authenticated && (
                       <div className="space-y-4 mt-2">
                         <Alert>
@@ -462,7 +462,7 @@ export default function ProfilePage() {
                             Seus agendamentos serão automaticamente sincronizados com seu Google Calendar.
                           </AlertDescription>
                         </Alert>
-                        
+
                         <div className="space-y-2">
                           <h4 className="text-sm font-medium">Próximos eventos</h4>
                           {isLoadingEvents ? (
@@ -511,7 +511,7 @@ export default function ProfilePage() {
                   <p className="text-sm text-muted-foreground">{user?.email}</p>
                 </div>
               </div>
-              
+
               <div className="flex items-center space-x-4">
                 <div className="p-2 bg-primary/10 rounded-full">
                   <CalendarIcon2 className="h-5 w-5 text-primary" />
@@ -523,7 +523,7 @@ export default function ProfilePage() {
                   </p>
                 </div>
               </div>
-              
+
               <div className="flex items-center space-x-4">
                 <div className="p-2 bg-primary/10 rounded-full">
                   <Phone className="h-5 w-5 text-primary" />
@@ -535,7 +535,7 @@ export default function ProfilePage() {
                   </p>
                 </div>
               </div>
-              
+
               <div className="flex items-center space-x-4">
                 <div className="p-2 bg-primary/10 rounded-full">
                   <Clock className="h-5 w-5 text-primary" />
@@ -547,7 +547,7 @@ export default function ProfilePage() {
                   </p>
                 </div>
               </div>
-              
+
               <div className="flex items-center space-x-4">
                 <div className="p-2 bg-primary/10 rounded-full">
                   <Users className="h-5 w-5 text-primary" />
@@ -567,7 +567,7 @@ export default function ProfilePage() {
             <CardContent className="flex justify-center">
               <Avatar className="w-16 h-16">
                 <AvatarImage src={imagePreview || undefined} />
-                <AvatarFallback 
+                <AvatarFallback
                   showPsychologySymbol={user?.role === "psychologist"}
                   className={`text-lg font-semibold ${user?.role === "psychologist" ? "bg-primary/10" : ""}`}
                 >
