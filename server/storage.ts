@@ -1,5 +1,5 @@
-import { 
-  users, type User, type InsertUser, 
+import {
+  users, type User, type InsertUser,
   psychologists, type Psychologist, type InsertPsychologist,
   rooms, type Room, type InsertRoom,
   appointments, type Appointment, type InsertAppointment,
@@ -12,7 +12,7 @@ import {
 import session from "express-session";
 import createMemoryStore from "memorystore";
 import connectPg from "connect-pg-simple";
-// import { db, pool } from "./db"; // Commented out for local development
+import { db, pool } from "./db";
 import { eq, and, gte, lte, sql } from "drizzle-orm";
 import fs from "fs";
 import path from "path";
@@ -175,19 +175,19 @@ export class MemStorage implements IStorage {
       if (fs.existsSync(this.tokensFilePath)) {
         const data = fs.readFileSync(this.tokensFilePath, 'utf8');
         const tokens = JSON.parse(data);
-        
+
         for (const [token, tokenData] of Object.entries(tokens)) {
           // Convert date strings back to Date objects
           const resetToken = tokenData as any;
           resetToken.expiresAt = new Date(resetToken.expiresAt);
           resetToken.createdAt = new Date(resetToken.createdAt);
-          
+
           // Only load non-expired tokens
           if (resetToken.expiresAt > new Date() && !resetToken.used) {
             this.passwordResetTokens.set(token, resetToken);
           }
         }
-        
+
         console.log('💾 Tokens carregados do arquivo:', this.passwordResetTokens.size);
       }
     } catch (error) {
@@ -216,8 +216,8 @@ export class MemStorage implements IStorage {
 
   async createUser(user: InsertUser): Promise<User> {
     const id = this.userIdCounter++;
-    const newUser: User = { 
-      ...user, 
+    const newUser: User = {
+      ...user,
       id,
       role: user.role || 'user',
       status: user.status || 'active',
@@ -255,8 +255,8 @@ export class MemStorage implements IStorage {
 
   async createPsychologist(psychologist: InsertPsychologist): Promise<Psychologist> {
     const id = this.psychologistIdCounter++;
-    const newPsychologist: Psychologist = { 
-      ...psychologist, 
+    const newPsychologist: Psychologist = {
+      ...psychologist,
       id,
       specialization: psychologist.specialization || null,
       bio: psychologist.bio || null,
@@ -290,8 +290,8 @@ export class MemStorage implements IStorage {
 
   async createRoom(room: InsertRoom): Promise<Room> {
     const id = this.roomIdCounter++;
-    const newRoom: Room = { 
-      ...room, 
+    const newRoom: Room = {
+      ...room,
       id,
       hasWifi: room.hasWifi || false,
       hasAirConditioning: room.hasAirConditioning || false,
@@ -326,8 +326,8 @@ export class MemStorage implements IStorage {
 
   async createAppointment(appointment: InsertAppointment): Promise<Appointment> {
     const id = this.appointmentIdCounter++;
-    const newAppointment: Appointment = { 
-      ...appointment, 
+    const newAppointment: Appointment = {
+      ...appointment,
       id,
       status: appointment.status || 'scheduled',
       notes: appointment.notes || null
@@ -382,8 +382,8 @@ export class MemStorage implements IStorage {
 
   async createTransaction(transaction: InsertTransaction): Promise<Transaction> {
     const id = this.transactionIdCounter++;
-    const newTransaction: Transaction = { 
-      ...transaction, 
+    const newTransaction: Transaction = {
+      ...transaction,
       id,
       amount: transaction.amount.toString(),
       relatedAppointmentId: transaction.relatedAppointmentId || null
@@ -429,8 +429,8 @@ export class MemStorage implements IStorage {
 
   async createRoomBooking(roomBooking: InsertRoomBooking): Promise<RoomBooking> {
     const id = this.roomBookingIdCounter++;
-    const newRoomBooking: RoomBooking = { 
-      ...roomBooking, 
+    const newRoomBooking: RoomBooking = {
+      ...roomBooking,
       id,
       purpose: roomBooking.purpose || null
     };
@@ -502,8 +502,8 @@ export class MemStorage implements IStorage {
 
   async createPermission(permission: InsertPermission): Promise<Permission> {
     const id = this.permissionIdCounter++;
-    const newPermission: Permission = { 
-      ...permission, 
+    const newPermission: Permission = {
+      ...permission,
       id,
       description: permission.description || null
     };
@@ -576,7 +576,7 @@ export class MemStorage implements IStorage {
       createdAt: new Date()
     };
     this.passwordResetTokens.set(token, resetToken);
-    
+
     // Persist to file for development
     this.persistTokens();
   }
@@ -587,13 +587,13 @@ export class MemStorage implements IStorage {
       totalTokensStored: this.passwordResetTokens.size,
       allTokens: Array.from(this.passwordResetTokens.keys()).map(k => k.substring(0, 8) + '...')
     });
-    
+
     const resetToken = this.passwordResetTokens.get(token);
     if (!resetToken) {
       console.log('❌ Token não encontrado no storage');
       return undefined;
     }
-    
+
     console.log('🗺 Token encontrado:', {
       userId: resetToken.userId,
       expiresAt: resetToken.expiresAt,
@@ -602,13 +602,13 @@ export class MemStorage implements IStorage {
       isExpired: resetToken.expiresAt < new Date(),
       currentTime: new Date()
     });
-    
+
     // Check if token has expired
     if (resetToken.expiresAt < new Date() || resetToken.used) {
       console.log('❌ Token expirado ou já usado');
       return undefined;
     }
-    
+
     console.log('✅ Token válido retornado');
     return resetToken;
   }
@@ -618,7 +618,7 @@ export class MemStorage implements IStorage {
     if (resetToken) {
       resetToken.used = true;
       this.passwordResetTokens.set(token, resetToken);
-      
+
       // Persist to file for development
       this.persistTokens();
     }
@@ -627,19 +627,329 @@ export class MemStorage implements IStorage {
   async updateUserPassword(userId: number, hashedPassword: string): Promise<boolean> {
     const user = this.users.get(userId);
     if (!user) return false;
-    
+
     user.password = hashedPassword;
     this.users.set(userId, user);
     return true;
   }
 }
 
-// Comment out DatabaseStorage class - using MemStorage for development
-/*
 export class DatabaseStorage implements IStorage {
-  // ... All database methods commented out for development mode ...
+  sessionStore: session.Store;
+
+  constructor() {
+    this.sessionStore = new PostgresSessionStore({
+      pool,
+      createTableIfMissing: true
+    });
+  }
+
+  // User methods
+  async getUser(id: number): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user;
+  }
+
+  async createUser(user: InsertUser): Promise<User> {
+    const [newUser] = await db.insert(users).values(user).returning();
+    return newUser;
+  }
+
+  async updateUser(id: number, userData: Partial<User>): Promise<User | undefined> {
+    const [updatedUser] = await db.update(users).set(userData).where(eq(users.id, id)).returning();
+    return updatedUser;
+  }
+
+  async deleteUser(id: number): Promise<boolean> {
+    const [deletedUser] = await db.delete(users).where(eq(users.id, id)).returning();
+    return !!deletedUser;
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    return await db.select().from(users);
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user;
+  }
+
+  // Password Reset
+  async savePasswordResetToken(userId: number, token: string, expiresAt: Date): Promise<void> {
+    await db.insert(passwordResetTokens).values({
+      userId,
+      token,
+      expiresAt,
+      used: false
+    });
+  }
+
+  async getPasswordResetToken(token: string): Promise<PasswordResetToken | undefined> {
+    const [resetToken] = await db.select().from(passwordResetTokens).where(eq(passwordResetTokens.token, token));
+    return resetToken;
+  }
+
+  async invalidatePasswordResetToken(token: string): Promise<void> {
+    await db.update(passwordResetTokens)
+      .set({ used: true })
+      .where(eq(passwordResetTokens.token, token));
+  }
+
+  async updateUserPassword(userId: number, hashedPassword: string): Promise<boolean> {
+    const [updatedUser] = await db.update(users)
+      .set({ password: hashedPassword })
+      .where(eq(users.id, userId))
+      .returning();
+    return !!updatedUser;
+  }
+
+  // Psychologist methods
+  async getPsychologist(id: number): Promise<Psychologist | undefined> {
+    const [psych] = await db.select().from(psychologists).where(eq(psychologists.id, id));
+    return psych;
+  }
+
+  async getPsychologistByUserId(userId: number): Promise<Psychologist | undefined> {
+    const [psych] = await db.select().from(psychologists).where(eq(psychologists.userId, userId));
+    return psych;
+  }
+
+  async createPsychologist(psychologist: InsertPsychologist): Promise<Psychologist> {
+    const [newPsych] = await db.insert(psychologists).values(psychologist).returning();
+    return newPsych;
+  }
+
+  async updatePsychologist(id: number, data: Partial<Psychologist>): Promise<Psychologist | undefined> {
+    const [updated] = await db.update(psychologists).set(data).where(eq(psychologists.id, id)).returning();
+    return updated;
+  }
+
+  async deletePsychologist(id: number): Promise<boolean> {
+    const [deleted] = await db.delete(psychologists).where(eq(psychologists.id, id)).returning();
+    return !!deleted;
+  }
+
+  async getAllPsychologists(): Promise<Psychologist[]> {
+    return await db.select().from(psychologists);
+  }
+
+  // Room methods
+  async getRoom(id: number): Promise<Room | undefined> {
+    const [room] = await db.select().from(rooms).where(eq(rooms.id, id));
+    return room;
+  }
+
+  async createRoom(room: InsertRoom): Promise<Room> {
+    const [newRoom] = await db.insert(rooms).values(room).returning();
+    return newRoom;
+  }
+
+  async updateRoom(id: number, data: Partial<Room>): Promise<Room | undefined> {
+    const [updated] = await db.update(rooms).set(data).where(eq(rooms.id, id)).returning();
+    return updated;
+  }
+
+  async deleteRoom(id: number): Promise<boolean> {
+    const [deleted] = await db.delete(rooms).where(eq(rooms.id, id)).returning();
+    return !!deleted;
+  }
+
+  async getAllRooms(): Promise<Room[]> {
+    return await db.select().from(rooms);
+  }
+
+  // Appointment methods
+  async getAppointment(id: number): Promise<Appointment | undefined> {
+    const [appt] = await db.select().from(appointments).where(eq(appointments.id, id));
+    return appt;
+  }
+
+  async createAppointment(appointment: InsertAppointment): Promise<Appointment> {
+    const [newAppt] = await db.insert(appointments).values(appointment).returning();
+    return newAppt;
+  }
+
+  async updateAppointment(id: number, data: Partial<Appointment>): Promise<Appointment | undefined> {
+    const [updated] = await db.update(appointments).set(data).where(eq(appointments.id, id)).returning();
+    return updated;
+  }
+
+  async deleteAppointment(id: number): Promise<boolean> {
+    const [deleted] = await db.delete(appointments).where(eq(appointments.id, id)).returning();
+    return !!deleted;
+  }
+
+  async getAllAppointments(): Promise<Appointment[]> {
+    return await db.select().from(appointments);
+  }
+
+  async getAppointmentsByPsychologistId(psychologistId: number): Promise<Appointment[]> {
+    return await db.select().from(appointments).where(eq(appointments.psychologistId, psychologistId));
+  }
+
+  async getAppointmentsByDate(date: Date): Promise<Appointment[]> {
+    const all = await this.getAllAppointments();
+    const dateString = date.toISOString().split('T')[0];
+    return all.filter(a => new Date(a.date).toISOString().split('T')[0] === dateString);
+  }
+
+  async getAppointmentsByDateRange(startDate: Date, endDate: Date): Promise<Appointment[]> {
+    return await db.select().from(appointments)
+      .where(and(
+        gte(appointments.date, startDate.toISOString()),
+        lte(appointments.date, endDate.toISOString())
+      ));
+  }
+
+  // Transaction methods
+  async getTransaction(id: number): Promise<Transaction | undefined> {
+    const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
+    return tx;
+  }
+
+  async createTransaction(transaction: InsertTransaction): Promise<Transaction> {
+    const [newTx] = await db.insert(transactions).values(transaction).returning();
+    return newTx;
+  }
+
+  async updateTransaction(id: number, data: Partial<Transaction>): Promise<Transaction | undefined> {
+    const [updated] = await db.update(transactions).set(data).where(eq(transactions.id, id)).returning();
+    return updated;
+  }
+
+  async deleteTransaction(id: number): Promise<boolean> {
+    const [deleted] = await db.delete(transactions).where(eq(transactions.id, id)).returning();
+    return !!deleted;
+  }
+
+  async getAllTransactions(): Promise<Transaction[]> {
+    return await db.select().from(transactions);
+  }
+
+  async getTransactionsByType(type: string): Promise<Transaction[]> {
+    return await db.select().from(transactions).where(eq(transactions.type, type));
+  }
+
+  async getTransactionsByDateRange(startDate: Date, endDate: Date): Promise<Transaction[]> {
+    return await db.select().from(transactions)
+      .where(and(
+        gte(transactions.date, startDate.toISOString()),
+        lte(transactions.date, endDate.toISOString())
+      ));
+  }
+
+  // RoomBooking methods
+  async getRoomBooking(id: number): Promise<RoomBooking | undefined> {
+    const [booking] = await db.select().from(roomBookings).where(eq(roomBookings.id, id));
+    return booking;
+  }
+
+  async createRoomBooking(booking: InsertRoomBooking): Promise<RoomBooking> {
+    const [newBooking] = await db.insert(roomBookings).values(booking).returning();
+    return newBooking;
+  }
+
+  async updateRoomBooking(id: number, data: Partial<RoomBooking>): Promise<RoomBooking | undefined> {
+    const [updated] = await db.update(roomBookings).set(data).where(eq(roomBookings.id, id)).returning();
+    return updated;
+  }
+
+  async deleteRoomBooking(id: number): Promise<boolean> {
+    const [deleted] = await db.delete(roomBookings).where(eq(roomBookings.id, id)).returning();
+    return !!deleted;
+  }
+
+  async getAllRoomBookings(): Promise<RoomBooking[]> {
+    return await db.select().from(roomBookings);
+  }
+
+  async getRoomBookingsByRoomId(roomId: number): Promise<RoomBooking[]> {
+    return await db.select().from(roomBookings).where(eq(roomBookings.roomId, roomId));
+  }
+
+  async getRoomBookingsByDate(date: Date): Promise<RoomBooking[]> {
+    const all = await this.getAllRoomBookings();
+    const dateString = date.toISOString().split('T')[0];
+    return all.filter(b => new Date(b.date).toISOString().split('T')[0] === dateString);
+  }
+
+  async getRoomBookingsByDateRange(startDate: Date, endDate: Date): Promise<RoomBooking[]> {
+    return await db.select().from(roomBookings)
+      .where(and(
+        gte(roomBookings.date, startDate.toISOString()),
+        lte(roomBookings.date, endDate.toISOString())
+      ));
+  }
+
+  async checkRoomAvailability(roomId: number, date: Date, startTime: string, endTime: string): Promise<boolean> {
+    const bookings = await this.getRoomBookingsByDate(date);
+    const hasOverlap = bookings.some(booking => {
+      if (booking.roomId !== roomId) return false;
+      return (startTime < booking.endTime && endTime > booking.startTime);
+    });
+    return !hasOverlap;
+  }
+
+  // Permission methods
+  async getPermission(id: number): Promise<Permission | undefined> {
+    const [perm] = await db.select().from(permissions).where(eq(permissions.id, id));
+    return perm;
+  }
+
+  async createPermission(permission: InsertPermission): Promise<Permission> {
+    const [newPerm] = await db.insert(permissions).values(permission).returning();
+    return newPerm;
+  }
+
+  async updatePermission(id: number, data: Partial<Permission>): Promise<Permission | undefined> {
+    const [updated] = await db.update(permissions).set(data).where(eq(permissions.id, id)).returning();
+    return updated;
+  }
+
+  async deletePermission(id: number): Promise<boolean> {
+    const [deleted] = await db.delete(permissions).where(eq(permissions.id, id)).returning();
+    return !!deleted;
+  }
+
+  async getAllPermissions(): Promise<Permission[]> {
+    return await db.select().from(permissions);
+  }
+
+  // RolePermission methods
+  async getRolePermission(id: number): Promise<RolePermission | undefined> {
+    const [rp] = await db.select().from(rolePermissions).where(eq(rolePermissions.id, id));
+    return rp;
+  }
+
+  async createRolePermission(rolePermission: InsertRolePermission): Promise<RolePermission> {
+    const [newRp] = await db.insert(rolePermissions).values(rolePermission).returning();
+    return newRp;
+  }
+
+  async updateRolePermission(id: number, data: Partial<RolePermission>): Promise<RolePermission | undefined> {
+    const [updated] = await db.update(rolePermissions).set(data).where(eq(rolePermissions.id, id)).returning();
+    return updated;
+  }
+
+  async deleteRolePermission(id: number): Promise<boolean> {
+    const [deleted] = await db.delete(rolePermissions).where(eq(rolePermissions.id, id)).returning();
+    return !!deleted;
+  }
+
+  async getAllRolePermissions(): Promise<RolePermission[]> {
+    return await db.select().from(rolePermissions);
+  }
+
+  async getRolePermissionsByRole(role: string): Promise<RolePermission[]> {
+    return await db.select().from(rolePermissions).where(eq(rolePermissions.role, role));
+  }
 }
-*/
 
 // Use memory storage for local development
-export const storage = new MemStorage();
+// Use database storage for production
+export const storage = new DatabaseStorage();

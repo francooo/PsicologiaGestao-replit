@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { Pool, neonConfig } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import ws from "ws";
@@ -6,12 +7,7 @@ import * as schema from "@shared/schema";
 neonConfig.webSocketConstructor = ws;
 
 if (!process.env.DATABASE_URL) {
-  console.warn("DATABASE_URL not set, using mock database for local development");
-  // Create mock exports for local development
-  export const pool = null;
-  export const db = null;
-  export default { pool: null, db: null };
-  process.exit(0);
+  throw new Error("DATABASE_URL must be set. Did you forget to provision a database?");
 }
 
 export const pool = new Pool({ connectionString: process.env.DATABASE_URL });

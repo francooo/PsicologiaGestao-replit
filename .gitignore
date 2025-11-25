@@ -9,3 +9,11 @@ vite.config.ts.*
 dev-tokens.json
 uploads/*
 !uploads/.gitkeep
+
+# Environment variables
+.env
+.env.local
+
+# Logs
+*.log
+*.txt

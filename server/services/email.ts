@@ -3,11 +3,11 @@ import { Resend } from 'resend';
 import { User } from '@shared/schema';
 
 // Initialize Resend with API key
-const resend = new Resend(process.env.RESEND_API_KEY || 're_C3afDVpG_BTRHpWzZxCNoeqbPNGRTt7ki');
+const resend = new Resend(process.env.RESEND_API_KEY || 're_VnJA3rZ2_KNRjjpskEEc3JvwMoM5jc8X7');
 
 export const sendPasswordResetEmail = async (user: User, resetToken: string) => {
   const resetLink = `${process.env.APP_URL || 'http://localhost:5000'}/reset-password?token=${resetToken}`;
-  
+
   // In development, log the reset link instead of sending email
   if (process.env.NODE_ENV !== 'production') {
     console.log('📧 DESENVOLVIMENTO: Email de recuperação seria enviado para:', user.email);
@@ -15,17 +15,17 @@ export const sendPasswordResetEmail = async (user: User, resetToken: string) => 
     console.log('⚠️  Link válido por 1 hora. Use este link para testar a recuperação de senha.');
     // return { id: 'dev-mode', email: user.email }; // Comentado para permitir envio real
   }
-  
+
   try {
     // Validate email and API key
     if (!user.email || !user.email.includes('@')) {
       throw new Error('Email do usuário inválido');
     }
-    
-    const apiKey = process.env.RESEND_API_KEY || 're_C3afDVpG_BTRHpWzZxCNoeqbPNGRTt7ki';
+
+    const apiKey = process.env.RESEND_API_KEY || 're_VnJA3rZ2_KNRjjpskEEc3JvwMoM5jc8X7';
     console.log('🔑 Usando API Key:', apiKey.substring(0, 8) + '...');
     console.log('📧 Enviando email para:', user.email);
-    
+
     const { data, error } = await resend.emails.send({
       from: 'ConsultaPsi <onboarding@resend.dev>',
       to: [user.email],
@@ -81,18 +81,18 @@ export const sendPasswordResetEmail = async (user: User, resetToken: string) => 
 
     if (error) {
       console.error('❌ Erro detalhado do Resend:', error);
-      
+
       // Handle specific Resend API limitations
       if (error.statusCode === 403 && error.message.includes('You can only send testing emails to your own email address')) {
         console.log('⚠️  RESEND LIMITATION: Este é um API key de teste que só pode enviar emails para: andrewsfranco93@gmail.com');
         console.log('🔗 Para enviar para outros emails, verifique um domínio em resend.com/domains');
-        
+
         // In development/testing, log the reset link instead of failing completely
         console.log('📝 Link de recuperação (para teste manual):', resetLink);
         console.log('✅ Token gerado com sucesso. Use o link acima para testar o reset de senha.');
         return { id: 'resend-limitation', email: user.email, testLink: resetLink };
       }
-      
+
       console.error('❌ Tipo do erro:', typeof error);
       console.error('❌ Conteúdo do erro:', JSON.stringify(error, null, 2));
       throw new Error(`Falha no envio do email via Resend: ${error.message || JSON.stringify(error)}`);
@@ -105,7 +105,7 @@ export const sendPasswordResetEmail = async (user: User, resetToken: string) => 
       from: 'ConsultaPsi <onboarding@resend.dev>',
       timestamp: new Date().toISOString()
     });
-    
+
     return data;
   } catch (error) {
     console.error('❌ Erro crítico no envio de email:', error);
