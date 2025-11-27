@@ -55,7 +55,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Plus, Pencil, Trash2, UserCog, User } from "lucide-react";
+import { Loader2, Plus, Pencil, Trash2, UserCog, User, Upload } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 
 // Psychologist form schema
@@ -65,12 +65,12 @@ const psychologistFormSchema = z
     existingUserId: z.number().optional(),
     fullName: z.string().min(1, "Nome completo é obrigatório"),
     email: z.string().email("Email inválido"),
-    username: z.string().min(3, "Nome de usuário deve ter pelo menos 3 caracteres").optional(),
-    password: z.string().min(6, "Senha deve ter pelo menos 6 caracteres").optional(),
+    username: z.string().optional(),
+    password: z.string().optional(),
     specialization: z.string().min(1, "Especialização é obrigatória"),
-    bio: z.string(),
-    hourlyRate: z.string().refine((val) => !isNaN(parseFloat(val)), {
-      message: "Valor deve ser um número válido",
+    bio: z.string().default(""),
+    hourlyRate: z.string().refine((val) => !isNaN(parseFloat(val)) && parseFloat(val) > 0, {
+      message: "Valor deve ser um número válido maior que zero",
     }),
     profileImage: z.string().optional(),
     role: z.string().default("psychologist"),
@@ -78,45 +78,53 @@ const psychologistFormSchema = z
   })
   .refine(
     (data) => {
-      // Se estiver usando usuário existente, verificar se existingUserId está preenchido
       if (data.useExistingUser) {
         return !!data.existingUserId;
       }
-      
-      // Se não estiver usando usuário existente, verificar se os campos de usuário estão preenchidos
-      return true;
+      return !!data.username && data.username.length >= 3;
     },
     {
-      message: "Selecione um usuário existente",
-      path: ["existingUserId"],
+      message: "Nome de usuário deve ter pelo menos 3 caracteres",
+      path: ["username"],
     }
   )
   .refine(
     (data) => {
-      // Se não estiver usando usuário existente, verificar se os campos de usuário estão preenchidos
-      if (!data.useExistingUser) {
-        return !!data.username && !!data.password;
+      if (data.useExistingUser) {
+        return true;
       }
-      
-      // Se estiver usando usuário existente, não precisa verificar esses campos
-      return true;
+      return !!data.password && data.password.length >= 6;
     },
     {
-      message: "Nome de usuário e senha são obrigatórios ao criar um novo usuário",
-      path: ["username"],
+      message: "Senha deve ter pelo menos 6 caracteres",
+      path: ["password"],
     }
   );
 
+// Edit schema - apenas campos editáveis
+const editPsychologistSchema = z.object({
+  specialization: z.string().min(1, "Especialização é obrigatória"),
+  bio: z.string(),
+  hourlyRate: z.string().refine((val) => !isNaN(parseFloat(val)), {
+    message: "Valor deve ser um número válido",
+  }),
+});
+
 type PsychologistFormValues = z.infer<typeof psychologistFormSchema>;
+type EditPsychologistFormValues = z.infer<typeof editPsychologistSchema>;
 
 export default function Psychologists() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [isNewPsychologistDialogOpen, setIsNewPsychologistDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [selectedPsychologist, setSelectedPsychologist] = useState<number | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [psychologistToDelete, setPsychologistToDelete] = useState<number | null>(null);
   const [useExistingUser, setUseExistingUser] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
 
   // Fetch psychologists
   const { data: psychologists, isLoading } = useQuery({
@@ -158,17 +166,64 @@ export default function Psychologists() {
     }
   });
 
+  // Edit form
+  const editForm = useForm<EditPsychologistFormValues>({
+    resolver: zodResolver(editPsychologistSchema),
+    defaultValues: {
+      specialization: "",
+      bio: "",
+      hourlyRate: "",
+    }
+  });
+
+  // Update psychologist mutation
+  const updatePsychologistMutation = useMutation({
+    mutationFn: async (data: { id: number; values: Partial<PsychologistFormValues> }) => {
+      const psychologistResponse = await apiRequest("PUT", `/api/psychologists/${data.id}`, {
+        specialization: data.values.specialization,
+        bio: data.values.bio,
+        hourlyRate: data.values.hourlyRate ? parseFloat(data.values.hourlyRate) : undefined,
+      });
+      
+      if (!psychologistResponse.ok) {
+        const error = await psychologistResponse.json();
+        throw new Error(error.message || 'Erro ao atualizar psicóloga');
+      }
+      
+      return psychologistResponse.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/psychologists'] });
+      toast({
+        title: "Sucesso!",
+        description: "A psicóloga foi atualizada com sucesso.",
+        variant: "default",
+      });
+      setIsEditDialogOpen(false);
+      setSelectedPsychologist(null);
+      psychologistForm.reset();
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro na atualização",
+        description: error.message || "Houve um erro ao atualizar a psicóloga.",
+        variant: "destructive",
+      });
+    }
+  });
+
   // Create psychologist mutation
   const createPsychologistMutation = useMutation({
     mutationFn: async (data: PsychologistFormValues) => {
       try {
+        console.log('Creating psychologist with data:', data);
         let userId;
         
         if (data.useExistingUser && data.existingUserId) {
-          // Se estiver usando um usuário existente, apenas usa o ID fornecido
           userId = data.existingUserId;
+          console.log('Using existing user ID:', userId);
         } else {
-          // Primeiro cria o usuário
+          console.log('Creating new user...');
           const userResponse = await apiRequest("POST", "/api/register", {
             fullName: data.fullName,
             email: data.email,
@@ -180,29 +235,35 @@ export default function Psychologists() {
           });
           
           if (!userResponse.ok) {
-            const error = await userResponse.json();
+            const error = await userResponse.json().catch(() => ({ message: 'Erro desconhecido' }));
+            console.error('Error creating user:', error);
             throw new Error(error.message || 'Erro ao criar usuário');
           }
           
           const user = await userResponse.json();
           userId = user.id;
+          console.log('User created with ID:', userId);
         }
         
-        // Cria o perfil de psicóloga
+        console.log('Creating psychologist profile...');
         const psychologistResponse = await apiRequest("POST", "/api/psychologists", {
           userId: userId,
           specialization: data.specialization,
-          bio: data.bio,
+          bio: data.bio || "",
           hourlyRate: parseFloat(data.hourlyRate),
         });
         
         if (!psychologistResponse.ok) {
-          const error = await psychologistResponse.json();
+          const error = await psychologistResponse.json().catch(() => ({ message: 'Erro desconhecido' }));
+          console.error('Error creating psychologist:', error);
           throw new Error(error.message || 'Erro ao criar perfil da psicóloga');
         }
         
-        return psychologistResponse.json();
+        const result = await psychologistResponse.json();
+        console.log('Psychologist created successfully:', result);
+        return result;
       } catch (error) {
+        console.error('Error in createPsychologistMutation:', error);
         throw error;
       }
     },
@@ -249,8 +310,121 @@ export default function Psychologists() {
     }
   });
 
+  // Handle edit click
+  const handleEditClick = (psychologist: any) => {
+    setSelectedPsychologist(psychologist.id);
+    editForm.reset({
+      specialization: psychologist.specialization,
+      bio: psychologist.bio,
+      hourlyRate: psychologist.hourlyRate.toString(),
+    });
+    setPreviewImage(psychologist.user.profileImage || null);
+    setUploadedImageUrl(null);
+    setIsEditDialogOpen(true);
+  };
+
+  // Handle edit form submission
+  const onEditSubmit = (data: EditPsychologistFormValues) => {
+    if (selectedPsychologist) {
+      const updateData = { ...data };
+      // Se houver uma nova imagem, adicionar ao payload
+      if (uploadedImageUrl) {
+        updateData.profileImage = uploadedImageUrl;
+      }
+      updatePsychologistMutation.mutate({ id: selectedPsychologist, values: updateData });
+    }
+  };
+
+  // Handle edit image upload
+  const handleEditImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!selectedPsychologist) {
+      toast({
+        title: "Erro",
+        description: "Nenhuma psicóloga selecionada.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+    if (!validTypes.includes(file.type)) {
+      toast({
+        title: "Formato inválido",
+        description: "Por favor, selecione uma imagem nos formatos JPG, JPEG ou PNG.",
+        variant: "destructive",
+      });
+      event.target.value = '';
+      return;
+    }
+
+    // Validate file size (2MB max)
+    if (file.size > 2 * 1024 * 1024) {
+      toast({
+        title: "Arquivo muito grande",
+        description: "O tamanho máximo permitido é 2MB.",
+        variant: "destructive",
+      });
+      event.target.value = '';
+      return;
+    }
+
+    // Show preview
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setPreviewImage(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+
+    setUploadingImage(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('profileImageFile', file);
+      formData.append('psychologistId', selectedPsychologist.toString());
+
+      const response = await apiRequest('POST', '/api/profile', formData, {
+        headers: {}
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Erro desconhecido' }));
+        throw new Error(errorData.message || 'Erro ao fazer upload');
+      }
+
+      const data = await response.json();
+      setUploadedImageUrl(data.profileImage);
+      
+      queryClient.invalidateQueries({ queryKey: ['/api/psychologists'] });
+      
+      toast({
+        title: "Sucesso!",
+        description: "Foto atualizada com sucesso.",
+        variant: "default",
+      });
+    } catch (error) {
+      console.error('Erro no upload:', error);
+      toast({
+        title: "Erro no upload",
+        description: error instanceof Error ? error.message : 'Não foi possível fazer upload da imagem.',
+        variant: "destructive",
+      });
+      const psychologist = psychologists?.find((p: any) => p.id === selectedPsychologist);
+      if (psychologist) {
+        setPreviewImage(psychologist.user.profileImage || null);
+      }
+    } finally {
+      setUploadingImage(false);
+      event.target.value = '';
+    }
+  };
+
   // Handle psychologist form submission
   const onPsychologistSubmit = (data: PsychologistFormValues) => {
+    console.log('Submitting psychologist data:', data);
     createPsychologistMutation.mutate(data);
   };
 
@@ -258,6 +432,71 @@ export default function Psychologists() {
   const handleDeleteConfirm = () => {
     if (psychologistToDelete) {
       deletePsychologistMutation.mutate(psychologistToDelete);
+    }
+  };
+
+  // Handle image upload
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+    if (!validTypes.includes(file.type)) {
+      toast({
+        title: "Formato inválido",
+        description: "Por favor, selecione uma imagem nos formatos JPG, JPEG ou PNG.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate file size (2MB max)
+    if (file.size > 2 * 1024 * 1024) {
+      toast({
+        title: "Arquivo muito grande",
+        description: "O tamanho máximo permitido é 2MB.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setUploadingImage(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('profileImageFile', file);
+
+      const response = await fetch('/api/profile', {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('Erro ao fazer upload da imagem');
+      }
+
+      const data = await response.json();
+      
+      // Update form with the uploaded image URL
+      psychologistForm.setValue('profileImage', data.profileImage);
+      
+      toast({
+        title: "Sucesso!",
+        description: "Imagem enviada com sucesso.",
+        variant: "default",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro no upload",
+        description: "Não foi possível fazer upload da imagem. Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingImage(false);
+      // Reset input
+      event.target.value = '';
     }
   };
 
@@ -347,9 +586,31 @@ export default function Psychologists() {
                             render={({ field }) => (
                               <FormItem>
                                 <FormLabel>URL da Foto de Perfil</FormLabel>
-                                <FormControl>
-                                  <Input placeholder="https://exemplo.com/foto.jpg" {...field} />
-                                </FormControl>
+                                <div className="flex gap-2">
+                                  <FormControl>
+                                    <Input placeholder="https://exemplo.com/foto.jpg" {...field} className="flex-1" />
+                                  </FormControl>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
+                                    disabled={uploadingImage}
+                                    onClick={() => document.getElementById('profile-image-upload')?.click()}
+                                  >
+                                    {uploadingImage ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Upload className="h-4 w-4" />
+                                    )}
+                                  </Button>
+                                  <input
+                                    id="profile-image-upload"
+                                    type="file"
+                                    accept="image/jpeg,image/jpg,image/png"
+                                    className="hidden"
+                                    onChange={handleImageUpload}
+                                  />
+                                </div>
                                 <FormMessage />
                               </FormItem>
                             )}
@@ -561,6 +822,138 @@ export default function Psychologists() {
                   </Form>
                 </DialogContent>
               </Dialog>
+              
+              {/* Edit Dialog */}
+              <Dialog 
+                open={isEditDialogOpen} 
+onOpenChange={(open) => {
+                  setIsEditDialogOpen(open);
+                  if (!open) {
+                    setSelectedPsychologist(null);
+                    editForm.reset();
+                  }
+                }}>
+                <DialogContent className="max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Editar Psicóloga</DialogTitle>
+                    <DialogDescription>
+                      Atualize as informações da psicóloga.
+                    </DialogDescription>
+                  </DialogHeader>
+                  
+                  <Form {...editForm}>
+                    <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4 mt-4">
+                      <div className="space-y-4">
+                        <h3 className="text-sm font-medium text-neutral-dark border-b pb-2">Foto de Perfil</h3>
+                        
+                        <div className="flex items-center gap-4">
+                          {previewImage && (
+                            <div className="relative w-20 h-20 rounded-full overflow-hidden border-2 border-primary">
+                              <img 
+                                src={previewImage} 
+                                alt="Preview" 
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+                          )}
+                          <div className="flex-1">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={uploadingImage}
+                              onClick={() => document.getElementById('edit-profile-image-upload')?.click()}
+                              className="w-full"
+                            >
+                              {uploadingImage ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Enviando...
+                                </>
+                              ) : (
+                                <>
+                                  <Upload className="mr-2 h-4 w-4" />
+                                  Alterar Foto
+                                </>
+                              )}
+                            </Button>
+                            <input
+                              id="edit-profile-image-upload"
+                              type="file"
+                              accept="image/jpeg,image/jpg,image/png"
+                              className="hidden"
+                              onChange={handleEditImageUpload}
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">JPG, JPEG ou PNG (máx. 2MB)</p>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="space-y-4">
+                        <h3 className="text-sm font-medium text-neutral-dark border-b pb-2">Informações Profissionais</h3>
+                        
+                        <FormField
+                          control={editForm.control}
+                          name="specialization"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Especialização</FormLabel>
+                              <FormControl>
+                                <Input placeholder="Ex: Terapia Cognitivo-Comportamental" {...field} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        
+                        <FormField
+                          control={editForm.control}
+                          name="hourlyRate"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Valor da Hora</FormLabel>
+                              <FormControl>
+                                <Input placeholder="Ex: 150.00" {...field} />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        
+                        <FormField
+                          control={editForm.control}
+                          name="bio"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Biografia</FormLabel>
+                              <FormControl>
+                                <Textarea 
+                                  placeholder="Descreva a experiência e formação da profissional" 
+                                  className="resize-none min-h-[100px]" 
+                                  {...field} 
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                      
+                      <DialogFooter>
+                        <Button type="submit" disabled={updatePsychologistMutation.isPending}>
+                          {updatePsychologistMutation.isPending ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Atualizando...
+                            </>
+                          ) : (
+                            "Salvar Alterações"
+                          )}
+                        </Button>
+                      </DialogFooter>
+                    </form>
+                  </Form>
+                </DialogContent>
+              </Dialog>
             </div>
           </div>
           
@@ -574,10 +967,10 @@ export default function Psychologists() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {psychologists && psychologists.length > 0 ? (
                   psychologists.map((psychologist) => (
-                    <Card key={psychologist.id} className="overflow-hidden">
-                      <CardHeader className="pb-3">
-                        <div className="flex items-center">
-                          <div className="relative mr-4">
+                    <Card key={psychologist.id} className="overflow-hidden flex flex-col h-full">
+                      <CardHeader className="pb-3 min-h-[100px] flex items-start">
+                        <div className="flex items-start w-full">
+                          <div className="relative mr-4 flex-shrink-0">
                             <img 
                               src={psychologist.user.profileImage || "https://via.placeholder.com/80"} 
                               alt={psychologist.user.fullName} 
@@ -588,37 +981,42 @@ export default function Psychologists() {
                               psychologist.user.status === 'pending' ? 'bg-yellow-500' : 'bg-gray-400'
                             }`}></span>
                           </div>
-                          <div>
-                            <CardTitle className="text-lg">{psychologist.user.fullName}</CardTitle>
-                            <CardDescription>{psychologist.specialization}</CardDescription>
+                          <div className="flex-1 min-h-[64px] flex flex-col justify-center">
+                            <CardTitle className="text-lg leading-tight mb-1">{psychologist.user.fullName}</CardTitle>
+                            <CardDescription className="leading-tight">{psychologist.specialization}</CardDescription>
                           </div>
                         </div>
                       </CardHeader>
-                      <CardContent className="pb-4">
-                        <div className="mb-4">
+                      <CardContent className="pb-4 flex-1 flex flex-col">
+                        <div className="mb-4 flex-1">
                           <p className="text-sm text-neutral-dark line-clamp-3">
                             {psychologist.bio || "Nenhuma biografia disponível."}
                           </p>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div className="grid grid-cols-2 gap-2 text-sm mb-3">
                           <div className="flex items-center gap-1 text-neutral-dark">
-                            <User className="h-4 w-4" />
-                            <span>{psychologist.user.username}</span>
+                            <User className="h-4 w-4 flex-shrink-0" />
+                            <span className="truncate">{psychologist.user.username}</span>
                           </div>
                           <div className="flex items-center gap-1 text-neutral-dark">
-                            <UserCog className="h-4 w-4" />
-                            <span className="capitalize">{psychologist.user.role}</span>
-                          </div>
-                          <div className="flex items-center gap-1 text-neutral-dark col-span-2">
-                            <span className="font-medium">Valor/hora:</span>
-                            <span className="text-green-600 font-medium">
-                              {formatCurrency(parseFloat(psychologist.hourlyRate.toString()))}
-                            </span>
+                            <UserCog className="h-4 w-4 flex-shrink-0" />
+                            <span className="capitalize truncate">{psychologist.user.role}</span>
                           </div>
                         </div>
+                        <div className="flex items-center gap-1 text-sm pt-3 border-t">
+                          <span className="font-medium text-neutral-dark">Valor/hora:</span>
+                          <span className="text-green-600 font-semibold">
+                            {formatCurrency(parseFloat(psychologist.hourlyRate.toString()))}
+                          </span>
+                        </div>
                       </CardContent>
-                      <CardFooter className="pt-0 flex justify-between">
-                        <Button variant="outline" size="sm">
+                      <CardFooter className="pt-0 flex gap-2 mt-auto">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="flex-1"
+                          onClick={() => handleEditClick(psychologist)}
+                        >
                           <Pencil className="h-4 w-4 mr-2" />
                           Editar
                         </Button>
@@ -628,6 +1026,7 @@ export default function Psychologists() {
                             <Button 
                               variant="destructive" 
                               size="sm"
+                              className="flex-1"
                               onClick={() => setPsychologistToDelete(psychologist.id)}
                             >
                               <Trash2 className="h-4 w-4 mr-2" />
