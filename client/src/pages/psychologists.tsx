@@ -108,6 +108,7 @@ const editPsychologistSchema = z.object({
   hourlyRate: z.string().refine((val) => !isNaN(parseFloat(val)), {
     message: "Valor deve ser um número válido",
   }),
+  profileImage: z.string().optional(),
 });
 
 type PsychologistFormValues = z.infer<typeof psychologistFormSchema>;
@@ -125,6 +126,8 @@ export default function Psychologists() {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
+  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
+  const [newPsychologistPreview, setNewPsychologistPreview] = useState<string | null>(null);
 
   // Fetch psychologists
   const { data: psychologists, isLoading } = useQuery({
@@ -214,7 +217,7 @@ export default function Psychologists() {
 
   // Create psychologist mutation
   const createPsychologistMutation = useMutation({
-    mutationFn: async (data: PsychologistFormValues) => {
+    mutationFn: async (data: PsychologistFormValues & { imageFile?: File | null }) => {
       try {
         console.log('Creating psychologist with data:', data);
         let userId;
@@ -231,7 +234,6 @@ export default function Psychologists() {
             password: data.password,
             role: data.role,
             status: data.status,
-            profileImage: data.profileImage || undefined,
           });
           
           if (!userResponse.ok) {
@@ -261,6 +263,26 @@ export default function Psychologists() {
         
         const result = await psychologistResponse.json();
         console.log('Psychologist created successfully:', result);
+        
+        // Upload da foto APÓS criar a psicóloga, usando o endpoint específico para psicóloga
+        if (data.imageFile) {
+          console.log('Uploading photo for new psychologist ID:', result.id);
+          const formData = new FormData();
+          formData.append('profileImageFile', data.imageFile);
+          
+          const uploadResponse = await fetch(`/api/psychologists/${result.id}/photo`, {
+            method: 'POST',
+            body: formData,
+            credentials: 'include',
+          });
+          
+          if (!uploadResponse.ok) {
+            console.error('Error uploading photo, but psychologist was created');
+          } else {
+            console.log('Photo uploaded successfully');
+          }
+        }
+        
         return result;
       } catch (error) {
         console.error('Error in createPsychologistMutation:', error);
@@ -276,6 +298,8 @@ export default function Psychologists() {
       });
       setIsNewPsychologistDialogOpen(false);
       psychologistForm.reset();
+      setPendingImageFile(null);
+      setNewPsychologistPreview(null);
     },
     onError: (error: Error) => {
       toast({
@@ -384,10 +408,12 @@ export default function Psychologists() {
     try {
       const formData = new FormData();
       formData.append('profileImageFile', file);
-      formData.append('psychologistId', selectedPsychologist.toString());
 
-      const response = await apiRequest('POST', '/api/profile', formData, {
-        headers: {}
+      // Usar o endpoint específico para psicóloga, não /api/profile
+      const response = await fetch(`/api/psychologists/${selectedPsychologist}/photo`, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
       });
 
       if (!response.ok) {
@@ -425,7 +451,8 @@ export default function Psychologists() {
   // Handle psychologist form submission
   const onPsychologistSubmit = (data: PsychologistFormValues) => {
     console.log('Submitting psychologist data:', data);
-    createPsychologistMutation.mutate(data);
+    // Incluir o arquivo de imagem pendente para upload após criar a psicóloga
+    createPsychologistMutation.mutate({ ...data, imageFile: pendingImageFile });
   };
 
   // Handle delete confirmation
@@ -435,8 +462,8 @@ export default function Psychologists() {
     }
   };
 
-  // Handle image upload
-  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle image upload - guarda o arquivo temporariamente para upload após criar a psicóloga
+  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -448,6 +475,7 @@ export default function Psychologists() {
         description: "Por favor, selecione uma imagem nos formatos JPG, JPEG ou PNG.",
         variant: "destructive",
       });
+      event.target.value = '';
       return;
     }
 
@@ -458,46 +486,28 @@ export default function Psychologists() {
         description: "O tamanho máximo permitido é 2MB.",
         variant: "destructive",
       });
+      event.target.value = '';
       return;
     }
 
-    setUploadingImage(true);
-
-    try {
-      const formData = new FormData();
-      formData.append('profileImageFile', file);
-
-      const response = await fetch('/api/profile', {
-        method: 'POST',
-        body: formData,
-        credentials: 'include',
-      });
-
-      if (!response.ok) {
-        throw new Error('Erro ao fazer upload da imagem');
-      }
-
-      const data = await response.json();
-      
-      // Update form with the uploaded image URL
-      psychologistForm.setValue('profileImage', data.profileImage);
-      
-      toast({
-        title: "Sucesso!",
-        description: "Imagem enviada com sucesso.",
-        variant: "default",
-      });
-    } catch (error) {
-      toast({
-        title: "Erro no upload",
-        description: "Não foi possível fazer upload da imagem. Tente novamente.",
-        variant: "destructive",
-      });
-    } finally {
-      setUploadingImage(false);
-      // Reset input
-      event.target.value = '';
-    }
+    // Guardar arquivo para upload posterior (após criar a psicóloga)
+    setPendingImageFile(file);
+    
+    // Mostrar preview da imagem
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setNewPsychologistPreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+    
+    toast({
+      title: "Imagem selecionada",
+      description: "A imagem será enviada após criar a psicóloga.",
+      variant: "default",
+    });
+    
+    // Reset input
+    event.target.value = '';
   };
 
   // Format currency
@@ -530,6 +540,8 @@ export default function Psychologists() {
                   if (!open) {
                     psychologistForm.reset();
                     setUseExistingUser(false);
+                    setPendingImageFile(null);
+                    setNewPsychologistPreview(null);
                   }
                 }}>
                 <DialogTrigger asChild>
@@ -664,7 +676,7 @@ export default function Psychologists() {
                                     </SelectTrigger>
                                   </FormControl>
                                   <SelectContent>
-                                    {users?.map((user) => (
+                                    {users?.map((user: { id: number; fullName: string; username: string; email: string }) => (
                                       <SelectItem key={user.id} value={user.id.toString()}>
                                         {user.fullName || user.username} ({user.email})
                                       </SelectItem>
@@ -966,7 +978,7 @@ onOpenChange={(open) => {
               {/* Psychologists Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {psychologists && psychologists.length > 0 ? (
-                  psychologists.map((psychologist) => (
+                  psychologists.map((psychologist: any) => (
                     <Card key={psychologist.id} className="overflow-hidden flex flex-col h-full">
                       <CardHeader className="pb-3 min-h-[100px] flex items-start">
                         <div className="flex items-start w-full">
