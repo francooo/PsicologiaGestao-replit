@@ -1778,7 +1778,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const user = req.user as any;
+      console.log(`[DEBUG] GET /api/invoices - user.id: ${user.id}, type: ${typeof user.id}`);
+      
       const invoices = await storage.getInvoicesByUserId(user.id);
+      console.log(`[DEBUG] GET /api/invoices - found ${invoices.length} invoices for user ${user.id}`);
 
       res.json(invoices);
     } catch (error) {
