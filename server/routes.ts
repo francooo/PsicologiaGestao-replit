@@ -1783,8 +1783,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const invoices = await storage.getInvoicesByUserId(user.id);
       console.log(`[DEBUG] GET /api/invoices - found ${invoices.length} invoices for user ${user.id}`);
 
-      // Disable cache to ensure fresh data per user
-      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+      // Disable all caching to prevent data leakage between users
+      res.set({
+        'Cache-Control': 'private, no-store, no-cache, max-age=0, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Vary': 'Cookie',
+        'ETag': ''
+      });
       res.json(invoices);
     } catch (error) {
       console.error("Error fetching invoices:", error);
