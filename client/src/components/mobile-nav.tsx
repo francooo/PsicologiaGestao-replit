@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { Menu, X, Home, CalendarDays, Users, DoorOpen, BarChart3, Lock, Settings, LogOut, UserCircle } from "lucide-react";
+import { Menu, X, Home, CalendarDays, Users, DoorOpen, BarChart3, Lock, Settings, LogOut, UserCircle, FileText, ClipboardList } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function MobileNav() {
@@ -56,6 +56,18 @@ export default function MobileNav() {
       icon: <BarChart3 className="w-5 h-5" />,
       href: "/financial",
       allowedRoles: ["admin", "receptionist"]
+    },
+    {
+      name: "Minhas Notas Fiscais",
+      icon: <FileText className="w-5 h-5" />,
+      href: "/invoices",
+      allowedRoles: ["admin", "psychologist", "receptionist"]
+    },
+    {
+      name: "Gestão de Notas",
+      icon: <ClipboardList className="w-5 h-5" />,
+      href: "/admin/invoices",
+      allowedRoles: ["admin"]
     },
     {
       name: "Permissões",

@@ -12,7 +12,9 @@ import {
   LogOut,
   UserCircle,
   LineChart,
-  DollarSign
+  DollarSign,
+  FileText,
+  ClipboardList
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
@@ -60,6 +62,18 @@ export default function Sidebar() {
       icon: <LineChart className="w-5 h-5 mr-3 text-primary" />,
       href: "/cash-flow",
       allowedRoles: ["admin", "psychologist", "receptionist"]
+    },
+    {
+      name: "Minhas Notas Fiscais",
+      icon: <FileText className="w-5 h-5 mr-3 text-primary" />,
+      href: "/invoices",
+      allowedRoles: ["admin", "psychologist", "receptionist"]
+    },
+    {
+      name: "Gestão de Notas",
+      icon: <ClipboardList className="w-5 h-5 mr-3 text-primary" />,
+      href: "/admin/invoices",
+      allowedRoles: ["admin"]
     },
     {
       name: "Permissões",

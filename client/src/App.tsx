@@ -15,6 +15,8 @@ import Profile from "@/pages/profile";
 import QuickBooking from "@/pages/quick-booking";
 import PasswordRecovery from "@/pages/password-recovery";
 import ResetPassword from "@/pages/reset-password";
+import Invoices from "@/pages/invoices";
+import AdminInvoices from "@/pages/admin-invoices";
 import { ProtectedRoute } from "./lib/protected-route";
 import { AuthProvider } from "./hooks/use-auth";
 
@@ -28,6 +30,8 @@ function Router() {
       <ProtectedRoute path="/rooms" component={Rooms} />
       <ProtectedRoute path="/financial" component={Financial} />
       <ProtectedRoute path="/cash-flow" component={CashFlow} />
+      <ProtectedRoute path="/invoices" component={Invoices} />
+      <ProtectedRoute path="/admin/invoices" component={AdminInvoices} />
       <ProtectedRoute path="/permissions" component={Permissions} />
       <ProtectedRoute path="/profile" component={Profile} />
       <Route path="/auth" component={AuthPage} />

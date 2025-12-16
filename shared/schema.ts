@@ -170,6 +170,9 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   transactions: many(transactions, {
     relationName: "userTransactions",
   }),
+  invoices: many(invoices, {
+    relationName: "userInvoices",
+  }),
 }));
 
 export const psychologistsRelations = relations(psychologists, ({ one, many }) => ({
@@ -358,3 +361,38 @@ export const passwordResetTokensRelations = relations(passwordResetTokens, ({ on
 
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type InsertPasswordResetToken = z.infer<typeof insertPasswordResetTokenSchema>;
+
+// Invoices (Notas Fiscais)
+export const invoices = pgTable("invoices", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  referenceMonth: text("reference_month").notNull(), // Formato: YYYY-MM (ex: 2025-01)
+  filePath: text("file_path").notNull(),
+  originalFilename: text("original_filename").notNull(),
+  mimeType: text("mime_type").notNull(),
+  fileSize: integer("file_size").notNull(), // em bytes
+  status: text("status").notNull().default("enviada"), // enviada, pendente, aprovada
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertInvoiceSchema = createInsertSchema(invoices).pick({
+  userId: true,
+  referenceMonth: true,
+  filePath: true,
+  originalFilename: true,
+  mimeType: true,
+  fileSize: true,
+  status: true,
+});
+
+export const invoicesRelations = relations(invoices, ({ one }) => ({
+  user: one(users, {
+    fields: [invoices.userId],
+    references: [users.id],
+    relationName: "userInvoices",
+  }),
+}));
+
+export type Invoice = typeof invoices.$inferSelect;
+export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;

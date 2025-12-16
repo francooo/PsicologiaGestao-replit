@@ -7,7 +7,8 @@ import {
   roomBookings, type RoomBooking, type InsertRoomBooking,
   permissions, type Permission, type InsertPermission,
   rolePermissions, type RolePermission, type InsertRolePermission,
-  passwordResetTokens, type PasswordResetToken, type InsertPasswordResetToken
+  passwordResetTokens, type PasswordResetToken, type InsertPasswordResetToken,
+  invoices, type Invoice, type InsertInvoice
 } from "@shared/schema";
 import session from "express-session";
 import createMemoryStore from "memorystore";
@@ -88,6 +89,17 @@ export interface IStorage {
   deleteRolePermission(id: number): Promise<boolean>;
   getAllRolePermissions(): Promise<RolePermission[]>;
   getRolePermissionsByRole(role: string): Promise<RolePermission[]>;
+
+  // Invoice related methods
+  getInvoice(id: number): Promise<Invoice | undefined>;
+  createInvoice(invoice: InsertInvoice): Promise<Invoice>;
+  deleteInvoice(id: number): Promise<boolean>;
+  getInvoicesByUserId(userId: number): Promise<Invoice[]>;
+  getAllInvoices(): Promise<Invoice[]>;
+  getInvoicesByReferenceMonth(referenceMonth: string): Promise<Invoice[]>;
+  getInvoiceByUserAndMonth(userId: number, referenceMonth: string): Promise<Invoice | undefined>;
+  getInvoiceWithUser(id: number): Promise<(Invoice & { user: User }) | undefined>;
+  getAllInvoicesWithUsers(): Promise<(Invoice & { user: User })[]>;
 
   // Session store
   sessionStore: session.Store;
@@ -632,6 +644,35 @@ export class MemStorage implements IStorage {
     this.users.set(userId, user);
     return true;
   }
+
+  // Invoice methods (stub implementations for MemStorage)
+  async getInvoice(id: number): Promise<Invoice | undefined> {
+    return undefined;
+  }
+  async createInvoice(invoice: InsertInvoice): Promise<Invoice> {
+    throw new Error('MemStorage does not support invoices');
+  }
+  async deleteInvoice(id: number): Promise<boolean> {
+    return false;
+  }
+  async getInvoicesByUserId(userId: number): Promise<Invoice[]> {
+    return [];
+  }
+  async getAllInvoices(): Promise<Invoice[]> {
+    return [];
+  }
+  async getInvoicesByReferenceMonth(referenceMonth: string): Promise<Invoice[]> {
+    return [];
+  }
+  async getInvoiceByUserAndMonth(userId: number, referenceMonth: string): Promise<Invoice | undefined> {
+    return undefined;
+  }
+  async getInvoiceWithUser(id: number): Promise<(Invoice & { user: User }) | undefined> {
+    return undefined;
+  }
+  async getAllInvoicesWithUsers(): Promise<(Invoice & { user: User })[]> {
+    return [];
+  }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -947,6 +988,82 @@ export class DatabaseStorage implements IStorage {
 
   async getRolePermissionsByRole(role: string): Promise<RolePermission[]> {
     return await db.select().from(rolePermissions).where(eq(rolePermissions.role, role));
+  }
+
+  // Invoice methods
+  async getInvoice(id: number): Promise<Invoice | undefined> {
+    const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
+    return invoice;
+  }
+
+  async createInvoice(invoice: InsertInvoice): Promise<Invoice> {
+    const [newInvoice] = await db.insert(invoices).values(invoice).returning();
+    return newInvoice;
+  }
+
+  async deleteInvoice(id: number): Promise<boolean> {
+    const [deleted] = await db.delete(invoices).where(eq(invoices.id, id)).returning();
+    return !!deleted;
+  }
+
+  async getInvoicesByUserId(userId: number): Promise<Invoice[]> {
+    return await db.select().from(invoices).where(eq(invoices.userId, userId));
+  }
+
+  async getAllInvoices(): Promise<Invoice[]> {
+    return await db.select().from(invoices);
+  }
+
+  async getInvoicesByReferenceMonth(referenceMonth: string): Promise<Invoice[]> {
+    return await db.select().from(invoices).where(eq(invoices.referenceMonth, referenceMonth));
+  }
+
+  async getInvoiceByUserAndMonth(userId: number, referenceMonth: string): Promise<Invoice | undefined> {
+    const [invoice] = await db.select().from(invoices)
+      .where(and(eq(invoices.userId, userId), eq(invoices.referenceMonth, referenceMonth)));
+    return invoice;
+  }
+
+  async getInvoiceWithUser(id: number): Promise<(Invoice & { user: User }) | undefined> {
+    const result = await db.select({
+      id: invoices.id,
+      userId: invoices.userId,
+      referenceMonth: invoices.referenceMonth,
+      filePath: invoices.filePath,
+      originalFilename: invoices.originalFilename,
+      mimeType: invoices.mimeType,
+      fileSize: invoices.fileSize,
+      status: invoices.status,
+      createdAt: invoices.createdAt,
+      updatedAt: invoices.updatedAt,
+      user: users
+    })
+    .from(invoices)
+    .innerJoin(users, eq(invoices.userId, users.id))
+    .where(eq(invoices.id, id));
+    
+    if (result.length === 0) return undefined;
+    return { ...result[0], user: result[0].user };
+  }
+
+  async getAllInvoicesWithUsers(): Promise<(Invoice & { user: User })[]> {
+    const result = await db.select({
+      id: invoices.id,
+      userId: invoices.userId,
+      referenceMonth: invoices.referenceMonth,
+      filePath: invoices.filePath,
+      originalFilename: invoices.originalFilename,
+      mimeType: invoices.mimeType,
+      fileSize: invoices.fileSize,
+      status: invoices.status,
+      createdAt: invoices.createdAt,
+      updatedAt: invoices.updatedAt,
+      user: users
+    })
+    .from(invoices)
+    .innerJoin(users, eq(invoices.userId, users.id));
+    
+    return result.map(r => ({ ...r, user: r.user }));
   }
 }
 

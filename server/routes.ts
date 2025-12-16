@@ -2,7 +2,7 @@ import express, { type Express, type Request } from "express";
 import { createServer, type Server } from "http";
 import { setupAuth, hashPassword } from "./auth";
 import { storage } from "./storage";
-import { insertAppointmentSchema, insertRoomSchema, insertPsychologistSchema, insertTransactionSchema, insertRoomBookingSchema, insertPermissionSchema, insertRolePermissionSchema } from "@shared/schema";
+import { insertAppointmentSchema, insertRoomSchema, insertPsychologistSchema, insertTransactionSchema, insertRoomBookingSchema, insertPermissionSchema, insertRolePermissionSchema, insertInvoiceSchema } from "@shared/schema";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
 import multer from "multer";
@@ -46,6 +46,41 @@ const upload = multer({
     }
 
     cb(new Error("Apenas imagens nos formatos JPEG, JPG, PNG e GIF são permitidas."));
+  },
+});
+
+// Configure multer for invoice upload (PDF, JPG, PNG - 5MB max)
+const invoiceUploadDir = path.join(process.cwd(), "uploads", "invoices");
+if (!fs.existsSync(invoiceUploadDir)) {
+  fs.mkdirSync(invoiceUploadDir, { recursive: true });
+}
+
+const invoiceStorageConfig = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, invoiceUploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname);
+    cb(null, `invoice-${uniqueSuffix}${ext}`);
+  },
+});
+
+const invoiceUpload = multer({
+  storage: invoiceStorageConfig,
+  limits: {
+    fileSize: 1024 * 1024 * 5, // 5MB max file size
+  },
+  fileFilter: function (req, file, cb) {
+    const filetypes = /jpeg|jpg|png|pdf/;
+    const mimetype = /image\/(jpeg|jpg|png)|application\/pdf/.test(file.mimetype);
+    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+
+    if (mimetype && extname) {
+      return cb(null, true);
+    }
+
+    cb(new Error("Apenas arquivos nos formatos PDF, JPG ou PNG são permitidos."));
   },
 });
 
@@ -1646,6 +1681,275 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Google Calendar routes
   app.use("/api/google-calendar", googleCalendarRoutes);
+
+  // ========== INVOICE ROUTES ==========
+
+  // POST /api/invoices - Upload de nota fiscal (usuário autenticado)
+  app.post("/api/invoices", (req, res, next) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "Não autenticado" });
+    }
+    
+    invoiceUpload.single("invoiceFile")(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({
+            message: "O arquivo é muito grande. O tamanho máximo permitido é 5MB."
+          });
+        }
+        return res.status(400).json({
+          message: `Erro no upload: ${err.message}`
+        });
+      } else if (err) {
+        return res.status(400).json({
+          message: err.message
+        });
+      }
+      next();
+    });
+  }, async (req, res) => {
+    try {
+      const user = req.user as any;
+      const { referenceMonth } = req.body;
+
+      if (!referenceMonth) {
+        // Remove o arquivo se o mês não foi informado
+        if (req.file) {
+          fs.unlinkSync(req.file.path);
+        }
+        return res.status(400).json({ message: "Mês de referência é obrigatório" });
+      }
+
+      // Validar formato do mês (YYYY-MM)
+      const monthRegex = /^\d{4}-(0[1-9]|1[0-2])$/;
+      if (!monthRegex.test(referenceMonth)) {
+        if (req.file) {
+          fs.unlinkSync(req.file.path);
+        }
+        return res.status(400).json({ message: "Formato do mês inválido. Use YYYY-MM (ex: 2025-01)" });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ message: "Nenhum arquivo enviado" });
+      }
+
+      // Verificar se já existe uma nota para este mês
+      const existingInvoice = await storage.getInvoiceByUserAndMonth(user.id, referenceMonth);
+      if (existingInvoice) {
+        // Remove o arquivo enviado
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ 
+          message: `Já existe uma nota fiscal enviada para o mês ${referenceMonth}` 
+        });
+      }
+
+      // Criar a nota fiscal
+      const invoice = await storage.createInvoice({
+        userId: user.id,
+        referenceMonth,
+        filePath: `/uploads/invoices/${req.file.filename}`,
+        originalFilename: req.file.originalname,
+        mimeType: req.file.mimetype,
+        fileSize: req.file.size,
+        status: "enviada"
+      });
+
+      console.log(`Invoice uploaded: ${invoice.id} by user ${user.id} for month ${referenceMonth}`);
+
+      res.status(201).json({
+        ...invoice,
+        message: "Nota fiscal enviada com sucesso"
+      });
+    } catch (error) {
+      console.error("Error uploading invoice:", error);
+      // Remove o arquivo em caso de erro
+      if (req.file) {
+        try { fs.unlinkSync(req.file.path); } catch (e) {}
+      }
+      res.status(500).json({ message: "Erro ao enviar nota fiscal" });
+    }
+  });
+
+  // GET /api/invoices - Lista notas do usuário logado
+  app.get("/api/invoices", async (req, res) => {
+    try {
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Não autenticado" });
+      }
+
+      const user = req.user as any;
+      const invoices = await storage.getInvoicesByUserId(user.id);
+
+      res.json(invoices);
+    } catch (error) {
+      console.error("Error fetching invoices:", error);
+      res.status(500).json({ message: "Erro ao buscar notas fiscais" });
+    }
+  });
+
+  // GET /api/admin/invoices - Lista todas as notas (somente admin)
+  app.get("/api/admin/invoices", async (req, res) => {
+    try {
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Não autenticado" });
+      }
+
+      const user = req.user as any;
+      if (user.role !== "admin") {
+        return res.status(403).json({ message: "Acesso negado. Apenas administradores." });
+      }
+
+      // Filtros opcionais
+      const { userId, referenceMonth } = req.query;
+
+      let invoices = await storage.getAllInvoicesWithUsers();
+
+      // Aplicar filtros
+      if (userId) {
+        invoices = invoices.filter(inv => inv.userId === parseInt(userId as string));
+      }
+      if (referenceMonth) {
+        invoices = invoices.filter(inv => inv.referenceMonth === referenceMonth);
+      }
+
+      res.json(invoices);
+    } catch (error) {
+      console.error("Error fetching admin invoices:", error);
+      res.status(500).json({ message: "Erro ao buscar notas fiscais" });
+    }
+  });
+
+  // GET /api/admin/invoices/status - Status de envio por mês (quem enviou/não enviou)
+  app.get("/api/admin/invoices/status", async (req, res) => {
+    try {
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Não autenticado" });
+      }
+
+      const user = req.user as any;
+      if (user.role !== "admin") {
+        return res.status(403).json({ message: "Acesso negado. Apenas administradores." });
+      }
+
+      const { referenceMonth } = req.query;
+      if (!referenceMonth) {
+        return res.status(400).json({ message: "Mês de referência é obrigatório" });
+      }
+
+      // Buscar todos os usuários (exceto admin)
+      const allUsers = await storage.getAllUsers();
+      const nonAdminUsers = allUsers.filter(u => u.role !== "admin");
+
+      // Buscar notas do mês
+      const invoices = await storage.getInvoicesByReferenceMonth(referenceMonth as string);
+      const userIdsWithInvoice = new Set(invoices.map(inv => inv.userId));
+
+      const sent = nonAdminUsers.filter(u => userIdsWithInvoice.has(u.id)).map(u => ({
+        id: u.id,
+        fullName: u.fullName,
+        email: u.email,
+        role: u.role
+      }));
+
+      const pending = nonAdminUsers.filter(u => !userIdsWithInvoice.has(u.id)).map(u => ({
+        id: u.id,
+        fullName: u.fullName,
+        email: u.email,
+        role: u.role
+      }));
+
+      res.json({
+        referenceMonth,
+        sent,
+        pending,
+        totalUsers: nonAdminUsers.length,
+        totalSent: sent.length,
+        totalPending: pending.length
+      });
+    } catch (error) {
+      console.error("Error fetching invoice status:", error);
+      res.status(500).json({ message: "Erro ao buscar status de notas fiscais" });
+    }
+  });
+
+  // GET /api/invoices/:id/download - Download da nota (verifica permissão)
+  app.get("/api/invoices/:id/download", async (req, res) => {
+    try {
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Não autenticado" });
+      }
+
+      const user = req.user as any;
+      const invoiceId = parseInt(req.params.id);
+
+      if (isNaN(invoiceId)) {
+        return res.status(400).json({ message: "ID inválido" });
+      }
+
+      const invoice = await storage.getInvoice(invoiceId);
+      if (!invoice) {
+        return res.status(404).json({ message: "Nota fiscal não encontrada" });
+      }
+
+      // Verificar permissão: usuário é o dono ou é admin
+      if (invoice.userId !== user.id && user.role !== "admin") {
+        return res.status(403).json({ message: "Acesso negado" });
+      }
+
+      // Construir caminho do arquivo
+      const filePath = path.join(process.cwd(), invoice.filePath);
+      
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ message: "Arquivo não encontrado" });
+      }
+
+      // Enviar o arquivo com o nome original
+      res.download(filePath, invoice.originalFilename);
+    } catch (error) {
+      console.error("Error downloading invoice:", error);
+      res.status(500).json({ message: "Erro ao baixar nota fiscal" });
+    }
+  });
+
+  // DELETE /api/invoices/:id - Excluir nota (apenas própria)
+  app.delete("/api/invoices/:id", async (req, res) => {
+    try {
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Não autenticado" });
+      }
+
+      const user = req.user as any;
+      const invoiceId = parseInt(req.params.id);
+
+      if (isNaN(invoiceId)) {
+        return res.status(400).json({ message: "ID inválido" });
+      }
+
+      const invoice = await storage.getInvoice(invoiceId);
+      if (!invoice) {
+        return res.status(404).json({ message: "Nota fiscal não encontrada" });
+      }
+
+      // Verificar permissão: apenas o dono pode excluir
+      if (invoice.userId !== user.id) {
+        return res.status(403).json({ message: "Acesso negado. Você só pode excluir suas próprias notas." });
+      }
+
+      // Remover arquivo do disco
+      const filePath = path.join(process.cwd(), invoice.filePath);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+
+      // Remover do banco
+      await storage.deleteInvoice(invoiceId);
+
+      res.json({ message: "Nota fiscal excluída com sucesso" });
+    } catch (error) {
+      console.error("Error deleting invoice:", error);
+      res.status(500).json({ message: "Erro ao excluir nota fiscal" });
+    }
+  });
 
   const httpServer = createServer(app);
   return httpServer;

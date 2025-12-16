@@ -2,12 +2,15 @@
 
 This is a psychology practice management system built with a modern full-stack architecture. The application serves as a comprehensive platform for managing appointments, psychologists, rooms, financial transactions, and patient interactions. It features role-based access control, real-time scheduling, and integrates with external services like WhatsApp and Google Calendar for enhanced communication and scheduling capabilities.
 
-## Recent Updates (August 2025)
+## Recent Updates (December 2025)
+- ✅ Implemented invoice (nota fiscal) management system
+- ✅ Created invoice upload with PDF/JPG/PNG support (5MB max)
+- ✅ Added user invoice page for uploading and viewing personal invoices
+- ✅ Added admin invoice dashboard with submission tracking by month
+- ✅ Implemented role-based access control for invoice routes
 - ✅ Fixed psychologist creation validation errors for hourlyRate field
 - ✅ Enhanced financial transaction modal UI with improved visibility
 - ✅ Corrected schema validation for amount fields in transactions
-- ✅ Improved modal sizing and button visibility in financial forms
-- ✅ Successfully resolved username conflicts when creating psychologist profiles
 
 # User Preferences
 
