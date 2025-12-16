@@ -180,12 +180,12 @@ export default function AdminInvoices() {
                     </CardTitle>
                     <div className="flex items-center gap-2 flex-wrap">
                       <Filter className="w-4 h-4 text-neutral-dark" />
-                      <Select value={filterMonth} onValueChange={setFilterMonth}>
+                      <Select value={filterMonth || "all"} onValueChange={(val) => setFilterMonth(val === "all" ? "" : val)}>
                         <SelectTrigger className="w-32" data-testid="filter-month">
                           <SelectValue placeholder="Mês" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">Todos</SelectItem>
+                          <SelectItem value="all">Todos</SelectItem>
                           {months.map((m) => (
                             <SelectItem key={m.value} value={m.value}>
                               {m.label}
