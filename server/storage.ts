@@ -731,7 +731,29 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getPasswordResetToken(token: string): Promise<PasswordResetToken | undefined> {
+    console.log('🔍 [DB] Buscando token:', token.substring(0, 8) + '...');
+    
     const [resetToken] = await db.select().from(passwordResetTokens).where(eq(passwordResetTokens.token, token));
+    
+    if (!resetToken) {
+      console.log('❌ [DB] Token não encontrado');
+      return undefined;
+    }
+    
+    console.log('🗺 [DB] Token encontrado:', {
+      userId: resetToken.userId,
+      expiresAt: resetToken.expiresAt,
+      used: resetToken.used,
+      isExpired: new Date(resetToken.expiresAt) < new Date(),
+      currentTime: new Date()
+    });
+    
+    // Check if token has expired or been used
+    if (new Date(resetToken.expiresAt) < new Date() || resetToken.used) {
+      console.log('❌ [DB] Token expirado ou já usado');
+      return undefined;
+    }
+    
     return resetToken;
   }
 
