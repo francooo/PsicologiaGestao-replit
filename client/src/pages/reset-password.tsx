@@ -49,9 +49,30 @@ export default function ResetPassword() {
   const [isValidatingToken, setIsValidatingToken] = useState(true);
   const [isTokenValid, setIsTokenValid] = useState(false);
 
-  // Extract token from URL query parameters
-  const urlParams = new URLSearchParams(location.split('?')[1]);
-  const token = urlParams.get('token');
+  // Extract token from URL query parameters - use window.location for reliability
+  const getTokenFromUrl = () => {
+    // Try window.location.search first (most reliable)
+    if (typeof window !== 'undefined' && window.location.search) {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('token');
+    }
+    // Fallback to wouter location
+    if (location.includes('?')) {
+      const params = new URLSearchParams(location.split('?')[1]);
+      return params.get('token');
+    }
+    return null;
+  };
+  
+  const token = getTokenFromUrl();
+  
+  // Debug logging
+  console.log('[ResetPassword] URL Debug:', {
+    windowLocation: typeof window !== 'undefined' ? window.location.href : 'N/A',
+    windowSearch: typeof window !== 'undefined' ? window.location.search : 'N/A',
+    wouterLocation: location,
+    extractedToken: token ? token.substring(0, 8) + '...' : null
+  });
 
   const form = useForm<ResetPasswordFormData>({
     resolver: zodResolver(resetPasswordSchema),
