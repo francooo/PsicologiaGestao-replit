@@ -5,8 +5,23 @@ import { User } from '@shared/schema';
 // Initialize Resend with API key
 const resend = new Resend(process.env.RESEND_API_KEY || 're_VnJA3rZ2_KNRjjpskEEc3JvwMoM5jc8X7');
 
+// Get the public URL for the application
+const getAppUrl = () => {
+  // First check for explicitly set APP_URL
+  if (process.env.APP_URL) {
+    return process.env.APP_URL;
+  }
+  // Use Replit's dev domain if available
+  if (process.env.REPLIT_DEV_DOMAIN) {
+    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  }
+  // Fallback for local development
+  return 'http://localhost:5000';
+};
+
 export const sendPasswordResetEmail = async (user: User, resetToken: string) => {
-  const resetLink = `${process.env.APP_URL || 'http://localhost:5000'}/reset-password?token=${resetToken}`;
+  const appUrl = getAppUrl();
+  const resetLink = `${appUrl}/reset-password?token=${resetToken}`;
 
   // In development, log the reset link instead of sending email
   if (process.env.NODE_ENV !== 'production') {
