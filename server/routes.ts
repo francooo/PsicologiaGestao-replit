@@ -37,15 +37,19 @@ const upload = multer({
     fileSize: 1024 * 1024 * 2, // 2MB max file size
   },
   fileFilter: function (req, file, cb) {
-    const filetypes = /jpeg|jpg|png|gif/;
-    const mimetype = filetypes.test(file.mimetype);
-    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+    // Allowed extensions
+    const allowedExtensions = /jpeg|jpg|png|gif|webp/;
+    // Allowed mimetypes
+    const allowedMimetypes = /image\/(jpeg|jpg|png|gif|webp)/;
+
+    const extname = allowedExtensions.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedMimetypes.test(file.mimetype.toLowerCase());
 
     if (mimetype && extname) {
       return cb(null, true);
     }
 
-    cb(new Error("Apenas imagens nos formatos JPEG, JPG, PNG e GIF são permitidas."));
+    cb(new Error("Apenas imagens nos formatos JPEG, JPG, PNG, GIF e WEBP são permitidas."));
   },
 });
 
@@ -191,33 +195,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       console.log('Upload request received for psychologist:', req.params.id);
       const psychologistId = parseInt(req.params.id);
-      
+
       if (isNaN(psychologistId)) {
         return res.status(400).json({ message: "ID da psicóloga inválido" });
       }
-      
+
       // Verificar se a psicóloga existe
       const psychologist = await storage.getPsychologist(psychologistId);
       if (!psychologist) {
         console.error('Psychologist not found:', psychologistId);
         return res.status(404).json({ message: "Psicóloga não encontrada" });
       }
-      
+
       // Verificar se há arquivo
       if (!req.file) {
         console.error('No file uploaded');
         return res.status(400).json({ message: "Nenhum arquivo enviado" });
       }
-      
+
       console.log('File uploaded:', req.file.filename);
-      
+
       // Obter usuário associado
       const user = await storage.getUser(psychologist.userId);
       if (!user) {
         console.error('User not found:', psychologist.userId);
         return res.status(404).json({ message: "Usuário não encontrado" });
       }
-      
+
       // Remover foto antiga se existir
       if (user.profileImage) {
         try {
@@ -230,16 +234,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.error("Error deleting old profile image:", err);
         }
       }
-      
+
       // Atualizar foto do usuário associado
       const imageUrl = `/uploads/${req.file.filename}`;
       await storage.updateUser(psychologist.userId, { profileImage: imageUrl });
-      
+
       console.log('Profile image updated successfully:', imageUrl);
       res.json({ profileImage: imageUrl });
     } catch (error) {
       console.error("Error uploading psychologist photo:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         message: "Erro ao fazer upload da foto",
         error: error instanceof Error ? error.message : 'Erro desconhecido'
       });
@@ -250,18 +254,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const id = parseInt(req.params.id);
       const { profileImage, ...psychologistData } = req.body;
-      
+
       // Atualizar dados da psicóloga
       const updatedPsychologist = await storage.updatePsychologist(id, psychologistData);
       if (!updatedPsychologist) {
         return res.status(404).json({ message: "Psychologist not found" });
       }
-      
+
       // Se houver profileImage, atualizar o usuário associado
       if (profileImage) {
         await storage.updateUser(updatedPsychologist.userId, { profileImage });
       }
-      
+
       res.json(updatedPsychologist);
     } catch (error) {
       res.status(500).json({ message: "Error updating psychologist" });
@@ -1321,7 +1325,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       let userId = req.user?.id;
-      
+
       // Se psychologistId foi enviado, buscar o userId da psicóloga
       if (req.body.psychologistId) {
         console.log('Updating psychologist photo, ID:', req.body.psychologistId);
@@ -1334,7 +1338,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId = psychologist.userId;
         console.log('Found psychologist, user ID:', userId);
       }
-      
+
       if (!userId) {
         return res.status(400).json({ message: "User ID not found" });
       }
@@ -1359,7 +1363,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Process profile image if uploaded
       if (req.file) {
         console.log('Processing uploaded file:', req.file.filename);
-        
+
         // If there's an existing profile image, remove it to save space
         if (existingUser.profileImage) {
           try {
@@ -1395,7 +1399,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(userWithoutPassword);
     } catch (error) {
       console.error("Error updating profile:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         message: "Error updating profile",
         error: error instanceof Error ? error.message : 'Unknown error'
       });
@@ -1689,7 +1693,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!req.isAuthenticated()) {
       return res.status(401).json({ message: "Não autenticado" });
     }
-    
+
     invoiceUpload.single("invoiceFile")(req, res, (err) => {
       if (err instanceof multer.MulterError) {
         if (err.code === 'LIMIT_FILE_SIZE') {
@@ -1738,8 +1742,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (existingInvoice) {
         // Remove o arquivo enviado
         fs.unlinkSync(req.file.path);
-        return res.status(400).json({ 
-          message: `Já existe uma nota fiscal enviada para o mês ${referenceMonth}` 
+        return res.status(400).json({
+          message: `Já existe uma nota fiscal enviada para o mês ${referenceMonth}`
         });
       }
 
@@ -1764,7 +1768,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Error uploading invoice:", error);
       // Remove o arquivo em caso de erro
       if (req.file) {
-        try { fs.unlinkSync(req.file.path); } catch (e) {}
+        try { fs.unlinkSync(req.file.path); } catch (e) { }
       }
       res.status(500).json({ message: "Erro ao enviar nota fiscal" });
     }
@@ -1779,7 +1783,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const user = req.user as any;
       console.log(`[DEBUG] GET /api/invoices - user.id: ${user.id}, type: ${typeof user.id}`);
-      
+
       const invoices = await storage.getInvoicesByUserId(user.id);
       console.log(`[DEBUG] GET /api/invoices - found ${invoices.length} invoices for user ${user.id}`);
 
@@ -1909,7 +1913,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Construir caminho do arquivo
       const filePath = path.join(process.cwd(), invoice.filePath);
-      
+
       if (!fs.existsSync(filePath)) {
         return res.status(404).json({ message: "Arquivo não encontrado" });
       }

@@ -100,7 +100,8 @@ export default function ProfilePage() {
       });
 
       if (!res.ok) {
-        throw new Error("Falha ao atualizar perfil, pois a extensão da imagem não é permitida");
+        const errorData = await res.json();
+        throw new Error(errorData.message || "Falha ao atualizar perfil");
       }
 
       return await res.json();
@@ -124,6 +125,30 @@ export default function ProfilePage() {
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      // Validate file type
+      const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+      if (!allowedTypes.includes(file.type.toLowerCase())) {
+        toast({
+          title: "Formato inválido",
+          description: "Apenas imagens nos formatos JPEG, JPG, PNG, GIF e WEBP são permitidas.",
+          variant: "destructive",
+        });
+        e.target.value = ''; // Clear the input
+        return;
+      }
+
+      // Validate file size (2MB)
+      const maxSize = 2 * 1024 * 1024; // 2MB in bytes
+      if (file.size > maxSize) {
+        toast({
+          title: "Arquivo muito grande",
+          description: "O tamanho máximo permitido é 2MB.",
+          variant: "destructive",
+        });
+        e.target.value = ''; // Clear the input
+        return;
+      }
+
       setImageFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -305,7 +330,7 @@ export default function ProfilePage() {
                           <Input
                             id="picture"
                             type="file"
-                            accept="image/*"
+                            accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
                             className="hidden"
                             onChange={handleImageChange}
                           />

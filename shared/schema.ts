@@ -396,3 +396,7 @@ export const invoicesRelations = relations(invoices, ({ one }) => ({
 
 export type Invoice = typeof invoices.$inferSelect;
 export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
+
+// Export all patient record schemas
+export * from "./patient-schema";
+

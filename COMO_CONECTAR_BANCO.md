@@ -1,65 +1,75 @@
-# Como Conectar ao Banco de Dados PostgreSQL
+# Status da Conexão com Banco de Dados PostgreSQL
 
-## Problema Atual
-O sistema está usando armazenamento em memória (`MemStorage`), o que significa que:
-- Os dados são perdidos quando o servidor reinicia
-- Os usuários do banco de dados PostgreSQL não estão acessíveis
-- Você precisa recriar usuários toda vez que o servidor reinicia
+## ✅ Status Atual: CONECTADO
 
-## Solução
-Mudar para `DatabaseStorage` para usar o banco de dados PostgreSQL real.
+A aplicação **já está configurada e conectada** ao banco de dados PostgreSQL hospedado no Neon.
 
-## Passos para Conectar
+## Configuração Atual
 
-### 1. Abra o arquivo `server/storage.ts`
+O arquivo `server/storage.ts` está corretamente configurado:
 
-### 2. Descomente as linhas 12-14
+- **Linha 16**: Importações do banco de dados ativas
+  ```typescript
+  import { db, pool } from "./db";
+  ```
 
-**Encontre estas linhas (12-14):**
-```typescript
-// import { db } from "./db"; // Commented out for local development
-import { eq, and, gte, lte, sql } from "drizzle-orm";
-// import { pool } from "./db"; // Commented out for local development
+- **Linha 17**: Operadores do Drizzle ORM importados
+  ```typescript
+  import { eq, and, gte, lte, sql } from "drizzle-orm";
+  ```
+
+- **Linha 1094**: Storage usando `DatabaseStorage`
+  ```typescript
+  export const storage = new DatabaseStorage();
+  ```
+
+## Banco de Dados
+
+**Tipo**: PostgreSQL (Neon)  
+**Configuração**: Definida no arquivo `.env`
+
+```
+DATABASE_URL=postgresql://neondb_owner:npg_F4eEAw3JGzVo@ep-withered-sea-aiv46ynt-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
 ```
 
-**Mude para:**
-```typescript
-import { db } from "./db";
-import { eq, and, gte, lte, sql } from "drizzle-orm";
-import { pool } from "./db";
+**Detalhes da Conexão:**
+- **Host**: `ep-withered-sea-aiv46ynt-pooler.c-4.us-east-1.aws.neon.tech`
+- **Porta**: `5432`
+- **Banco**: `neondb`
+- **Usuário**: `neondb_owner`
+- **Senha**: `npg_F4eEAw3JGzVo`
+- **SSL**: Obrigatório
+- **Connection Pooling**: Habilitado
+
+## Benefícios Ativos
+
+- ✅ Os dados são persistidos no banco de dados PostgreSQL
+- ✅ Os usuários existentes no banco estão acessíveis
+- ✅ Não é necessário recriar usuários após reiniciar o servidor
+- ✅ Todos os dados (agendamentos, psicólogos, salas, etc.) são salvos permanentemente
+
+## Verificação da Conexão
+
+Para verificar se a conexão está funcionando, você pode executar:
+
+### 1. Testar conexão com o banco
+```bash
+node test-db-connection.js
 ```
 
-### 3. Mude a linha 645
-
-**Encontre esta linha (645):**
-```typescript
-export const storage = new MemStorage();
-```
-
-**Mude para:**
-```typescript
-export const storage = new DatabaseStorage();
-```
-
-### 4. Salve o arquivo
-
-### 5. Reinicie o servidor
-
-O servidor vai reiniciar automaticamente quando você salvar o arquivo.
-
-## Resultado
-
-Após fazer essas mudanças:
-- ✅ Os dados serão persistidos no banco de dados PostgreSQL
-- ✅ Os usuários existentes no banco estarão acessíveis
-- ✅ Você não precisará recriar usuários após reiniciar o servidor
-- ✅ Todos os dados (agendamentos, psicólogos, salas, etc.) serão salvos permanentemente
-
-## Verificação
-
-Para verificar se funcionou, após reiniciar o servidor, execute:
+### 2. Listar usuários do banco
 ```bash
 node scripts/list-users.js
 ```
 
-Você deve ver os usuários que existem no banco de dados PostgreSQL.
+### 3. Verificar logs do servidor
+Ao iniciar o servidor com `npm run dev`, você deve ver mensagens de conexão bem-sucedida.
+
+## Solução de Problemas
+
+Se encontrar problemas de conexão:
+
+1. **Verifique o arquivo `.env`**: Certifique-se de que existe e contém a `DATABASE_URL`
+2. **Verifique a conexão com a internet**: O Neon é um serviço cloud
+3. **Verifique os logs do servidor**: Procure por erros relacionados ao banco de dados
+4. **Teste a conexão**: Execute `node test-db-connection.js`
