@@ -13,6 +13,7 @@ import { sendPasswordResetEmail } from "./services/email";
 import * as WhatsAppService from "./services/whatsapp";
 import googleCalendarRoutes from "./routes/google-calendar";
 import * as GoogleCalendarService from "./services/google-calendar";
+import patientRecordsRouter from "./routes/patient-records";
 
 // Configure multer for image upload
 const uploadDir = path.join(process.cwd(), "uploads");
@@ -1684,7 +1685,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Google Calendar routes
+  // Google Calendar routes
   app.use("/api/google-calendar", googleCalendarRoutes);
+
+  // Patient Record System Routes
+  app.use("/api/patients", patientRecordsRouter);
 
   // ========== INVOICE ROUTES ==========
 

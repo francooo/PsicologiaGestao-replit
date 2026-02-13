@@ -17,6 +17,8 @@ import PasswordRecovery from "@/pages/password-recovery";
 import ResetPassword from "@/pages/reset-password";
 import Invoices from "@/pages/invoices";
 import AdminInvoices from "@/pages/admin-invoices";
+import PatientsList from "@/pages/patients";
+import PatientRecord from "@/pages/patients/record";
 import { ProtectedRoute } from "./lib/protected-route";
 import { AuthProvider } from "./hooks/use-auth";
 
@@ -33,7 +35,10 @@ function Router() {
       <ProtectedRoute path="/invoices" component={Invoices} />
       <ProtectedRoute path="/admin/invoices" component={AdminInvoices} />
       <ProtectedRoute path="/permissions" component={Permissions} />
+
       <ProtectedRoute path="/profile" component={Profile} />
+      <ProtectedRoute path="/patients" component={PatientsList} />
+      <ProtectedRoute path="/patients/:id/record" component={PatientRecord} />
       <Route path="/auth" component={AuthPage} />
       <Route path="/auth-page" component={AuthPage} />
       <Route path="/password-recovery" component={PasswordRecovery} />

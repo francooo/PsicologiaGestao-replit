@@ -1,20 +1,21 @@
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import { Link, useLocation } from "wouter";
-import { 
-  LayoutDashboard, 
-  CalendarDays, 
-  Users, 
-  DoorOpen, 
-  BarChart3, 
-  Lock, 
-  Settings, 
+import {
+  LayoutDashboard,
+  CalendarDays,
+  Users,
+  DoorOpen,
+  BarChart3,
+  Lock,
+  Settings,
   LogOut,
   UserCircle,
   LineChart,
   DollarSign,
   FileText,
-  ClipboardList
+  ClipboardList,
+  Contact
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
@@ -37,6 +38,12 @@ export default function Sidebar() {
       name: "Agendamentos",
       icon: <CalendarDays className="w-5 h-5 mr-3 text-primary" />,
       href: "/appointments",
+      allowedRoles: ["admin", "psychologist", "receptionist"]
+    },
+    {
+      name: "Pacientes",
+      icon: <Contact className="w-5 h-5 mr-3 text-primary" />,
+      href: "/patients",
       allowedRoles: ["admin", "psychologist", "receptionist"]
     },
     {
@@ -100,7 +107,7 @@ export default function Sidebar() {
   };
 
   // Filter items based on user role
-  const filteredItems = navigationItems.filter(item => 
+  const filteredItems = navigationItems.filter(item =>
     item.allowedRoles.includes(user?.role || "")
   );
 
@@ -110,13 +117,13 @@ export default function Sidebar() {
         <h1 className="text-primary font-bold text-2xl">ConsultaPsi</h1>
         <p className="text-neutral-dark text-sm">Gestão de Consultório</p>
       </div>
-      
+
       {/* User Profile Section */}
       <div className="p-4 border-b border-neutral-light">
         <div className="flex items-center">
           <Avatar className="w-12 h-12 mr-3 border-2 border-primary">
             <AvatarImage src={user?.profileImage || undefined} alt={user?.fullName || "Usuário"} />
-            <AvatarFallback 
+            <AvatarFallback
               showPsychologySymbol={user?.role === "psychologist"}
               className={`text-lg font-semibold ${user?.role === "psychologist" ? "bg-primary/10" : ""}`}
             >
@@ -129,13 +136,13 @@ export default function Sidebar() {
           </div>
         </div>
       </div>
-      
+
       {/* Navigation Menu */}
       <nav className="py-4">
         <ul>
           {filteredItems.map((item) => (
             <li key={item.href}>
-              <Link 
+              <Link
                 href={item.href}
                 className={cn(
                   "flex items-center py-3 px-4 text-neutral-darkest hover:bg-neutral-lightest",
@@ -147,9 +154,9 @@ export default function Sidebar() {
               </Link>
             </li>
           ))}
-          
+
           <li>
-            <button 
+            <button
               onClick={handleLogout}
               className="w-full flex items-center py-3 px-4 text-neutral-darkest hover:bg-neutral-lightest"
             >

@@ -8,7 +8,15 @@ import {
   permissions, type Permission, type InsertPermission,
   rolePermissions, type RolePermission, type InsertRolePermission,
   passwordResetTokens, type PasswordResetToken, type InsertPasswordResetToken,
-  invoices, type Invoice, type InsertInvoice
+  invoices, type Invoice, type InsertInvoice,
+  // Patient Record System
+  patients, type Patient, type InsertPatient,
+  medicalRecords, type MedicalRecord, type InsertMedicalRecord,
+  clinicalSessions, type ClinicalSession, type InsertClinicalSession,
+  patientDocuments, type PatientDocument, type InsertPatientDocument,
+  psychologicalAssessments, type PsychologicalAssessment, type InsertPsychologicalAssessment,
+  auditLogs, type AuditLog,
+  sessionHistory, type SessionHistory
 } from "@shared/schema";
 import session from "express-session";
 import createMemoryStore from "memorystore";
@@ -97,7 +105,43 @@ export interface IStorage {
   getInvoicesByUserId(userId: number): Promise<Invoice[]>;
   getAllInvoices(): Promise<Invoice[]>;
   getInvoicesByReferenceMonth(referenceMonth: string): Promise<Invoice[]>;
+  getInvoicesByReferenceMonth(referenceMonth: string): Promise<Invoice[]>;
   getInvoiceByUserAndMonth(userId: number, referenceMonth: string): Promise<Invoice | undefined>;
+
+  // Patient Record System Methods
+  // Patients
+  getPatient(id: number): Promise<Patient | undefined>;
+  getPatientByCpf(cpf: string): Promise<Patient | undefined>;
+  createPatient(patient: InsertPatient): Promise<Patient>;
+  updatePatient(id: number, patient: Partial<Patient>): Promise<Patient | undefined>;
+  listPatients(activeOnly?: boolean): Promise<Patient[]>;
+
+  // Medical Records
+  getMedicalRecordByPatientId(patientId: number): Promise<MedicalRecord | undefined>;
+  createMedicalRecord(record: InsertMedicalRecord): Promise<MedicalRecord>;
+  updateMedicalRecord(id: number, record: Partial<MedicalRecord>): Promise<MedicalRecord | undefined>;
+
+  // Clinical Sessions
+  getSession(id: number): Promise<ClinicalSession | undefined>;
+  createSession(session: InsertClinicalSession): Promise<ClinicalSession>;
+  updateSession(id: number, session: Partial<ClinicalSession>): Promise<ClinicalSession | undefined>;
+  listSessionsByPatientId(patientId: number): Promise<ClinicalSession[]>;
+
+  // Documents
+  getDocument(id: number): Promise<PatientDocument | undefined>;
+  createDocument(document: InsertPatientDocument & { uploadedBy: number }): Promise<PatientDocument>;
+  listDocumentsByPatientId(patientId: number): Promise<PatientDocument[]>;
+  deleteDocument(id: number): Promise<boolean>;
+
+  // Assessments
+  getAssessment(id: number): Promise<PsychologicalAssessment | undefined>;
+  createAssessment(assessment: InsertPsychologicalAssessment): Promise<PsychologicalAssessment>;
+  listAssessmentsByPatientId(patientId: number): Promise<PsychologicalAssessment[]>;
+
+  // Audit & History
+  createAuditLog(log: Omit<AuditLog, "id" | "createdAt">): Promise<AuditLog>;
+  listAuditLogsByPatientId(patientId: number): Promise<AuditLog[]>;
+  getSessionHistory(sessionId: number): Promise<SessionHistory[]>;
   getInvoiceWithUser(id: number): Promise<(Invoice & { user: User }) | undefined>;
   getAllInvoicesWithUsers(): Promise<(Invoice & { user: User })[]>;
 
@@ -732,14 +776,14 @@ export class DatabaseStorage implements IStorage {
 
   async getPasswordResetToken(token: string): Promise<PasswordResetToken | undefined> {
     console.log('🔍 [DB] Buscando token:', token.substring(0, 8) + '...');
-    
+
     const [resetToken] = await db.select().from(passwordResetTokens).where(eq(passwordResetTokens.token, token));
-    
+
     if (!resetToken) {
       console.log('❌ [DB] Token não encontrado');
       return undefined;
     }
-    
+
     console.log('🗺 [DB] Token encontrado:', {
       userId: resetToken.userId,
       expiresAt: resetToken.expiresAt,
@@ -747,13 +791,13 @@ export class DatabaseStorage implements IStorage {
       isExpired: new Date(resetToken.expiresAt) < new Date(),
       currentTime: new Date()
     });
-    
+
     // Check if token has expired or been used
     if (new Date(resetToken.expiresAt) < new Date() || resetToken.used) {
       console.log('❌ [DB] Token expirado ou já usado');
       return undefined;
     }
-    
+
     return resetToken;
   }
 
@@ -1060,10 +1104,10 @@ export class DatabaseStorage implements IStorage {
       updatedAt: invoices.updatedAt,
       user: users
     })
-    .from(invoices)
-    .innerJoin(users, eq(invoices.userId, users.id))
-    .where(eq(invoices.id, id));
-    
+      .from(invoices)
+      .innerJoin(users, eq(invoices.userId, users.id))
+      .where(eq(invoices.id, id));
+
     if (result.length === 0) return undefined;
     return { ...result[0], user: result[0].user };
   }
@@ -1082,10 +1126,133 @@ export class DatabaseStorage implements IStorage {
       updatedAt: invoices.updatedAt,
       user: users
     })
-    .from(invoices)
-    .innerJoin(users, eq(invoices.userId, users.id));
-    
+      .from(invoices)
+      .innerJoin(users, eq(invoices.userId, users.id));
+
     return result.map(r => ({ ...r, user: r.user }));
+  }
+
+  // Patient Record System Implementation
+
+  // Patients
+  async getPatient(id: number): Promise<Patient | undefined> {
+    const [patient] = await db.select().from(patients).where(eq(patients.id, id));
+    return patient;
+  }
+
+  async getPatientByCpf(cpf: string): Promise<Patient | undefined> {
+    const [patient] = await db.select().from(patients).where(eq(patients.cpf, cpf));
+    return patient;
+  }
+
+  async createPatient(patient: InsertPatient): Promise<Patient> {
+    const [newPatient] = await db.insert(patients).values(patient).returning();
+    return newPatient;
+  }
+
+  async updatePatient(id: number, data: Partial<Patient>): Promise<Patient | undefined> {
+    const [updated] = await db.update(patients).set(data).where(eq(patients.id, id)).returning();
+    return updated;
+  }
+
+  async listPatients(activeOnly: boolean = true): Promise<Patient[]> {
+    let query = db.select().from(patients);
+    if (activeOnly) {
+      // @ts-ignore - Status field exists but might be inferred incorrectly sometimes
+      return await db.select().from(patients).where(eq(patients.status, 'active'));
+    }
+    return await query;
+  }
+
+  // Medical Records
+  async getMedicalRecordByPatientId(patientId: number): Promise<MedicalRecord | undefined> {
+    const [record] = await db.select().from(medicalRecords).where(eq(medicalRecords.patientId, patientId));
+    return record;
+  }
+
+  async createMedicalRecord(record: InsertMedicalRecord): Promise<MedicalRecord> {
+    const [newRecord] = await db.insert(medicalRecords).values(record).returning();
+    return newRecord;
+  }
+
+  async updateMedicalRecord(id: number, record: Partial<MedicalRecord>): Promise<MedicalRecord | undefined> {
+    const [updated] = await db.update(medicalRecords).set(record).where(eq(medicalRecords.id, id)).returning();
+    return updated;
+  }
+
+  // Clinical Sessions
+  async getSession(id: number): Promise<ClinicalSession | undefined> {
+    const [session] = await db.select().from(clinicalSessions).where(eq(clinicalSessions.id, id));
+    return session;
+  }
+
+  async createSession(session: InsertClinicalSession): Promise<ClinicalSession> {
+    const [newSession] = await db.insert(clinicalSessions).values(session).returning();
+    return newSession;
+  }
+
+  async updateSession(id: number, session: Partial<ClinicalSession>): Promise<ClinicalSession | undefined> {
+    const [updated] = await db.update(clinicalSessions).set(session).where(eq(clinicalSessions.id, id)).returning();
+    return updated;
+  }
+
+  async listSessionsByPatientId(patientId: number): Promise<ClinicalSession[]> {
+    return await db.select().from(clinicalSessions)
+      .where(eq(clinicalSessions.patientId, patientId))
+      .orderBy(sql`${clinicalSessions.sessionDate} DESC, ${clinicalSessions.sessionTime} DESC`);
+  }
+
+  // Documents
+  async getDocument(id: number): Promise<PatientDocument | undefined> {
+    const [doc] = await db.select().from(patientDocuments).where(eq(patientDocuments.id, id));
+    return doc;
+  }
+
+  async createDocument(document: InsertPatientDocument & { uploadedBy: number }): Promise<PatientDocument> {
+    const [newDoc] = await db.insert(patientDocuments).values(document).returning();
+    return newDoc;
+  }
+
+  async listDocumentsByPatientId(patientId: number): Promise<PatientDocument[]> {
+    return await db.select().from(patientDocuments).where(eq(patientDocuments.patientId, patientId));
+  }
+
+  async deleteDocument(id: number): Promise<boolean> {
+    const [deleted] = await db.delete(patientDocuments).where(eq(patientDocuments.id, id)).returning();
+    return !!deleted;
+  }
+
+  // Assessments
+  async getAssessment(id: number): Promise<PsychologicalAssessment | undefined> {
+    const [assessment] = await db.select().from(psychologicalAssessments).where(eq(psychologicalAssessments.id, id));
+    return assessment;
+  }
+
+  async createAssessment(assessment: InsertPsychologicalAssessment): Promise<PsychologicalAssessment> {
+    const [newAssessment] = await db.insert(psychologicalAssessments).values(assessment).returning();
+    return newAssessment;
+  }
+
+  async listAssessmentsByPatientId(patientId: number): Promise<PsychologicalAssessment[]> {
+    return await db.select().from(psychologicalAssessments).where(eq(psychologicalAssessments.patientId, patientId));
+  }
+
+  // Audit & History
+  async createAuditLog(log: Omit<AuditLog, "id" | "createdAt">): Promise<AuditLog> {
+    const [newLog] = await db.insert(auditLogs).values(log).returning();
+    return newLog;
+  }
+
+  async listAuditLogsByPatientId(patientId: number): Promise<AuditLog[]> {
+    return await db.select().from(auditLogs)
+      .where(eq(auditLogs.patientId, patientId))
+      .orderBy(sql`${auditLogs.createdAt} DESC`);
+  }
+
+  async getSessionHistory(sessionId: number): Promise<SessionHistory[]> {
+    return await db.select().from(sessionHistory)
+      .where(eq(sessionHistory.sessionId, sessionId))
+      .orderBy(sql`${sessionHistory.version} DESC`);
   }
 }
 

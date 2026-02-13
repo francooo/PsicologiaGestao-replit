@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { Menu, X, Home, CalendarDays, Users, DoorOpen, BarChart3, Lock, Settings, LogOut, UserCircle, FileText, ClipboardList } from "lucide-react";
+import { Menu, X, Home, CalendarDays, Users, DoorOpen, BarChart3, Lock, Settings, LogOut, UserCircle, FileText, ClipboardList, Contact } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function MobileNav() {
@@ -37,6 +37,12 @@ export default function MobileNav() {
       name: "Agendamentos",
       icon: <CalendarDays className="w-5 h-5" />,
       href: "/appointments",
+      allowedRoles: ["admin", "psychologist", "receptionist"]
+    },
+    {
+      name: "Pacientes",
+      icon: <Contact className="w-5 h-5" />,
+      href: "/patients",
       allowedRoles: ["admin", "psychologist", "receptionist"]
     },
     {
@@ -90,7 +96,7 @@ export default function MobileNav() {
   ];
 
   // Filter items based on user role
-  const filteredItems = navigationItems.filter(item => 
+  const filteredItems = navigationItems.filter(item =>
     item.allowedRoles.includes(user?.role || "")
   );
 
@@ -107,9 +113,9 @@ export default function MobileNav() {
         <div className="flex items-center">
           <div className="relative">
             <button className="flex items-center">
-              <img 
+              <img
                 src={user?.profileImage || "https://via.placeholder.com/32"}
-                alt="Foto de perfil" 
+                alt="Foto de perfil"
                 className="w-8 h-8 rounded-full mr-2 border-2 border-primary"
               />
               <span className="text-neutral-dark text-sm hidden sm:block">{user?.fullName}</span>
@@ -119,7 +125,7 @@ export default function MobileNav() {
       </header>
 
       {/* Mobile Navigation Overlay */}
-      <div 
+      <div
         className={cn(
           "fixed inset-0 bg-black bg-opacity-50 z-30 md:hidden transition-opacity",
           isOpen ? "opacity-100" : "opacity-0 pointer-events-none"
@@ -128,7 +134,7 @@ export default function MobileNav() {
       ></div>
 
       {/* Mobile Navigation Sidebar */}
-      <div 
+      <div
         className={cn(
           "fixed top-0 left-0 h-full w-64 bg-white z-40 transform transition-transform duration-300 ease-in-out md:hidden",
           isOpen ? "translate-x-0" : "-translate-x-full"
@@ -138,13 +144,13 @@ export default function MobileNav() {
           <h1 className="text-primary font-bold text-2xl">ConsultaPsi</h1>
           <p className="text-neutral-dark text-sm">Gestão de Consultório</p>
         </div>
-        
+
         {/* User Profile Section */}
         <div className="p-4 border-b border-neutral-light">
           <div className="flex items-center">
-            <img 
-              src={user?.profileImage || "https://via.placeholder.com/40"} 
-              alt="Foto de perfil" 
+            <img
+              src={user?.profileImage || "https://via.placeholder.com/40"}
+              alt="Foto de perfil"
               className="w-12 h-12 rounded-full mr-3 border-2 border-primary"
             />
             <div>
@@ -153,13 +159,13 @@ export default function MobileNav() {
             </div>
           </div>
         </div>
-        
+
         {/* Navigation Menu */}
         <nav className="py-4">
           <ul>
             {filteredItems.map((item) => (
               <li key={item.href}>
-                <Link 
+                <Link
                   href={item.href}
                   onClick={closeMenu}
                   className={cn(
@@ -172,9 +178,9 @@ export default function MobileNav() {
                 </Link>
               </li>
             ))}
-            
+
             <li>
-              <button 
+              <button
                 onClick={handleLogout}
                 className="w-full flex items-center py-3 px-4 text-neutral-darkest hover:bg-neutral-lightest"
               >
@@ -190,7 +196,7 @@ export default function MobileNav() {
       <nav className="fixed bottom-0 w-full bg-white shadow-md py-2 px-6 md:hidden z-10">
         <ul className="flex justify-between">
           <li>
-            <Link 
+            <Link
               href="/dashboard"
               className={`flex flex-col items-center ${isActive("/dashboard") ? "text-primary" : "text-neutral-dark"}`}
             >
@@ -199,7 +205,7 @@ export default function MobileNav() {
             </Link>
           </li>
           <li>
-            <Link 
+            <Link
               href="/appointments"
               className={`flex flex-col items-center ${isActive("/appointments") ? "text-primary" : "text-neutral-dark"}`}
             >
@@ -208,7 +214,7 @@ export default function MobileNav() {
             </Link>
           </li>
           <li>
-            <Link 
+            <Link
               href="/profile"
               className={`flex flex-col items-center ${isActive("/profile") ? "text-primary" : "text-neutral-dark"}`}
             >
@@ -217,7 +223,7 @@ export default function MobileNav() {
             </Link>
           </li>
           <li>
-            <Link 
+            <Link
               href="/rooms"
               className={`flex flex-col items-center ${isActive("/rooms") ? "text-primary" : "text-neutral-dark"}`}
             >
