@@ -1689,6 +1689,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/google-calendar", googleCalendarRoutes);
 
   // Patient Record System Routes
+  console.log("Registering /api/patients routes...");
   app.use("/api/patients", patientRecordsRouter);
 
   // ========== INVOICE ROUTES ==========
