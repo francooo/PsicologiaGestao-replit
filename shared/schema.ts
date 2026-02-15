@@ -8,12 +8,14 @@ import { sql } from "drizzle-orm";
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+  password: text("password"),
   email: text("email").notNull().unique(),
   fullName: text("full_name").notNull(),
   role: text("role").notNull().default("psychologist"), // admin, psychologist, receptionist
   status: text("status").notNull().default("active"), // active, inactive, pending
   profileImage: text("profile_image"),
+  googleId: text("google_id").unique(),
+  avatarUrl: text("avatar_url"),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({
@@ -24,6 +26,8 @@ export const insertUserSchema = createInsertSchema(users).pick({
   role: true,
   status: true,
   profileImage: true,
+  googleId: true,
+  avatarUrl: true,
 });
 
 // Psychologist specific info

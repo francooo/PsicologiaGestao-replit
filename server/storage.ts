@@ -148,6 +148,7 @@ export interface IStorage {
   // Session store
   sessionStore: session.Store;
   getUserByEmail: (email: string) => Promise<User | undefined>;
+  getUserByGoogleId: (googleId: string) => Promise<User | undefined>;
   savePasswordResetToken: (userId: number, token: string, expiresAt: Date) => Promise<void>;
   getPasswordResetToken: (token: string) => Promise<PasswordResetToken | undefined>;
   invalidatePasswordResetToken: (token: string) => Promise<void>;
@@ -277,7 +278,10 @@ export class MemStorage implements IStorage {
       id,
       role: user.role || 'user',
       status: user.status || 'active',
-      profileImage: user.profileImage || null
+      profileImage: user.profileImage || null,
+      googleId: user.googleId || null,
+      avatarUrl: user.avatarUrl || null,
+      password: user.password || null
     };
     this.users.set(id, newUser);
     return newUser;
@@ -622,6 +626,10 @@ export class MemStorage implements IStorage {
     return Array.from(this.users.values()).find(user => user.email === email);
   }
 
+  async getUserByGoogleId(googleId: string): Promise<User | undefined> {
+    return Array.from(this.users.values()).find(user => user.googleId === googleId);
+  }
+
   async savePasswordResetToken(userId: number, token: string, expiresAt: Date): Promise<void> {
     const resetToken: PasswordResetToken = {
       id: Date.now(), // Simple ID for in-memory storage
@@ -717,6 +725,35 @@ export class MemStorage implements IStorage {
   async getAllInvoicesWithUsers(): Promise<(Invoice & { user: User })[]> {
     return [];
   }
+
+  // Patient Record System Stubs (Not implemented in MemStorage)
+  async getPatient(id: number): Promise<Patient | undefined> { return undefined; }
+  async getPatientByCpf(cpf: string): Promise<Patient | undefined> { return undefined; }
+  async createPatient(patient: InsertPatient): Promise<Patient> { throw new Error("Method not implemented."); }
+  async updatePatient(id: number, patient: Partial<Patient>): Promise<Patient | undefined> { return undefined; }
+  async listPatients(activeOnly?: boolean): Promise<Patient[]> { return []; }
+
+  async getMedicalRecordByPatientId(patientId: number): Promise<MedicalRecord | undefined> { return undefined; }
+  async createMedicalRecord(record: InsertMedicalRecord): Promise<MedicalRecord> { throw new Error("Method not implemented."); }
+  async updateMedicalRecord(id: number, record: Partial<MedicalRecord>): Promise<MedicalRecord | undefined> { return undefined; }
+
+  async getSession(id: number): Promise<ClinicalSession | undefined> { return undefined; }
+  async createSession(session: InsertClinicalSession): Promise<ClinicalSession> { throw new Error("Method not implemented."); }
+  async updateSession(id: number, session: Partial<ClinicalSession>): Promise<ClinicalSession | undefined> { return undefined; }
+  async listSessionsByPatientId(patientId: number): Promise<ClinicalSession[]> { return []; }
+
+  async getDocument(id: number): Promise<PatientDocument | undefined> { return undefined; }
+  async createDocument(document: InsertPatientDocument & { uploadedBy: number }): Promise<PatientDocument> { throw new Error("Method not implemented."); }
+  async listDocumentsByPatientId(patientId: number): Promise<PatientDocument[]> { return []; }
+  async deleteDocument(id: number): Promise<boolean> { return false; }
+
+  async getAssessment(id: number): Promise<PsychologicalAssessment | undefined> { return undefined; }
+  async createAssessment(assessment: InsertPsychologicalAssessment): Promise<PsychologicalAssessment> { throw new Error("Method not implemented."); }
+  async listAssessmentsByPatientId(patientId: number): Promise<PsychologicalAssessment[]> { return []; }
+
+  async createAuditLog(log: Omit<AuditLog, "id" | "createdAt">): Promise<AuditLog> { throw new Error("Method not implemented."); }
+  async listAuditLogsByPatientId(patientId: number): Promise<AuditLog[]> { return []; }
+  async getSessionHistory(sessionId: number): Promise<SessionHistory[]> { return []; }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -761,6 +798,11 @@ export class DatabaseStorage implements IStorage {
 
   async getUserByEmail(email: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user;
+  }
+
+  async getUserByGoogleId(googleId: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.googleId, googleId));
     return user;
   }
 
@@ -827,7 +869,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createPsychologist(psychologist: InsertPsychologist): Promise<Psychologist> {
-    const [newPsych] = await db.insert(psychologists).values(psychologist).returning();
+    const [newPsych] = await db.insert(psychologists).values({
+      ...psychologist,
+      hourlyRate: psychologist.hourlyRate.toString()
+    }).returning();
     return newPsych;
   }
 
@@ -920,7 +965,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createTransaction(transaction: InsertTransaction): Promise<Transaction> {
-    const [newTx] = await db.insert(transactions).values(transaction).returning();
+    const [newTx] = await db.insert(transactions).values({
+      ...transaction,
+      amount: transaction.amount.toString()
+    }).returning();
     return newTx;
   }
 

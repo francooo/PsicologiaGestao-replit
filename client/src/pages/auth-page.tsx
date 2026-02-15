@@ -7,14 +7,14 @@ import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { 
-  Form, 
-  FormControl, 
-  FormDescription, 
-  FormField, 
-  FormItem, 
-  FormLabel, 
-  FormMessage 
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage
 } from "@/components/ui/form";
 import {
   Card,
@@ -96,8 +96,8 @@ export default function AuthPage() {
               {activeTab === "login" ? "Entrar" : "Criar uma conta"}
             </CardTitle>
             <CardDescription>
-              {activeTab === "login" 
-                ? "Entre com suas credenciais para acessar o sistema" 
+              {activeTab === "login"
+                ? "Entre com suas credenciais para acessar o sistema"
                 : "Preencha suas informações para criar uma nova conta"}
             </CardDescription>
           </CardHeader>
@@ -107,7 +107,7 @@ export default function AuthPage() {
                 <TabsTrigger value="login">Login</TabsTrigger>
                 <TabsTrigger value="register">Registro</TabsTrigger>
               </TabsList>
-              
+
               <TabsContent value="login">
                 <Form {...loginForm}>
                   <form onSubmit={loginForm.handleSubmit(onLoginSubmit)} className="space-y-4">
@@ -142,9 +142,9 @@ export default function AuthPage() {
                         Esqueceu sua senha?
                       </a>
                     </div>
-                    <Button 
-                      type="submit" 
-                      className="w-full" 
+                    <Button
+                      type="submit"
+                      className="w-full"
                       disabled={loginMutation.isPending}
                     >
                       {loginMutation.isPending ? (
@@ -158,8 +158,31 @@ export default function AuthPage() {
                     </Button>
                   </form>
                 </Form>
+
+                <div className="relative mt-6">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t"></span>
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-background px-2 text-muted-foreground">
+                      Ou continue com
+                    </span>
+                  </div>
+                </div>
+
+                <Button
+                  variant="outline"
+                  className="w-full mt-4"
+                  onClick={() => window.location.href = "/auth/google"}
+                  type="button"
+                >
+                  <svg className="mr-2 h-4 w-4" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="google" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512">
+                    <path fill="currentColor" d="M488 261.8C488 403.3 391.1 504 248 504 110.8 504 0 393.2 0 256S110.8 8 248 8c66.8 0 123 24.5 166.3 64.9l-67.5 64.9C258.5 52.6 94.3 116.6 94.3 256c0 86.5 69.1 156.6 153.7 156.6 98.2 0 135-70.4 140.8-106.9H248v-85.3h236.1c2.3 12.7 3.9 24.9 3.9 41.4z"></path>
+                  </svg>
+                  Google
+                </Button>
               </TabsContent>
-              
+
               <TabsContent value="register">
                 <Form {...registerForm}>
                   <form onSubmit={registerForm.handleSubmit(onRegisterSubmit)} className="space-y-3">
@@ -235,7 +258,7 @@ export default function AuthPage() {
                         <FormItem>
                           <FormLabel>Função</FormLabel>
                           <FormControl>
-                            <select 
+                            <select
                               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                               {...field}
                             >
@@ -248,9 +271,9 @@ export default function AuthPage() {
                         </FormItem>
                       )}
                     />
-                    <Button 
-                      type="submit" 
-                      className="w-full" 
+                    <Button
+                      type="submit"
+                      className="w-full"
                       disabled={registerMutation.isPending}
                     >
                       {registerMutation.isPending ? (
@@ -269,12 +292,12 @@ export default function AuthPage() {
           </CardContent>
           <CardFooter className="flex justify-center">
             <p className="text-sm text-neutral-dark">
-              {activeTab === "login" 
-                ? "Não tem uma conta? " 
+              {activeTab === "login"
+                ? "Não tem uma conta? "
                 : "Já tem uma conta? "}
-              <a 
-                href="#" 
-                className="text-primary hover:underline" 
+              <a
+                href="#"
+                className="text-primary hover:underline"
                 onClick={(e) => {
                   e.preventDefault();
                   setActiveTab(activeTab === "login" ? "register" : "login");
@@ -286,7 +309,7 @@ export default function AuthPage() {
           </CardFooter>
         </Card>
       </div>
-      
+
       {/* Right side - Hero */}
       <div className="hidden md:block w-1/2 bg-primary p-10">
         <div className="h-full flex flex-col justify-center items-center text-white">
