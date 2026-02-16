@@ -1,6 +1,6 @@
 import { google, calendar_v3 } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
-// import { db } from '../db'; // Commented out for local development
+import { db } from '../db';
 import { googleTokens, calendarEvents, appointments } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
 
@@ -27,7 +27,7 @@ export function getAuthUrl(userId: number): string {
     state: userId.toString(), // Usado para identificar o usuário após a autorização
     prompt: 'consent' // Sempre solicita permissão (necessário para obter refresh_token)
   });
-  
+
   return authUrl;
 }
 
@@ -37,28 +37,28 @@ export function getAuthUrl(userId: number): string {
 export async function handleAuthCode(code: string, userId: number): Promise<boolean> {
   try {
     const { tokens } = await oauth2Client.getToken(code);
-    
+
     if (!tokens.access_token) {
       console.error('Erro: Token de acesso não recebido');
       return false;
     }
-    
+
     // Salvar os tokens no cache temporário
     tokenCache[userId] = tokens;
-    
+
     // Verificar se já existe um registro para este usuário
     const existingTokens = await db.select().from(googleTokens).where(eq(googleTokens.userId, userId));
-    
+
     // Definir a data de expiração
-    const expiryDate = tokens.expiry_date 
-      ? new Date(tokens.expiry_date) 
+    const expiryDate = tokens.expiry_date
+      ? new Date(tokens.expiry_date)
       : new Date(Date.now() + 3600 * 1000); // 1 hora a partir de agora, padrão
-    
+
     if (existingTokens.length > 0) {
       // Atualizar o registro existente
       await db.update(googleTokens)
         .set({
-          accessToken: tokens.access_token,
+          accessToken: tokens.access_token!,
           refreshToken: tokens.refresh_token ?? existingTokens[0].refreshToken,
           expiryDate: expiryDate,
           updatedAt: new Date()
@@ -68,13 +68,13 @@ export async function handleAuthCode(code: string, userId: number): Promise<bool
       // Criar um novo registro
       await db.insert(googleTokens).values({
         userId,
-        accessToken: tokens.access_token,
+        accessToken: tokens.access_token!,
         refreshToken: tokens.refresh_token ?? null,
         expiryDate: expiryDate,
         calendarId: 'primary' // Calendário padrão
       });
     }
-    
+
     return true;
   } catch (error) {
     console.error('Erro ao processar o código de autorização:', error);
@@ -94,34 +94,34 @@ async function getUserTokens(userId: number): Promise<any | null> {
       return tokenCache[userId];
     }
   }
-  
+
   // Buscar do banco de dados
   const tokens = await db.select().from(googleTokens).where(eq(googleTokens.userId, userId));
-  
+
   if (tokens.length === 0) {
     return null;
   }
-  
+
   const userToken = tokens[0];
-  
+
   // Verificar se o token expirou e precisa ser atualizado usando o refresh token
   if (userToken.expiryDate && new Date(userToken.expiryDate).getTime() <= Date.now()) {
     if (!userToken.refreshToken) {
       return null; // Não pode renovar sem refresh token
     }
-    
+
     try {
       oauth2Client.setCredentials({
         refresh_token: userToken.refreshToken
       });
-      
+
       const { credentials } = await oauth2Client.refreshAccessToken();
-      
+
       // Atualizar o token no banco de dados
-      const expiryDate = credentials.expiry_date 
-        ? new Date(credentials.expiry_date) 
+      const expiryDate = credentials.expiry_date
+        ? new Date(credentials.expiry_date)
         : new Date(Date.now() + 3600 * 1000);
-        
+
       await db.update(googleTokens)
         .set({
           accessToken: credentials.access_token!,
@@ -129,27 +129,27 @@ async function getUserTokens(userId: number): Promise<any | null> {
           updatedAt: new Date()
         })
         .where(eq(googleTokens.userId, userId));
-      
+
       // Atualizar o cache
       tokenCache[userId] = credentials;
-      
+
       return credentials;
     } catch (error) {
       console.error('Erro ao renovar o token de acesso:', error);
       return null;
     }
   }
-  
+
   // Converter para o formato que o oauth2Client espera
   const credentials = {
     access_token: userToken.accessToken,
     refresh_token: userToken.refreshToken,
     expiry_date: userToken.expiryDate?.getTime()
   };
-  
+
   // Atualizar o cache
   tokenCache[userId] = credentials;
-  
+
   return credentials;
 }
 
@@ -158,13 +158,13 @@ async function getUserTokens(userId: number): Promise<any | null> {
  */
 async function setupClientForUser(userId: number): Promise<calendar_v3.Calendar | null> {
   const tokens = await getUserTokens(userId);
-  
+
   if (!tokens) {
     return null;
   }
-  
+
   oauth2Client.setCredentials(tokens);
-  
+
   // Criar um cliente da API do Calendar
   return google.calendar({ version: 'v3', auth: oauth2Client });
 }
@@ -184,11 +184,11 @@ export async function addEventToCalendar(
   }
 ): Promise<string | null> {
   const calendar = await setupClientForUser(userId);
-  
+
   if (!calendar) {
     return null;
   }
-  
+
   try {
     const response = await calendar.events.insert({
       calendarId: 'primary',
@@ -210,7 +210,7 @@ export async function addEventToCalendar(
         },
       },
     });
-    
+
     return response.data.id || null;
   } catch (error) {
     console.error('Erro ao adicionar evento ao calendário:', error);
@@ -234,18 +234,18 @@ export async function updateCalendarEvent(
   }
 ): Promise<boolean> {
   const calendar = await setupClientForUser(userId);
-  
+
   if (!calendar) {
     return false;
   }
-  
+
   try {
     // Primeiro, obter o evento atual
     const currentEvent = await calendar.events.get({
       calendarId: 'primary',
       eventId: eventId,
     });
-    
+
     // Preparar o corpo da solicitação
     const requestBody: any = {
       ...currentEvent.data,
@@ -253,7 +253,7 @@ export async function updateCalendarEvent(
       description: event.description ?? currentEvent.data.description,
       location: event.location ?? currentEvent.data.location,
     };
-    
+
     // Atualizar horários, se fornecidos
     if (event.startDateTime) {
       requestBody.start = {
@@ -261,25 +261,25 @@ export async function updateCalendarEvent(
         timeZone: 'America/Sao_Paulo',
       };
     }
-    
+
     if (event.endDateTime) {
       requestBody.end = {
         dateTime: event.endDateTime,
         timeZone: 'America/Sao_Paulo',
       };
     }
-    
+
     // Atualizar attendees, se fornecidos
     if (event.attendees) {
       requestBody.attendees = event.attendees;
     }
-    
+
     await calendar.events.update({
       calendarId: 'primary',
       eventId: eventId,
       requestBody: requestBody,
     });
-    
+
     return true;
   } catch (error) {
     console.error('Erro ao atualizar evento no calendário:', error);
@@ -292,17 +292,17 @@ export async function updateCalendarEvent(
  */
 export async function deleteCalendarEvent(userId: number, eventId: string): Promise<boolean> {
   const calendar = await setupClientForUser(userId);
-  
+
   if (!calendar) {
     return false;
   }
-  
+
   try {
     await calendar.events.delete({
       calendarId: 'primary',
       eventId: eventId,
     });
-    
+
     return true;
   } catch (error) {
     console.error('Erro ao remover evento do calendário:', error);
@@ -315,11 +315,11 @@ export async function deleteCalendarEvent(userId: number, eventId: string): Prom
  */
 export async function listUpcomingEvents(userId: number, maxResults = 10): Promise<any[] | null> {
   const calendar = await setupClientForUser(userId);
-  
+
   if (!calendar) {
     return null;
   }
-  
+
   try {
     const response = await calendar.events.list({
       calendarId: 'primary',
@@ -328,7 +328,7 @@ export async function listUpcomingEvents(userId: number, maxResults = 10): Promi
       singleEvents: true,
       orderBy: 'startTime',
     });
-    
+
     return response.data.items || [];
   } catch (error) {
     console.error('Erro ao listar eventos do calendário:', error);
@@ -393,7 +393,7 @@ export async function createBookingEvent(
     // Formatar datas para o Google Calendar
     const startDateTime = new Date(`${eventData.date}T${eventData.startTime}:00`);
     const endDateTime = new Date(`${eventData.date}T${eventData.endTime}:00`);
-    
+
     // Criar um evento com status tentative (provisório)
     const event = {
       summary: `${eventData.summary} (Disponível)`,
@@ -402,28 +402,28 @@ export async function createBookingEvent(
       endDateTime: endDateTime.toISOString(),
       location: 'Consultório',
     };
-    
+
     try {
       // Adicionar o evento ao calendário
       const eventId = await addEventToCalendar(psychologistUserId, event);
-      
+
       if (!eventId) {
         console.error('Não foi possível criar o evento no Google Calendar');
         return getAppointmentSchedulingLink(psychologistUserId, eventData);
       }
-      
+
       // Obter o token do usuário para acessar o evento
       const userTokens = await db.select().from(googleTokens).where(eq(googleTokens.userId, psychologistUserId));
       if (!userTokens || userTokens.length === 0) {
         return getAppointmentSchedulingLink(psychologistUserId, eventData);
       }
-      
+
       // Obter o calendarId (normalmente "primary")
       const calendarId = userTokens[0].calendarId || 'primary';
-      
+
       // Criar link de agendamento direto
       const eventLink = `https://calendar.google.com/calendar/event?action=TEMPLATE&tmeid=${encodeURIComponent(eventId)}&tmsrc=${encodeURIComponent(calendarId)}`;
-      
+
       return eventLink;
     } catch (error) {
       console.error('Erro ao interagir com o Google Calendar:', error);

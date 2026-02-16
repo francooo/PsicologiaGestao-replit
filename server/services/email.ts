@@ -96,9 +96,10 @@ export const sendPasswordResetEmail = async (user: User, resetToken: string) => 
 
     if (error) {
       console.error('❌ Erro detalhado do Resend:', error);
+      const err = error as any;
 
       // Handle specific Resend API limitations
-      if (error.statusCode === 403 && error.message.includes('You can only send testing emails to your own email address')) {
+      if (err.statusCode === 403 && err.message && err.message.includes('You can only send testing emails to your own email address')) {
         console.log('⚠️  RESEND LIMITATION: Este é um API key de teste que só pode enviar emails para: andrewsfranco93@gmail.com');
         console.log('🔗 Para enviar para outros emails, verifique um domínio em resend.com/domains');
 
