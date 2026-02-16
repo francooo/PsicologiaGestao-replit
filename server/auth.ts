@@ -3,10 +3,13 @@ import { Strategy as LocalStrategy } from "passport-local";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Express } from "express";
 import session from "express-session";
+import createMemoryStore from "memorystore";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 import { storage } from "./storage";
 import { User as SelectUser } from "@shared/schema";
+
+const MemoryStore = createMemoryStore(session);
 
 declare global {
   namespace Express {
@@ -32,8 +35,23 @@ async function comparePasswords(supplied: string, stored: string | null) {
 }
 
 export function setupAuth(app: Express) {
-  // ... existing setup ...
+  const sessionSettings: session.SessionOptions = {
+    secret: process.env.SESSION_SECRET || "psicomanager-session-secret-key",
+    resave: false,
+    saveUninitialized: false,
+    store: new MemoryStore({
+      checkPeriod: 86400000,
+    }),
+    cookie: {
+      maxAge: 24 * 60 * 60 * 1000,
+    },
+  };
 
+  if (app.get("env") === "production") {
+    app.set("trust proxy", 1);
+  }
+
+  app.use(session(sessionSettings));
   app.use(passport.initialize());
   app.use(passport.session());
 

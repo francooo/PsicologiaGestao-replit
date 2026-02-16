@@ -35,10 +35,10 @@ Preferred communication style: Simple, everyday language.
 - **API Design**: RESTful API with standardized error handling and middleware
 
 ## Data Storage
-- **Database**: PostgreSQL with Neon serverless hosting
-- **ORM**: Drizzle ORM for type-safe database operations
+- **Database**: PostgreSQL (Replit built-in, Neon-backed)
+- **ORM**: Drizzle ORM with node-postgres (pg) driver for type-safe database operations
 - **Schema Management**: Drizzle Kit for migrations and schema evolution
-- **Session Storage**: PostgreSQL-backed session store for scalability
+- **Session Storage**: Memory store for sessions
 
 ## Authentication & Authorization
 - **Strategy**: Session-based authentication with secure password hashing using scrypt
