@@ -26,6 +26,8 @@ export const patients = pgTable("patients", {
     legalGuardianCpf: text("legal_guardian_cpf"),
     status: text("status").notNull().default("active"), // active, inactive, discharged
     photoUrl: text("photo_url"),
+    // psychologist_id: psícólogo responsável pela carteira do paciente
+    psychologistId: integer("psychologist_id").references(() => psychologists.id),
     createdBy: integer("created_by").references(() => users.id),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -48,6 +50,7 @@ export const insertPatientSchema = createInsertSchema(patients).pick({
     legalGuardianCpf: true,
     status: true,
     photoUrl: true,
+    psychologistId: true,
 });
 
 // Medical Records (Anamnese/Prontuário Inicial)
@@ -301,3 +304,19 @@ export type InsertPsychologicalAssessment = z.infer<typeof insertPsychologicalAs
 
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type SessionHistory = typeof sessionHistory.$inferSelect;
+
+// ========== PATIENT TRANSFERS ==========
+// Histórico imutável de transferências de responsabilidade
+
+export const patientTransfers = pgTable("patient_transfers", {
+    id: serial("id").primaryKey(),
+    patientId: integer("patient_id").notNull().references(() => patients.id),
+    fromPsychologistId: integer("from_psychologist_id").references(() => psychologists.id),
+    toPsychologistId: integer("to_psychologist_id").notNull().references(() => psychologists.id),
+    transferredByAdminId: integer("transferred_by_admin_id").notNull().references(() => users.id),
+    reason: text("reason"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type PatientTransfer = typeof patientTransfers.$inferSelect;
+

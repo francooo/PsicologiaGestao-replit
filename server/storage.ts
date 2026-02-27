@@ -16,7 +16,8 @@ import {
   patientDocuments, type PatientDocument, type InsertPatientDocument,
   psychologicalAssessments, type PsychologicalAssessment, type InsertPsychologicalAssessment,
   auditLogs, type AuditLog,
-  sessionHistory, type SessionHistory
+  sessionHistory, type SessionHistory,
+  patientTransfers, type PatientTransfer
 } from "@shared/schema";
 import session from "express-session";
 import createMemoryStore from "memorystore";
@@ -144,6 +145,17 @@ export interface IStorage {
   getSessionHistory(sessionId: number): Promise<SessionHistory[]>;
   getInvoiceWithUser(id: number): Promise<(Invoice & { user: User }) | undefined>;
   getAllInvoicesWithUsers(): Promise<(Invoice & { user: User })[]>;
+
+  // Patient Transfers
+  transferPatient(data: {
+    patientId: number;
+    fromPsychologistId: number | null;
+    toPsychologistId: number;
+    transferredByAdminId: number;
+    reason: string | null;
+  }): Promise<PatientTransfer>;
+  listTransfersByPatientId(patientId: number): Promise<PatientTransfer[]>;
+
 
   // Session store
   sessionStore: session.Store;
@@ -754,6 +766,9 @@ export class MemStorage implements IStorage {
   async createAuditLog(log: Omit<AuditLog, "id" | "createdAt">): Promise<AuditLog> { throw new Error("Method not implemented."); }
   async listAuditLogsByPatientId(patientId: number): Promise<AuditLog[]> { return []; }
   async getSessionHistory(sessionId: number): Promise<SessionHistory[]> { return []; }
+
+  async transferPatient(data: { patientId: number; fromPsychologistId: number | null; toPsychologistId: number; transferredByAdminId: number; reason: string | null; }): Promise<PatientTransfer> { throw new Error("Method not implemented."); }
+  async listTransfersByPatientId(patientId: number): Promise<PatientTransfer[]> { return []; }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1301,6 +1316,40 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(sessionHistory)
       .where(eq(sessionHistory.sessionId, sessionId))
       .orderBy(sql`${sessionHistory.version} DESC`);
+  }
+
+  // Patient Transfers
+  async transferPatient(data: {
+    patientId: number;
+    fromPsychologistId: number | null;
+    toPsychologistId: number;
+    transferredByAdminId: number;
+    reason: string | null;
+  }): Promise<PatientTransfer> {
+    // Transacão atômica: UPDATE patients + INSERT patient_transfers
+    let transfer!: PatientTransfer;
+    await db.transaction(async (tx) => {
+      // 1. Atualiza vínculo do paciente
+      await tx.update(patients)
+        .set({ psychologistId: data.toPsychologistId })
+        .where(eq(patients.id, data.patientId));
+      // 2. Registra histórico imutável
+      const [newTransfer] = await tx.insert(patientTransfers).values({
+        patientId: data.patientId,
+        fromPsychologistId: data.fromPsychologistId,
+        toPsychologistId: data.toPsychologistId,
+        transferredByAdminId: data.transferredByAdminId,
+        reason: data.reason,
+      }).returning();
+      transfer = newTransfer;
+    });
+    return transfer;
+  }
+
+  async listTransfersByPatientId(patientId: number): Promise<PatientTransfer[]> {
+    return await db.select().from(patientTransfers)
+      .where(eq(patientTransfers.patientId, patientId))
+      .orderBy(sql`${patientTransfers.createdAt} DESC`);
   }
 }
 

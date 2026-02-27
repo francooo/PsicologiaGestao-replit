@@ -1,191 +1,207 @@
 import { useRoute, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 import Sidebar from "@/components/sidebar";
 import MobileNav from "@/components/mobile-nav";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Loader2, User, Activity, FileText, FolderOpen, ClipboardList, Lock, ArrowLeft, ShieldX } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, User, FileText, Activity, FolderOpen, ClipboardList, Plus } from "lucide-react";
-import { Loader2 } from "lucide-react";
-import { type Patient, type ClinicalSession } from "@shared/schema";
+import { type Patient } from "@shared/schema";
 
-function SessionsList({ patientId }: { patientId: number }) {
-    const { data: sessions, isLoading } = useQuery<ClinicalSession[]>({
-        queryKey: [`/api/patients/${patientId}/sessions`],
-        enabled: !!patientId
-    });
+import RecordHeader from "@/components/patient-record/RecordHeader";
+import PersonalDataTab from "@/components/patient-record/PersonalDataTab";
+import AnamnesisTab from "@/components/patient-record/AnamnesisTab";
+import EvolutionsTab from "@/components/patient-record/EvolutionsTab";
+import DocumentsTab from "@/components/patient-record/DocumentsTab";
+import AssessmentsTab from "@/components/patient-record/AssessmentsTab";
 
-    if (isLoading) {
-        return (
-            <div className="flex justify-center p-4">
-                <Loader2 className="h-6 w-6 animate-spin text-primary" />
-            </div>
-        );
-    }
+const TAB_KEY = "prontuario_active_tab";
 
-    if (!sessions || sessions.length === 0) {
-        return (
-            <div className="text-center py-8 bg-white rounded-lg border border-dashed border-neutral-light">
-                <p className="text-neutral-dark">Nenhuma evolução registrada para este paciente.</p>
-                <Button variant="link" className="text-primary mt-2">
-                    Criar primeira evolução
-                </Button>
-            </div>
-        );
-    }
+const TABS = [
+    { value: "details", label: "Dados Pessoais", icon: User, countKey: null },
+    { value: "anamnesis", label: "Anamnese", icon: Activity, countKey: null },
+    { value: "sessions", label: "Evoluções", icon: FileText, countKey: "sessions" },
+    { value: "documents", label: "Documentos", icon: FolderOpen, countKey: "documents" },
+    { value: "assessments", label: "Avaliações", icon: ClipboardList, countKey: "assessments" },
+] as const;
 
-    return (
-        <div className="space-y-4">
-            {sessions.map((session) => (
-                <Card key={session.id} className="overflow-hidden">
-                    <div className="bg-neutral-lightest px-6 py-3 border-b border-neutral-light flex justify-between items-center">
-                        <div className="flex items-center gap-2">
-                            <span className="font-semibold text-neutral-darkest">
-                                {new Date(session.sessionDate).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
-                            </span>
-                            <span className="text-neutral-dark text-sm">• {session.sessionTime}</span>
-                        </div>
-                        <span className={`text-xs px-2 py-1 rounded-full capitalize font-medium ${session.status === 'completed'
-                            ? 'bg-success/10 text-success'
-                            : 'bg-neutral-dark/10 text-neutral-dark'
-                            }`}>
-                            {session.status === 'completed' ? 'Realizada' : session.status}
-                        </span>
-                    </div>
-                    <CardContent className="p-6">
-                        <p className="text-sm text-neutral-darkest whitespace-pre-wrap leading-relaxed">
-                            {session.evolutionNotes}
-                        </p>
-                    </CardContent>
-                </Card>
-            ))}
-        </div>
-    );
+type TabValue = (typeof TABS)[number]["value"];
+
+interface TabCounts {
+    sessions: number;
+    documents: number;
+    assessments: number;
 }
 
 export default function PatientRecord() {
     const [, params] = useRoute("/patients/:id/record");
     const [, setLocation] = useLocation();
     const id = params ? parseInt(params.id) : 0;
+    const contentRef = useRef<HTMLDivElement>(null);
 
-    const { data: patient, isLoading } = useQuery<Patient>({
-        queryKey: [`/api/patients/${id}`],
-        enabled: !!id
+    const [activeTab, setActiveTab] = useState<TabValue>(() => {
+        const saved = localStorage.getItem(TAB_KEY);
+        return (saved as TabValue) || "details";
     });
 
-    if (isLoading) {
+    // New Evolution / Document / Assessment triggers
+    const [triggerNewEvolution, setTriggerNewEvolution] = useState(0);
+    const [triggerNewDocument, setTriggerNewDocument] = useState(0);
+    const [triggerNewAssessment, setTriggerNewAssessment] = useState(0);
+
+    const { data: patient, isLoading, error } = useQuery<Patient>({
+        queryKey: [`/api/patients/${id}`],
+        enabled: !!id,
+        retry: (failureCount, err: any) => {
+            // Do not retry on 403/404
+            if (err?.status === 403 || err?.status === 404) return false;
+            return failureCount < 2;
+        },
+    });
+
+    const { data: counts } = useQuery<TabCounts>({
+        queryKey: [`/api/patients/${id}/counts`],
+        enabled: !!id,
+    });
+
+    function handleTabChange(tab: TabValue) {
+        setActiveTab(tab);
+        localStorage.setItem(TAB_KEY, tab);
+        // Scroll to top on tab switch
+        setTimeout(() => {
+            contentRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+        }, 50);
+    }
+
+    function handleNewEvolution() {
+        handleTabChange("sessions");
+        setTimeout(() => setTriggerNewEvolution((n) => n + 1), 300);
+    }
+    function handleNewDocument() {
+        handleTabChange("documents");
+        setTimeout(() => setTriggerNewDocument((n) => n + 1), 300);
+    }
+    function handleNewAssessment() {
+        handleTabChange("assessments");
+        setTimeout(() => setTriggerNewAssessment((n) => n + 1), 300);
+    }
+
+    // 403 — Acesso negado
+    const isForbidden = (error as any)?.status === 403 || (error as any)?.message?.includes("403");
+
+    if (isForbidden) {
         return (
-            <div className="flex h-screen items-center justify-center bg-neutral-lightest">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <div className="flex h-screen bg-neutral-lightest">
+                <Sidebar />
+                <div className="flex-1 overflow-y-auto ml-0 md:ml-64 pt-16 md:pt-0">
+                    <MobileNav />
+                    <div className="flex flex-col items-center justify-center min-h-screen px-6 py-16">
+                        <div className="w-full max-w-md text-center">
+                            <div className="w-20 h-20 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-6">
+                                <ShieldX className="h-10 w-10 text-destructive" />
+                            </div>
+                            <h1 className="text-2xl font-bold text-neutral-800 mb-2">Acesso Negado</h1>
+                            <p className="text-neutral-500 mb-1">
+                                Você não possui permissão para visualizar este prontuário.
+                            </p>
+                            <p className="text-sm text-muted-foreground mb-8">
+                                Este conteúdo é restrito ao psicólogo responsável ou ao administrador do sistema.
+                            </p>
+                            <Button
+                                variant="outline"
+                                className="gap-2"
+                                onClick={() => setLocation("/patients")}
+                                id="btn-voltar-pacientes"
+                            >
+                                <ArrowLeft className="h-4 w-4" />
+                                Voltar para Pacientes
+                            </Button>
+                        </div>
+                    </div>
+                </div>
             </div>
         );
     }
 
-    if (!patient) return <div>Paciente não encontrado</div>;
+    if (!patient) return <div className="p-8 text-neutral-500">Paciente não encontrado</div>;
 
     return (
         <div className="flex h-screen bg-neutral-lightest">
             <Sidebar />
-            <div className="flex-1 overflow-x-hidden ml-0 md:ml-64 pt-16 md:pt-0">
+            <div ref={contentRef} className="flex-1 overflow-y-auto overflow-x-hidden ml-0 md:ml-64 pt-16 md:pt-0">
                 <MobileNav />
-                <main className="p-4 md:p-6">
-                    <div className="mb-6">
-                        <Button variant="ghost" onClick={() => setLocation("/patients")} className="mb-4 pl-0 hover:pl-2 transition-all">
-                            <ArrowLeft className="mr-2 h-4 w-4" /> Voltar para Pacientes
-                        </Button>
+                <main className="p-4 md:p-6 max-w-5xl mx-auto">
+                    {/* Enhanced Header */}
+                    <RecordHeader
+                        patient={patient}
+                        onNewEvolution={handleNewEvolution}
+                        onNewDocument={handleNewDocument}
+                        onNewAssessment={handleNewAssessment}
+                    />
 
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <h1 className="text-2xl font-bold text-neutral-darkest">{patient.fullName}</h1>
-                                <p className="text-neutral-dark">Prontuário Eletrônico</p>
-                            </div>
-                            <div className="flex space-x-2">
-                                <span className={`px-3 py-1 rounded-full text-sm font-medium ${patient.status === 'active'
-                                    ? 'bg-success bg-opacity-10 text-success'
-                                    : 'bg-neutral-dark bg-opacity-10 text-neutral-dark'
-                                    }`}>
-                                    {patient.status === 'active' ? 'Ativo' : 'Inativo'}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <Tabs defaultValue="details" className="w-full space-y-6">
-                        <TabsList className="w-full justify-start overflow-x-auto h-auto p-1 bg-white border border-neutral-light rounded-lg">
-                            <TabsTrigger value="details" className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
-                                <User className="mr-2 h-4 w-4" /> Dados Pessoais
-                            </TabsTrigger>
-                            <TabsTrigger value="anamnesis" className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
-                                <Activity className="mr-2 h-4 w-4" /> Anamnese
-                            </TabsTrigger>
-                            <TabsTrigger value="sessions" className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
-                                <FileText className="mr-2 h-4 w-4" /> Evoluções
-                            </TabsTrigger>
-                            <TabsTrigger value="documents" className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
-                                <FolderOpen className="mr-2 h-4 w-4" /> Documentos
-                            </TabsTrigger>
-                            <TabsTrigger value="assessments" className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
-                                <ClipboardList className="mr-2 h-4 w-4" /> Avaliações
-                            </TabsTrigger>
+                    {/* Enhanced Tabs */}
+                    <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as TabValue)} className="w-full">
+                        {/* Tab Navigation */}
+                        <TabsList className="w-full justify-start flex-nowrap overflow-x-auto h-auto p-1 bg-white border border-neutral-100 rounded-xl shadow-sm mb-6 gap-0.5">
+                            {TABS.map(({ value, label, icon: Icon, countKey }) => {
+                                const count = countKey && counts ? counts[countKey as keyof TabCounts] : null;
+                                return (
+                                    <TabsTrigger
+                                        key={value}
+                                        value={value}
+                                        id={`tab-${value}`}
+                                        className={[
+                                            "relative flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
+                                            "text-muted-foreground hover:text-primary hover:bg-primary/5",
+                                            "data-[state=active]:text-primary data-[state=active]:bg-primary/10",
+                                            "data-[state=active]:shadow-sm",
+                                            "after:absolute after:bottom-0 after:left-2 after:right-2 after:h-0.5 after:rounded-full",
+                                            "after:bg-primary after:scale-x-0 data-[state=active]:after:scale-x-100",
+                                            "after:transition-transform after:duration-300",
+                                        ].join(" ")}
+                                    >
+                                        <Icon className="h-4 w-4 flex-shrink-0" />
+                                        <span className="whitespace-nowrap">{label}</span>
+                                        {count !== null && count > 0 && (
+                                            <span className="ml-0.5 bg-primary/15 text-primary text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                                                {count}
+                                            </span>
+                                        )}
+                                    </TabsTrigger>
+                                );
+                            })}
                         </TabsList>
 
-                        <TabsContent value="details">
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle>Dados do Paciente</CardTitle>
-                                </CardHeader>
-                                <CardContent className="space-y-4">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <div>
-                                            <p className="text-sm font-medium text-neutral-dark">CPF</p>
-                                            <p>{patient.cpf || '-'}</p>
-                                        </div>
-                                        <div>
-                                            <p className="text-sm font-medium text-neutral-dark">Data de Nascimento</p>
-                                            <p>{patient.birthDate ? new Date(patient.birthDate).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : '-'}</p>
-                                        </div>
-                                        <div>
-                                            <p className="text-sm font-medium text-neutral-dark">Telefone</p>
-                                            <p>{patient.phone}</p>
-                                        </div>
-                                        <div>
-                                            <p className="text-sm font-medium text-neutral-dark">Email</p>
-                                            <p>{patient.email || '-'}</p>
-                                        </div>
-                                        <div className="col-span-2">
-                                            <p className="text-sm font-medium text-neutral-dark">Endereço</p>
-                                            <p>{patient.address || '-'}</p>
-                                        </div>
-                                        <div>
-                                            <p className="text-sm font-medium text-neutral-dark">Profissão</p>
-                                            <p>{patient.profession || '-'}</p>
-                                        </div>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        </TabsContent>
+                        {/* Tab Contents with fade animation */}
+                        <div className="animate-in fade-in-0 duration-200">
+                            <TabsContent value="details" className="mt-0">
+                                <PersonalDataTab patient={patient} onEdit={() => { }} />
+                            </TabsContent>
 
-                        <TabsContent value="anamnesis">
-                            <div className="text-center py-8 text-neutral-dark">Módulo de Anamnese em desenvolvimento</div>
-                        </TabsContent>
+                            <TabsContent value="anamnesis" className="mt-0">
+                                <AnamnesisTab patientId={id} />
+                            </TabsContent>
 
-                        <TabsContent value="sessions">
-                            <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-lg font-semibold text-neutral-darkest">Evoluções e Sessões</h3>
-                                <Button className="bg-primary hover:bg-primary-dark text-white">
-                                    <Plus className="mr-2 h-4 w-4" /> Nova Evolução
-                                </Button>
-                            </div>
-                            <SessionsList patientId={id} />
-                        </TabsContent>
+                            <TabsContent value="sessions" className="mt-0">
+                                <EvolutionsTab
+                                    patientId={id}
+                                    onNewEvolution={() => {
+                                        /* open new evolution dialog — to implement */
+                                    }}
+                                />
+                            </TabsContent>
 
-                        <TabsContent value="documents">
-                            <div className="text-center py-8 text-neutral-dark">Módulo de Documentos em desenvolvimento</div>
-                        </TabsContent>
+                            <TabsContent value="documents" className="mt-0">
+                                <DocumentsTab patientId={id} />
+                            </TabsContent>
 
-                        <TabsContent value="assessments">
-                            <div className="text-center py-8 text-neutral-dark">Módulo de Avaliações em desenvolvimento</div>
-                        </TabsContent>
+                            <TabsContent value="assessments" className="mt-0">
+                                <AssessmentsTab
+                                    patientId={id}
+                                    onNewAssessment={() => { }}
+                                />
+                            </TabsContent>
+                        </div>
                     </Tabs>
                 </main>
             </div>
