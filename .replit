@@ -45,4 +45,4 @@ integrations = ["styling_shadcn:1.0.0", "javascript_database:1.0.0"]
 expertMode = true
 
 [userenv.shared]
-GEMINI_API_KEY = "AIzaSyBFvlj2qPQpEkLVoq0x8bMuRQZZQxzGwa4"
+GEMINI_API_KEY = "AIzaSyASv4xwGQ5hKU3V1XDPXYfPFX99gBlFmpc"
