@@ -5,7 +5,7 @@ import { z } from 'zod';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { summarizeDocument, UnsupportedFormatError, AIServiceError } from '../services/ai';
+import { summarizeDocument, UnsupportedFormatError, AIServiceError, AIQuotaError } from '../services/ai';
 
 const router = Router();
 
@@ -546,8 +546,11 @@ router.post('/documents/:docId/summarize', async (req, res) => {
         if (error instanceof UnsupportedFormatError) {
             return res.status(400).json({ message: "Não foi possível processar este documento. Formato não suportado." });
         }
+        if (error instanceof AIQuotaError) {
+            return res.status(429).json({ message: (error as AIQuotaError).message });
+        }
         if (error instanceof AIServiceError) {
-            return res.status(502).json({ message: "Erro ao conectar com a IA. Tente novamente." });
+            return res.status(502).json({ message: (error as AIServiceError).message });
         }
         console.error("AI summarize error:", error);
         res.status(500).json({ message: "Erro ao processar documento." });

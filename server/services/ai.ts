@@ -63,6 +63,19 @@ export async function summarizeDocument(
   } catch (error) {
     if (error instanceof UnsupportedFormatError) throw error;
     console.error("Gemini API error:", error);
+
+    const err = error as any;
+    if (err?.status === 429) {
+      throw new AIQuotaError(
+        "Cota da API da IA esgotada. Verifique o plano e o billing da sua conta no Google AI Studio."
+      );
+    }
+    if (err?.status === 404) {
+      throw new AIServiceError(
+        "Modelo de IA não disponível para esta chave de API. Verifique as configurações no Google AI Studio."
+      );
+    }
+
     throw new AIServiceError("Erro ao conectar com a IA. Tente novamente.");
   }
 }
@@ -78,5 +91,12 @@ export class AIServiceError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "AIServiceError";
+  }
+}
+
+export class AIQuotaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AIQuotaError";
   }
 }
