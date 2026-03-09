@@ -70,11 +70,14 @@ export function setupAuth(app: Express) {
   );
 
   // Google Strategy
-  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_CALLBACK_URL) {
+  const googleCallbackUrl = process.env.GOOGLE_CALLBACK_URL ||
+    (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}/auth/google/callback` : null);
+
+  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && googleCallbackUrl) {
     passport.use(new GoogleStrategy({
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: process.env.GOOGLE_CALLBACK_URL,
+      callbackURL: googleCallbackUrl,
     },
       async (accessToken, refreshToken, profile, done) => {
         try {
@@ -142,19 +145,11 @@ export function setupAuth(app: Express) {
 
     // Google Auth Routes
     app.get('/auth/google', (req, res, next) => {
-      if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_CALLBACK_URL) {
-        return res.status(500).json({
-          message: "Google OAuth not configured. Please add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_CALLBACK_URL to your .env file."
-        });
-      }
       passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next);
     });
 
     app.get('/auth/google/callback',
       (req, res, next) => {
-        if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_CALLBACK_URL) {
-          return res.redirect('/auth?error=configuration_missing');
-        }
         passport.authenticate('google', { failureRedirect: '/auth' })(req, res, next);
       },
       (req, res) => {

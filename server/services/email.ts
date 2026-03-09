@@ -3,7 +3,10 @@ import { Resend } from 'resend';
 import { User } from '@shared/schema';
 
 // Initialize Resend with API key
-const resend = new Resend(process.env.RESEND_API_KEY || 're_VnJA3rZ2_KNRjjpskEEc3JvwMoM5jc8X7');
+if (!process.env.RESEND_API_KEY) {
+  console.warn('RESEND_API_KEY not set. Password recovery emails will not be sent.');
+}
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Get the public URL for the application
 const getAppUrl = () => {
@@ -37,8 +40,6 @@ export const sendPasswordResetEmail = async (user: User, resetToken: string) => 
       throw new Error('Email do usuário inválido');
     }
 
-    const apiKey = process.env.RESEND_API_KEY || 're_VnJA3rZ2_KNRjjpskEEc3JvwMoM5jc8X7';
-    console.log('🔑 Usando API Key:', apiKey.substring(0, 8) + '...');
     console.log('📧 Enviando email para:', user.email);
 
     const { data, error } = await resend.emails.send({

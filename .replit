@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "web", "nix"]
+modules = ["nodejs-20", "web", "nix", "postgresql-16"]
 run = "npm run dev"
 hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
 
@@ -42,3 +42,5 @@ waitForPort = 5000
 [agent]
 integrations = ["styling_shadcn:1.0.0", "javascript_database:1.0.0"]
 expertMode = true
+
+[userenv.shared]
