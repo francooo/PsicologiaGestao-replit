@@ -27,10 +27,11 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Upload, Download, Trash2, FileText, FileImage, File, FolderOpen, Loader2, Paperclip } from "lucide-react";
+import { Upload, Download, Trash2, FileText, FileImage, File, FolderOpen, Loader2, Paperclip, Sparkles } from "lucide-react";
 import { type PatientDocument } from "@shared/schema";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import AISummaryModal from "./AISummaryModal";
 
 interface DocumentsTabProps {
     patientId: number;
@@ -92,6 +93,36 @@ export default function DocumentsTab({ patientId }: DocumentsTabProps) {
     const [typeFilter, setTypeFilter] = useState("all");
     const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
     const [isUploading, setIsUploading] = useState(false);
+
+    const [aiLoadingId, setAiLoadingId] = useState<number | null>(null);
+    const [aiModalOpen, setAiModalOpen] = useState(false);
+    const [aiDocName, setAiDocName] = useState("");
+    const [aiSummary, setAiSummary] = useState("");
+    const [aiError, setAiError] = useState<string | null>(null);
+
+    async function handleAISummarize(doc: PatientDocument) {
+        setAiLoadingId(doc.id);
+        setAiDocName(doc.documentName);
+        setAiSummary("");
+        setAiError(null);
+        setAiModalOpen(true);
+        try {
+            const res = await fetch(`/api/patients/documents/${doc.id}/summarize`, {
+                method: "POST",
+                credentials: "include",
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                setAiError(data.message || "Erro ao processar documento.");
+            } else {
+                setAiSummary(data.summary);
+            }
+        } catch {
+            setAiError("Erro ao conectar com a IA. Tente novamente.");
+        } finally {
+            setAiLoadingId(null);
+        }
+    }
 
     const { data: documents, isLoading } = useQuery<PatientDocument[]>({
         queryKey: [`/api/patients/${patientId}/documents`],
@@ -258,6 +289,19 @@ export default function DocumentsTab({ patientId }: DocumentsTabProps) {
                                 </div>
                             </div>
                             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                    className="p-1.5 rounded-lg hover:bg-purple-100 text-purple-500 hover:text-purple-700 transition-colors disabled:opacity-50"
+                                    title="Resumir com IA"
+                                    onClick={() => handleAISummarize(doc)}
+                                    disabled={aiLoadingId === doc.id}
+                                    data-testid={`button-ai-summarize-${doc.id}`}
+                                >
+                                    {aiLoadingId === doc.id ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                        <Sparkles className="h-3.5 w-3.5" />
+                                    )}
+                                </button>
                                 <a
                                     href={`/api/patients/documents/${doc.id}/download`}
                                     className="p-1.5 rounded-lg hover:bg-primary/10 text-primary transition-colors"
@@ -417,6 +461,16 @@ export default function DocumentsTab({ patientId }: DocumentsTabProps) {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* ─── AI Summary Modal ──────────────────────────────────── */}
+            <AISummaryModal
+                open={aiModalOpen}
+                onClose={() => setAiModalOpen(false)}
+                documentName={aiDocName}
+                summary={aiSummary}
+                isLoading={aiLoadingId !== null}
+                error={aiError}
+            />
 
             {/* ─── Delete Confirmation ───────────────────────────────── */}
             <AlertDialog open={deleteTarget !== null} onOpenChange={() => setDeleteTarget(null)}>

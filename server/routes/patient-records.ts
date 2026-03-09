@@ -5,6 +5,7 @@ import { z } from 'zod';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { summarizeDocument, UnsupportedFormatError, AIServiceError } from '../services/ai';
 
 const router = Router();
 
@@ -520,6 +521,36 @@ router.get('/documents/:docId/download', async (req, res) => {
     } catch (error) {
         console.error("Download error:", error);
         res.status(500).json({ message: "Erro ao baixar documento" });
+    }
+});
+
+router.post('/documents/:docId/summarize', async (req, res) => {
+    try {
+        const docId = parseInt(req.params.docId);
+        const doc = await storage.getDocument(docId);
+
+        if (!doc) return res.status(404).json({ message: "Documento não encontrado" });
+
+        const filePath = path.join(process.cwd(), "uploads", "documents", path.basename(doc.filePath));
+
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ message: "Arquivo físico não encontrado" });
+        }
+
+        const fileBuffer = fs.readFileSync(filePath);
+        const summary = await summarizeDocument(fileBuffer, doc.mimeType, doc.documentName);
+
+        res.json({ summary });
+
+    } catch (error) {
+        if (error instanceof UnsupportedFormatError) {
+            return res.status(400).json({ message: "Não foi possível processar este documento. Formato não suportado." });
+        }
+        if (error instanceof AIServiceError) {
+            return res.status(502).json({ message: "Erro ao conectar com a IA. Tente novamente." });
+        }
+        console.error("AI summarize error:", error);
+        res.status(500).json({ message: "Erro ao processar documento." });
     }
 });
 
