@@ -14,6 +14,9 @@ uploads/*
 .env
 .env.local
 
+# Replit config (contains secrets)
+.replit
+
 # Logs
 *.log
 *.txt
