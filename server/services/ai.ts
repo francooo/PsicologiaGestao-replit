@@ -1,11 +1,13 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const pdfParse = require("pdf-parse");
 
-if (!process.env.GEMINI_API_KEY) {
-  console.warn("GEMINI_API_KEY not set. AI summarization will not work.");
+if (!process.env.GROQ_API_KEY) {
+  console.warn("GROQ_API_KEY not set. AI summarization will not work.");
 }
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const CLINICAL_PROMPT = `Você é um assistente clínico especializado em psicologia. 
 Analise o documento a seguir e forneça:
@@ -23,6 +25,19 @@ export function isSupportedMimeType(mimeType: string): boolean {
   return SUPPORTED_MIME_TYPES.some((supported) => mimeType.startsWith(supported));
 }
 
+async function extractTextFromBuffer(fileBuffer: Buffer, mimeType: string): Promise<string> {
+  if (mimeType === "application/pdf") {
+    const data = await pdfParse(fileBuffer);
+    if (!data.text || data.text.trim().length === 0) {
+      throw new UnsupportedFormatError(
+        "Não foi possível extrair texto deste PDF. O arquivo pode ser uma imagem ou estar protegido."
+      );
+    }
+    return data.text;
+  }
+  return fileBuffer.toString("utf-8");
+}
+
 export async function summarizeDocument(
   fileBuffer: Buffer,
   mimeType: string,
@@ -34,48 +49,54 @@ export async function summarizeDocument(
     );
   }
 
+  let textContent: string;
   try {
-    let result;
+    textContent = await extractTextFromBuffer(fileBuffer, mimeType);
+  } catch (error) {
+    if (error instanceof UnsupportedFormatError) throw error;
+    throw new UnsupportedFormatError("Não foi possível processar este documento.");
+  }
 
-    if (mimeType === "application/pdf") {
-      const base64Data = fileBuffer.toString("base64");
-      result = await model.generateContent([
+  const maxChars = 12000;
+  if (textContent.length > maxChars) {
+    textContent = textContent.slice(0, maxChars) + "\n\n[...documento truncado para análise...]";
+  }
+
+  try {
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
         {
-          inlineData: {
-            data: base64Data,
-            mimeType: "application/pdf",
-          },
+          role: "system",
+          content: CLINICAL_PROMPT,
         },
-        CLINICAL_PROMPT,
-      ]);
-    } else {
-      const textContent = fileBuffer.toString("utf-8");
-      result = await model.generateContent([
-        `${CLINICAL_PROMPT}\n\n---\n\nDocumento: ${fileName}\n\n${textContent}`,
-      ]);
-    }
+        {
+          role: "user",
+          content: `Documento: ${fileName}\n\n${textContent}`,
+        },
+      ],
+      temperature: 0.4,
+      max_tokens: 1500,
+    });
 
-    const text = result.response.text();
+    const text = completion.choices[0]?.message?.content;
     if (!text) {
       throw new Error("A IA retornou uma resposta vazia.");
     }
     return text;
   } catch (error) {
     if (error instanceof UnsupportedFormatError) throw error;
-    console.error("Gemini API error:", error);
 
     const err = error as any;
-    if (err?.status === 429) {
+    const status = err?.status || err?.statusCode || err?.error?.status;
+
+    if (status === 429) {
       throw new AIQuotaError(
-        "Cota da API da IA esgotada. Verifique o plano e o billing da sua conta no Google AI Studio."
-      );
-    }
-    if (err?.status === 404) {
-      throw new AIServiceError(
-        "Modelo de IA não disponível para esta chave de API. Verifique as configurações no Google AI Studio."
+        "Limite de requisições atingido. Aguarde alguns instantes e tente novamente."
       );
     }
 
+    console.error("Groq API error:", error);
     throw new AIServiceError("Erro ao conectar com a IA. Tente novamente.");
   }
 }
