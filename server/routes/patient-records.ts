@@ -544,7 +544,7 @@ router.post('/documents/:docId/summarize', async (req, res) => {
 
     } catch (error) {
         if (error instanceof UnsupportedFormatError) {
-            return res.status(400).json({ message: "Não foi possível processar este documento. Formato não suportado." });
+            return res.status(400).json({ message: (error as UnsupportedFormatError).message });
         }
         if (error instanceof AIQuotaError) {
             return res.status(429).json({ message: (error as AIQuotaError).message });
