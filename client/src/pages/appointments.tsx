@@ -38,15 +38,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Plus, Share, ExternalLink } from "lucide-react";
+import { Loader2, Plus, Share, ExternalLink, ChevronLeft, ChevronRight } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { type Patient } from "@shared/schema";
 
 // Extend appointment schema for form validation
 const appointmentFormSchema = insertAppointmentSchema.extend({
   date: z.string().min(1, "Data é obrigatória"),
   startTime: z.string().min(1, "Horário de início é obrigatório"),
   endTime: z.string().min(1, "Horário de término é obrigatório"),
+  // Campo apenas de front-end para facilitar o preenchimento de horário de término
+  duration: z.enum(["50", "60", "90"]).optional(),
 });
 
 type AppointmentFormValues = z.infer<typeof appointmentFormSchema>;
@@ -68,7 +79,8 @@ export default function Appointments() {
   const [isNewAppointmentDialogOpen, setIsNewAppointmentDialogOpen] = useState(false);
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<number | null>(null);
-  const [viewMode, setViewMode] = useState<'month' | 'day'>('month');
+  const [viewMode, setViewMode] = useState<"month" | "week" | "day">("month");
+  const [isPatientSearchOpen, setIsPatientSearchOpen] = useState(false);
 
   // Format date for API requests
   const formatDateForRequest = (date: Date) => {
@@ -88,8 +100,21 @@ export default function Appointments() {
     };
   };
 
-  // Get date range for queries
+  // Get date range for queries (mês usado na visão de calendário)
   const dateRange = getMonthDateRange(selectedDate);
+
+  // Get current week range for week view
+  const getWeekDateRange = (date: Date) => {
+    const dayOfWeek = date.getDay(); // 0 (Dom) - 6 (Sáb)
+    const start = new Date(date);
+    start.setDate(date.getDate() - dayOfWeek);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+
+    return { start, end };
+  };
+
+  const weekRange = getWeekDateRange(selectedDate);
 
   // Fetch appointments
   const { data: appointments, isLoading } = useQuery({
@@ -121,6 +146,11 @@ export default function Appointments() {
     }
   });
 
+  // Fetch patients (para auto-complete de paciente no agendamento)
+  const { data: patients } = useQuery<Patient[]>({
+    queryKey: ["/api/patients"],
+  });
+
   // Format appointments for calendar
   const formattedAppointments = appointments?.map(appointment => ({
     id: appointment.id,
@@ -136,6 +166,32 @@ export default function Appointments() {
     status: appointment.status,
   })) || [];
 
+  // Agrupar agendamentos por data para a visão semanal
+  const weeklyAppointmentsByDate = formattedAppointments.reduce<Record<string, typeof formattedAppointments>>(
+    (acc, appointment) => {
+      const dateKey = appointment.date;
+      if (!acc[dateKey]) acc[dateKey] = [];
+      acc[dateKey].push(appointment);
+      return acc;
+    },
+    {}
+  );
+
+  const formatDateForDisplay = (date: Date, pattern: string) => {
+    return format(date, pattern, { locale: ptBR });
+  };
+
+  const calculateEndTime = (startTime: string, durationMinutes: string) => {
+    const [hours, minutes] = startTime.split(":");
+    const duration = parseInt(durationMinutes, 10);
+    const startDate = new Date();
+    startDate.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
+    const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
+    const endHours = endDate.getHours().toString().padStart(2, "0");
+    const endMinutes = endDate.getMinutes().toString().padStart(2, "0");
+    return `${endHours}:${endMinutes}`;
+  };
+
   // Create appointment form
   const appointmentForm = useForm<AppointmentFormValues>({
     resolver: zodResolver(appointmentFormSchema),
@@ -148,6 +204,7 @@ export default function Appointments() {
       endTime: "10:00",
       status: "scheduled",
       notes: "",
+      duration: "50",
     }
   });
 
@@ -222,7 +279,8 @@ export default function Appointments() {
 
   // Handle appointment form submission
   const onAppointmentSubmit = (data: AppointmentFormValues) => {
-    createAppointmentMutation.mutate(data);
+    const { duration, ...payload } = data;
+    createAppointmentMutation.mutate(payload as AppointmentFormValues);
   };
 
   // Handle WhatsApp share form submission
@@ -242,8 +300,65 @@ export default function Appointments() {
     // Logic to show appointment details would go here
   };
 
+  const handleQuickAddAppointmentForDate = (date: Date) => {
+    const currentDuration = appointmentForm.getValues("duration") || "50";
+    const defaultStartTime = "09:00";
+    appointmentForm.setValue("date", formatDateForRequest(date));
+    appointmentForm.setValue("startTime", defaultStartTime);
+    appointmentForm.setValue("endTime", calculateEndTime(defaultStartTime, currentDuration));
+    setSelectedDate(date);
+    setViewMode("day");
+    setIsNewAppointmentDialogOpen(true);
+  };
+
+  const goToToday = () => {
+    const today = new Date();
+    setSelectedDate(today);
+  };
+
+  const goToPreviousPeriod = () => {
+    const newDate = new Date(selectedDate);
+    if (viewMode === "day") {
+      newDate.setDate(newDate.getDate() - 1);
+    } else if (viewMode === "week") {
+      newDate.setDate(newDate.getDate() - 7);
+    } else {
+      newDate.setMonth(newDate.getMonth() - 1);
+    }
+    setSelectedDate(newDate);
+  };
+
+  const goToNextPeriod = () => {
+    const newDate = new Date(selectedDate);
+    if (viewMode === "day") {
+      newDate.setDate(newDate.getDate() + 1);
+    } else if (viewMode === "week") {
+      newDate.setDate(newDate.getDate() + 7);
+    } else {
+      newDate.setMonth(newDate.getMonth() + 1);
+    }
+    setSelectedDate(newDate);
+  };
+
+  const currentPeriodLabel = (() => {
+    if (viewMode === "day") {
+      return formatDateForDisplay(selectedDate, "d 'de' MMMM yyyy");
+    }
+    if (viewMode === "week") {
+      const startLabel = formatDateForDisplay(weekRange.start, "d 'de' MMMM");
+      const endLabel = formatDateForDisplay(weekRange.end, "d 'de' MMMM yyyy");
+      return `Semana de ${startLabel} a ${endLabel}`;
+    }
+    return formatDateForDisplay(selectedDate, "MMMM yyyy");
+  })();
+
   // Loading state
   const isPageLoading = isLoading || isLoadingPsychologists || isLoadingRooms;
+
+  // Eventos filtrados para o dia selecionado (usados na visualização diária)
+  const dailyEventsForSelectedDate = formattedAppointments.filter(
+    (appointment) => appointment.date === formatDateForRequest(selectedDate)
+  );
 
   return (
     <div className="flex h-screen bg-neutral-lightest">
@@ -256,8 +371,8 @@ export default function Appointments() {
           {/* Agendamentos Header */}
           <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
             <div>
-              <h1 className="text-2xl font-bold text-neutral-darkest">Agendamentos</h1>
-              <p className="text-neutral-dark">Gerenciamento de consultas</p>
+              <h1 className="heading-page">Agendamentos</h1>
+              <p className="text-muted">Gerenciamento de consultas</p>
             </div>
             <div className="flex mt-4 md:mt-0 space-x-2">
               <Dialog open={isShareDialogOpen} onOpenChange={setIsShareDialogOpen}>
@@ -383,183 +498,360 @@ export default function Appointments() {
                     Novo Agendamento
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Novo Agendamento</DialogTitle>
-                    <DialogDescription>
-                      Preencha os detalhes para criar um novo agendamento.
-                    </DialogDescription>
+                <DialogContent className="max-w-2xl max-h-[90vh] p-0 overflow-hidden">
+                  <DialogHeader className="flex flex-row items-center justify-between px-6 py-4 border-b border-neutral-light">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                        <Plus className="h-5 w-5" />
+                      </div>
+                      <div className="text-left">
+                        <DialogTitle className="text-lg font-semibold tracking-tight">
+                          Novo Agendamento
+                        </DialogTitle>
+                        <DialogDescription className="text-sm text-neutral-dark">
+                          Agende uma sessão para um paciente.
+                        </DialogDescription>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsNewAppointmentDialogOpen(false)}
+                      className="w-9 h-9 flex items-center justify-center rounded-full text-neutral-dark hover:bg-neutral-lightest transition-colors"
+                    >
+                      <span className="sr-only">Fechar</span>
+                      ✕
+                    </button>
                   </DialogHeader>
-                  
+
                   <Form {...appointmentForm}>
-                    <form onSubmit={appointmentForm.handleSubmit(onAppointmentSubmit)} className="space-y-4 mt-4">
-                      <FormField
-                        control={appointmentForm.control}
-                        name="patientName"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Nome do Paciente</FormLabel>
-                            <FormControl>
-                              <Input placeholder="Digite o nome do paciente" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      
-                      <FormField
-                        control={appointmentForm.control}
-                        name="psychologistId"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Psicóloga</FormLabel>
-                            <Select 
-                              onValueChange={(value) => field.onChange(parseInt(value))} 
-                              defaultValue={field.value.toString()}
-                            >
-                              <FormControl>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Selecione uma psicóloga" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                {psychologists?.map((psychologist) => (
-                                  <SelectItem 
-                                    key={psychologist.id} 
-                                    value={psychologist.id.toString()}
+                    <form
+                      onSubmit={appointmentForm.handleSubmit(onAppointmentSubmit)}
+                      className="flex flex-col max-h-[calc(90vh-4rem)]"
+                    >
+                      {/* Corpo rolável do formulário */}
+                      <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+                        {/* Paciente + Psicóloga */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                          <FormField
+                            control={appointmentForm.control}
+                            name="patientName"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Paciente</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    placeholder="Buscar ou digitar paciente..."
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                                {/* Busca/auto-complete de paciente */}
+                                <div className="mt-2">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setIsPatientSearchOpen(true)}
                                   >
-                                    {psychologist.user.fullName}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      
-                      <FormField
-                        control={appointmentForm.control}
-                        name="roomId"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Sala</FormLabel>
-                            <Select 
-                              onValueChange={(value) => field.onChange(parseInt(value))} 
-                              defaultValue={field.value.toString()}
-                            >
-                              <FormControl>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Selecione uma sala" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                {rooms?.map((room) => (
-                                  <SelectItem 
-                                    key={room.id} 
-                                    value={room.id.toString()}
+                                    Buscar paciente existente
+                                  </Button>
+                                  <Command
+                                    shouldFilter={true}
+                                    className={
+                                      isPatientSearchOpen
+                                        ? "mt-2 border rounded-md"
+                                        : "hidden"
+                                    }
                                   >
-                                    {room.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      
-                      <div className="grid grid-cols-3 gap-4">
+                                    <CommandInput placeholder="Buscar por nome, e-mail ou CPF..." />
+                                    <CommandList>
+                                      <CommandEmpty>
+                                        Nenhum paciente encontrado.
+                                      </CommandEmpty>
+                                      <CommandGroup heading="Pacientes">
+                                        {patients?.map((patient) => (
+                                          <CommandItem
+                                            key={patient.id}
+                                            value={patient.fullName}
+                                            onSelect={() => {
+                                              appointmentForm.setValue(
+                                                "patientName",
+                                                patient.fullName
+                                              );
+                                              setIsPatientSearchOpen(false);
+                                            }}
+                                          >
+                                            <div className="flex flex-col">
+                                              <span className="text-sm font-medium">
+                                                {patient.fullName}
+                                              </span>
+                                              {patient.email && (
+                                                <span className="text-xs text-neutral-dark">
+                                                  {patient.email}
+                                                </span>
+                                              )}
+                                            </div>
+                                          </CommandItem>
+                                        ))}
+                                      </CommandGroup>
+                                    </CommandList>
+                                  </Command>
+                                </div>
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={appointmentForm.control}
+                            name="psychologistId"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Psicóloga</FormLabel>
+                                <FormControl>
+                                  <Select
+                                    onValueChange={(value) =>
+                                      field.onChange(parseInt(value))
+                                    }
+                                    defaultValue={field.value.toString()}
+                                  >
+                                    <FormControl>
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Selecione uma psicóloga" />
+                                      </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent>
+                                      {psychologists?.map((psychologist) => (
+                                        <SelectItem
+                                          key={psychologist.id}
+                                          value={psychologist.id.toString()}
+                                        >
+                                          {psychologist.user.fullName}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        {/* Sala + Status */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                          <FormField
+                            control={appointmentForm.control}
+                            name="roomId"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Sala</FormLabel>
+                                <FormControl>
+                                  <Select
+                                    onValueChange={(value) =>
+                                      field.onChange(parseInt(value))
+                                    }
+                                    defaultValue={field.value.toString()}
+                                  >
+                                    <FormControl>
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Selecione uma sala" />
+                                      </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent>
+                                      {rooms?.map((room) => (
+                                        <SelectItem
+                                          key={room.id}
+                                          value={room.id.toString()}
+                                        >
+                                          {room.name}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={appointmentForm.control}
+                            name="status"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Status</FormLabel>
+                                <FormControl>
+                                  <Select
+                                    onValueChange={field.onChange}
+                                    defaultValue={field.value}
+                                  >
+                                    <FormControl>
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Selecione o status" />
+                                      </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent>
+                                      <SelectItem value="scheduled">
+                                        Agendado
+                                      </SelectItem>
+                                      <SelectItem value="confirmed">
+                                        Confirmado
+                                      </SelectItem>
+                                      <SelectItem value="canceled">
+                                        Cancelado
+                                      </SelectItem>
+                                      <SelectItem value="completed">
+                                        Concluído
+                                      </SelectItem>
+                                      <SelectItem value="first-session">
+                                        Primeira Sessão
+                                      </SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        {/* Data / Horário / Duração em cartão destacado */}
+                        <div className="rounded-xl border border-primary/15 bg-primary/5 p-4 space-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <FormField
+                              control={appointmentForm.control}
+                              name="date"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Data da consulta</FormLabel>
+                                  <FormControl>
+                                    <Input type="date" {...field} />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            <FormField
+                              control={appointmentForm.control}
+                              name="startTime"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Início</FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      type="time"
+                                      {...field}
+                                      onChange={(event) => {
+                                        field.onChange(event);
+                                        const duration =
+                                          appointmentForm.getValues(
+                                            "duration"
+                                          ) || "50";
+                                        appointmentForm.setValue(
+                                          "endTime",
+                                          calculateEndTime(
+                                            event.target.value,
+                                            duration
+                                          )
+                                        );
+                                      }}
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            <FormField
+                              control={appointmentForm.control}
+                              name="endTime"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Término</FormLabel>
+                                  <FormControl>
+                                    <Input type="time" {...field} />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          </div>
+
+                          <FormField
+                            control={appointmentForm.control}
+                            name="duration"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Duração da sessão</FormLabel>
+                                <FormControl>
+                                  <Select
+                                    onValueChange={(value) => {
+                                      field.onChange(value);
+                                      const start =
+                                        appointmentForm.getValues("startTime");
+                                      if (start) {
+                                        appointmentForm.setValue(
+                                          "endTime",
+                                          calculateEndTime(start, value)
+                                        );
+                                      }
+                                    }}
+                                    defaultValue={field.value}
+                                  >
+                                    <FormControl>
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Selecione a duração" />
+                                      </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent>
+                                      <SelectItem value="50">
+                                        50 minutos
+                                      </SelectItem>
+                                      <SelectItem value="60">
+                                        60 minutos
+                                      </SelectItem>
+                                      <SelectItem value="90">
+                                        90 minutos
+                                      </SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        {/* Observações */}
                         <FormField
                           control={appointmentForm.control}
-                          name="date"
+                          name="notes"
                           render={({ field }) => (
-                            <FormItem className="col-span-1">
-                              <FormLabel>Data</FormLabel>
+                            <FormItem>
+                              <FormLabel>Observações</FormLabel>
                               <FormControl>
-                                <Input type="date" {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        
-                        <FormField
-                          control={appointmentForm.control}
-                          name="startTime"
-                          render={({ field }) => (
-                            <FormItem className="col-span-1">
-                              <FormLabel>Início</FormLabel>
-                              <FormControl>
-                                <Input type="time" {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        
-                        <FormField
-                          control={appointmentForm.control}
-                          name="endTime"
-                          render={({ field }) => (
-                            <FormItem className="col-span-1">
-                              <FormLabel>Término</FormLabel>
-                              <FormControl>
-                                <Input type="time" {...field} />
+                                <Textarea
+                                  placeholder="Informações adicionais sobre o agendamento"
+                                  className="resize-none min-h-[80px]"
+                                  {...field}
+                                />
                               </FormControl>
                               <FormMessage />
                             </FormItem>
                           )}
                         />
                       </div>
-                      
-                      <FormField
-                        control={appointmentForm.control}
-                        name="status"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Status</FormLabel>
-                            <Select 
-                              onValueChange={field.onChange} 
-                              defaultValue={field.value}
-                            >
-                              <FormControl>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Selecione o status" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                <SelectItem value="scheduled">Agendado</SelectItem>
-                                <SelectItem value="confirmed">Confirmado</SelectItem>
-                                <SelectItem value="canceled">Cancelado</SelectItem>
-                                <SelectItem value="completed">Concluído</SelectItem>
-                                <SelectItem value="first-session">Primeira Sessão</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      
-                      <FormField
-                        control={appointmentForm.control}
-                        name="notes"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Observações</FormLabel>
-                            <FormControl>
-                              <Textarea 
-                                placeholder="Informações adicionais sobre o agendamento" 
-                                className="resize-none" 
-                                {...field} 
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      
-                      <DialogFooter>
+
+                      {/* Rodapé fixo do modal */}
+                      <DialogFooter className="px-6 py-4 border-t border-neutral-light bg-neutral-light/60 flex flex-row items-center justify-end gap-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setIsNewAppointmentDialogOpen(false)}
+                        >
+                          Cancelar
+                        </Button>
                         <Button type="submit" disabled={createAppointmentMutation.isPending}>
                           {createAppointmentMutation.isPending ? (
                             <>
@@ -578,28 +870,94 @@ export default function Appointments() {
             </div>
           </div>
           
-          {/* Controle de visualização */}
-          <div className="flex items-center mb-6">
-            <div className="flex overflow-x-auto">
-              <Button 
-                variant={viewMode === 'month' ? 'default' : 'outline'} 
-                size="sm"
-                className="mr-2"
-                onClick={() => setViewMode('month')}
-              >
-                Mês
-              </Button>
-              <Button 
-                variant={viewMode === 'day' ? 'default' : 'outline'} 
-                size="sm"
-                className="mr-4"
-                onClick={() => {
-                  setViewMode('day');
-                  setSelectedDate(new Date()); // Reset para hoje
-                }}
-              >
-                Hoje
-              </Button>
+          {/* Toolbar do calendário: abas de visão + navegação de período + legenda */}
+          <div className="flex flex-col gap-4 mb-6 lg:flex-row lg:items-center lg:justify-between">
+            {/* Abas de visão */}
+            <div className="flex items-center gap-4">
+              <div className="inline-flex rounded-lg bg-neutral-light p-1">
+                <Button
+                  variant={viewMode === "month" ? "default" : "ghost"}
+                  size="sm"
+                  className="px-4"
+                  onClick={() => setViewMode("month")}
+                >
+                  Mês
+                </Button>
+                <Button
+                  variant={viewMode === "week" ? "default" : "ghost"}
+                  size="sm"
+                  className="px-4"
+                  onClick={() => setViewMode("week")}
+                >
+                  Semana
+                </Button>
+                <Button
+                  variant={viewMode === "day" ? "default" : "ghost"}
+                  size="sm"
+                  className="px-4"
+                  onClick={() => setViewMode("day")}
+                >
+                  Dia
+                </Button>
+              </div>
+
+              {/* Navegação de período */}
+              <div className="flex items-center gap-2 ml-2">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={goToPreviousPeriod}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-sm font-semibold text-neutral-darkest min-w-[150px]">
+                  {currentPeriodLabel}
+                </span>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={goToNextPeriod}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-1"
+                  onClick={() => {
+                    goToToday();
+                    setViewMode("day");
+                  }}
+                >
+                  Hoje
+                </Button>
+              </div>
+            </div>
+
+            {/* Legenda por status */}
+            <div className="flex flex-wrap gap-4 text-xs text-neutral-dark">
+              <div className="flex items-center gap-2">
+                <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
+                <span>Agendado</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+                <span>Confirmado</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+                <span>Aguardando (WhatsApp)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-block h-2 w-2 rounded-full bg-purple-500" />
+                <span>Concluído</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-block h-2 w-2 rounded-full bg-neutral-500" />
+                <span>Cancelado</span>
+              </div>
             </div>
           </div>
 
@@ -613,21 +971,74 @@ export default function Appointments() {
               {viewMode === 'day' && (
                 <DailyHoursView 
                   date={selectedDate}
-                  events={formattedAppointments}
+                  events={dailyEventsForSelectedDate}
                   onAppointmentClick={handleAppointmentClick}
                   onTimeSlotClick={(timeSlot, date) => {
                     appointmentForm.setValue('date', formatDateForRequest(date));
                     appointmentForm.setValue('startTime', timeSlot);
                     
-                    // Calcular o horário de término (1 hora após)
-                    const [hours, minutes] = timeSlot.split(':');
-                    const endHour = parseInt(hours) + 1;
-                    const endTime = `${endHour.toString().padStart(2, '0')}:${minutes}`;
-                    appointmentForm.setValue('endTime', endTime);
+                    const duration = appointmentForm.getValues("duration") || "50";
+                    appointmentForm.setValue('endTime', calculateEndTime(timeSlot, duration));
                     
                     setIsNewAppointmentDialogOpen(true);
                   }}
                 />
+              )}
+              
+              {/* Visualização semanal */}
+              {viewMode === "week" && (
+                <div className="mb-6 rounded-lg bg-white p-4 shadow-sm">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-7">
+                    {Array.from({ length: 7 }).map((_, index) => {
+                      const current = new Date(weekRange.start);
+                      current.setDate(weekRange.start.getDate() + index);
+                      const dateKey = formatDateForRequest(current);
+                      const eventsForDay = weeklyAppointmentsByDate[dateKey] || [];
+
+                      return (
+                        <div
+                          key={index}
+                          className="flex flex-col rounded-md border border-neutral-light bg-neutral-lightest p-3"
+                        >
+                          <div className="mb-2 text-sm font-semibold text-neutral-darkest">
+                            {formatDateForDisplay(current, "EEE dd/MM")}
+                          </div>
+
+                          <div className="flex-1 space-y-1">
+                            {eventsForDay.map((event) => (
+                              <button
+                                key={event.id}
+                                type="button"
+                                className="w-full rounded-md border-l-4 bg-white px-2 py-1 text-left text-xs hover:bg-neutral-lightest"
+                                onClick={() => handleAppointmentClick(event.id)}
+                              >
+                                <div className="font-medium">
+                                  {event.startTime} - {event.endTime}
+                                </div>
+                                <div className="text-[11px] text-neutral-dark">
+                                  {event.patientName}
+                                </div>
+                                <div className="text-[11px] text-neutral-500">
+                                  {event.psychologistName} · {event.roomName}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="xs"
+                            className="mt-2 text-xs"
+                            onClick={() => handleQuickAddAppointmentForDate(current)}
+                          >
+                            + Agendar
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               )}
               
               {/* Visualização do mês (calendário) */}
@@ -642,24 +1053,8 @@ export default function Appointments() {
                       setViewMode('day'); // Muda para visualização diária ao clicar em um dia
                     }}
                     onEventClick={handleAppointmentClick}
+                    onAddAppointmentClick={handleQuickAddAppointmentForDate}
                   />
-                  
-                  {/* Legenda do Calendário */}
-                  <div className="flex flex-wrap gap-4 mb-6">
-                    {psychologists?.slice(0, 5).map((psychologist) => (
-                      <div key={psychologist.id} className="flex items-center">
-                        <div 
-                          className="w-4 h-4 rounded-full mr-2"
-                          style={{ 
-                            backgroundColor: 
-                              psychologist.id % 3 === 0 ? '#2D7AA9' : 
-                              psychologist.id % 3 === 1 ? '#5EB69D' : '#F8B400' 
-                          }}
-                        ></div>
-                        <span className="text-sm text-neutral-dark">{psychologist.user.fullName}</span>
-                      </div>
-                    ))}
-                  </div>
                 </>
               )}
             </>

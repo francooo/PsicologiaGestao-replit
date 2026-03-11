@@ -102,8 +102,8 @@ export default function Dashboard() {
           {/* Dashboard Header */}
           <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
             <div>
-              <h1 className="text-2xl font-bold text-neutral-darkest">Dashboard</h1>
-              <p className="text-neutral-dark">Visão geral do consultório</p>
+              <h1 className="heading-page">Dashboard</h1>
+              <p className="text-muted">Visão geral do consultório</p>
             </div>
             <div className="flex mt-4 md:mt-0">
               <div className="relative mr-2">

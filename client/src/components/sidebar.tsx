@@ -32,73 +32,85 @@ export default function Sidebar() {
       name: "Dashboard",
       icon: <LayoutDashboard className="w-5 h-5 mr-3 text-primary" />,
       href: "/dashboard",
-      allowedRoles: ["admin", "psychologist", "receptionist"]
+      allowedRoles: ["admin", "psychologist", "receptionist"],
+      section: "main" as const,
     },
     {
       name: "Agendamentos",
       icon: <CalendarDays className="w-5 h-5 mr-3 text-primary" />,
       href: "/appointments",
-      allowedRoles: ["admin", "psychologist", "receptionist"]
+      allowedRoles: ["admin", "psychologist", "receptionist"],
+      section: "main" as const,
     },
     {
       name: "Pacientes",
       icon: <Contact className="w-5 h-5 mr-3 text-primary" />,
       href: "/patients",
-      allowedRoles: ["admin", "psychologist", "receptionist"]
+      allowedRoles: ["admin", "psychologist", "receptionist"],
+      section: "main" as const,
     },
     {
       name: "Psicólogas",
       icon: <Users className="w-5 h-5 mr-3 text-primary" />,
       href: "/psychologists",
-      allowedRoles: ["admin", "receptionist"]
+      allowedRoles: ["admin", "receptionist"],
+      section: "main" as const,
     },
     {
       name: "Salas",
       icon: <DoorOpen className="w-5 h-5 mr-3 text-primary" />,
       href: "/rooms",
-      allowedRoles: ["admin", "psychologist", "receptionist"]
+      allowedRoles: ["admin", "psychologist", "receptionist"],
+      section: "main" as const,
     },
     {
       name: "Financeiro",
       icon: <BarChart3 className="w-5 h-5 mr-3 text-primary" />,
       href: "/financial",
-      allowedRoles: ["admin", "psychologist", "receptionist"]
+      allowedRoles: ["admin", "psychologist", "receptionist"],
+      section: "financial" as const,
     },
     {
       name: "Fluxo de Caixa",
       icon: <LineChart className="w-5 h-5 mr-3 text-primary" />,
       href: "/cash-flow",
-      allowedRoles: ["admin", "psychologist", "receptionist"]
+      allowedRoles: ["admin", "psychologist", "receptionist"],
+      section: "financial" as const,
     },
     {
       name: "Minhas Notas Fiscais",
       icon: <FileText className="w-5 h-5 mr-3 text-primary" />,
       href: "/invoices",
-      allowedRoles: ["admin", "psychologist", "receptionist"]
+      allowedRoles: ["admin", "psychologist", "receptionist"],
+      section: "financial" as const,
     },
     {
       name: "Gestão de Notas",
       icon: <ClipboardList className="w-5 h-5 mr-3 text-primary" />,
       href: "/admin/invoices",
-      allowedRoles: ["admin"]
+      allowedRoles: ["admin"],
+      section: "financial" as const,
     },
     {
       name: "Permissões",
       icon: <Lock className="w-5 h-5 mr-3 text-primary" />,
       href: "/permissions",
-      allowedRoles: ["admin"]
+      allowedRoles: ["admin"],
+      section: "system" as const,
     },
     {
       name: "Meu Perfil",
       icon: <UserCircle className="w-5 h-5 mr-3 text-primary" />,
       href: "/profile",
-      allowedRoles: ["admin", "psychologist", "receptionist"]
+      allowedRoles: ["admin", "psychologist", "receptionist"],
+      section: "system" as const,
     },
     {
       name: "Configurações",
       icon: <Settings className="w-5 h-5 mr-3 text-primary" />,
       href: "/settings",
-      allowedRoles: ["admin", "psychologist", "receptionist"]
+      allowedRoles: ["admin", "psychologist", "receptionist"],
+      section: "system" as const,
     }
   ];
 
@@ -107,46 +119,79 @@ export default function Sidebar() {
   };
 
   // Filter items based on user role
-  const filteredItems = navigationItems.filter(item =>
+  const filteredItems = navigationItems.filter((item) =>
     item.allowedRoles.includes(user?.role || "")
   );
 
+  const mainItems = filteredItems.filter((item) => item.section === "main");
+  const financialItems = filteredItems.filter(
+    (item) => item.section === "financial"
+  );
+  const systemItems = filteredItems.filter((item) => item.section === "system");
+
+  const getRoleLabel = (role?: string | null) => {
+    if (!role) return "Usuário";
+    switch (role) {
+      case "admin":
+        return "Admin";
+      case "psychologist":
+        return "Psicóloga";
+      case "receptionist":
+        return "Recepção";
+      default:
+        return role;
+    }
+  };
+
   return (
-    <aside className="sidebar bg-white shadow-md w-64 h-screen fixed left-0 top-0 overflow-y-auto z-20 hidden md:block">
-      <div className="p-4 border-b border-neutral-light">
-        <h1 className="text-primary font-bold text-2xl">ConsultaPsi</h1>
-        <p className="text-neutral-dark text-sm">Gestão de Consultório</p>
+    <aside className="hidden md:flex md:flex-col w-64 h-screen fixed left-0 top-0 bg-white border-r border-neutral-light z-20 overflow-y-auto">
+      {/* Brand */}
+      <div className="px-5 py-4 border-b border-neutral-light">
+        <h1 className="text-primary font-bold text-[17px] leading-tight tracking-[-0.02em]">
+          ConsultaPsi
+        </h1>
+        <p className="mt-0.5 text-xs text-neutral-dark">
+          Gestão de Consultório
+        </p>
       </div>
 
       {/* User Profile Section */}
-      <div className="p-4 border-b border-neutral-light">
-        <div className="flex items-center">
-          <Avatar className="w-12 h-12 mr-3 border-2 border-primary">
-            <AvatarImage src={user?.profileImage || undefined} alt={user?.fullName || "Usuário"} />
+      <div className="px-5 py-3.5 border-b border-neutral-light">
+        <div className="flex items-center gap-3">
+          <Avatar className="w-9 h-9 border border-primary/30 bg-primary text-white">
+            <AvatarImage
+              src={user?.profileImage || undefined}
+              alt={user?.fullName || "Usuário"}
+            />
             <AvatarFallback
-              showPsychologySymbol={user?.role === "psychologist"}
-              className={`text-lg font-semibold ${user?.role === "psychologist" ? "bg-primary/10" : ""}`}
+              showPsychologySymbol={false}
+              className="text-sm font-semibold bg-primary text-white"
             >
               {user?.fullName?.charAt(0) || "U"}
             </AvatarFallback>
           </Avatar>
           <div>
-            <h3 className="font-semibold text-neutral-darkest">{user?.fullName || "Usuário"}</h3>
-            <p className="text-xs text-neutral-dark capitalize">{user?.role || "Usuário"}</p>
+            <h3 className="text-[13px] font-semibold text-neutral-darkest leading-snug">
+              {user?.fullName || "Usuário"}
+            </h3>
+            <p className="text-[11px] text-neutral-dark">
+              {getRoleLabel(user?.role)}
+            </p>
           </div>
         </div>
       </div>
 
       {/* Navigation Menu */}
-      <nav className="py-4">
-        <ul>
-          {filteredItems.map((item) => (
+      <nav className="py-3 text-sm text-neutral-dark">
+        <ul className="px-2">
+          {mainItems.map((item) => (
             <li key={item.href}>
               <Link
                 href={item.href}
                 className={cn(
-                  "flex items-center py-3 px-4 text-neutral-darkest hover:bg-neutral-lightest",
-                  isActive(item.href) && "border-l-4 border-primary bg-primary/5"
+                  "flex items-center rounded-md px-3 py-2 mb-1 text-[13px] font-medium text-slate-600 hover:bg-neutral-lightest",
+                  isActive(item.href) &&
+                    "bg-primary/10 text-primary"
                 )}
               >
                 {item.icon}
@@ -154,18 +199,69 @@ export default function Sidebar() {
               </Link>
             </li>
           ))}
-
-          <li>
-            <button
-              onClick={handleLogout}
-              className="w-full flex items-center py-3 px-4 text-neutral-darkest hover:bg-neutral-lightest"
-            >
-              <LogOut className="w-5 h-5 mr-3 text-primary" />
-              <span>Sair</span>
-            </button>
-          </li>
         </ul>
+
+        {financialItems.length > 0 && (
+          <>
+            <p className="mt-3 mb-1 px-5 text-[10px] font-semibold tracking-[0.12em] text-neutral-dark uppercase">
+              Financeiro
+            </p>
+            <ul className="px-2">
+              {financialItems.map((item) => (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    className={cn(
+                      "flex items-center rounded-md px-3 py-2 mb-1 text-[13px] font-medium text-slate-600 hover:bg-neutral-lightest",
+                      isActive(item.href) &&
+                        "bg-primary/10 text-primary"
+                    )}
+                  >
+                    {item.icon}
+                    <span>{item.name}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {systemItems.length > 0 && (
+          <>
+            <p className="mt-3 mb-1 px-5 text-[10px] font-semibold tracking-[0.12em] text-neutral-dark uppercase">
+              Sistema
+            </p>
+            <ul className="px-2">
+              {systemItems.map((item) => (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    className={cn(
+                      "flex items-center rounded-md px-3 py-2 mb-1 text-[13px] font-medium text-slate-600 hover:bg-neutral-lightest",
+                      isActive(item.href) &&
+                        "bg-primary/10 text-primary"
+                    )}
+                  >
+                    {item.icon}
+                    <span>{item.name}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </nav>
+
+      {/* Logout footer */}
+      <div className="mt-auto border-t border-neutral-light px-3 py-3">
+        <button
+          onClick={handleLogout}
+          className="w-full flex items-center rounded-md px-3 py-2 text-[13px] font-medium text-slate-600 hover:bg-neutral-lightest"
+        >
+          <LogOut className="w-5 h-5 mr-3 text-primary" />
+          <span>Sair</span>
+        </button>
+      </div>
     </aside>
   );
 }

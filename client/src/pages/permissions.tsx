@@ -18,6 +18,7 @@ import {
   FormLabel, 
   FormMessage 
 } from "@/components/ui/form";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Dialog,
   DialogContent,
@@ -366,8 +367,8 @@ export default function Permissions() {
           {/* Permissions Header */}
           <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
             <div>
-              <h1 className="text-2xl font-bold text-neutral-darkest">Permissões de Acesso</h1>
-              <p className="text-neutral-dark">Gerenciamento de usuários e permissões</p>
+              <h1 className="heading-page">Permissões de Acesso</h1>
+              <p className="text-muted">Gerenciamento de usuários e permissões</p>
             </div>
             <div className="flex mt-4 md:mt-0">
               <Dialog open={isNewUserDialogOpen} onOpenChange={setIsNewUserDialogOpen}>
@@ -571,11 +572,15 @@ export default function Permissions() {
                           <tr key={u.id} className="border-b border-neutral-light hover:bg-neutral-lightest">
                             <td className="py-3 text-sm">
                               <div className="flex items-center">
-                                <img 
-                                  src={u.profileImage || "https://via.placeholder.com/32"} 
-                                  alt={u.fullName} 
-                                  className="w-8 h-8 rounded-full mr-3"
-                                />
+                                <Avatar className="w-8 h-8 mr-3 border border-primary/30 bg-primary text-white">
+                                  <AvatarImage
+                                    src={u.profileImage || undefined}
+                                    alt={u.fullName}
+                                  />
+                                  <AvatarFallback className="text-xs font-semibold bg-primary text-white">
+                                    {u.fullName?.charAt(0) || "U"}
+                                  </AvatarFallback>
+                                </Avatar>
                                 <span className="font-medium text-neutral-darkest">{u.fullName}</span>
                               </div>
                             </td>

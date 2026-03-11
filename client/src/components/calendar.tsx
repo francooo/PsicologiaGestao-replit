@@ -22,6 +22,7 @@ interface CalendarProps {
   onDateSelect?: (date: Date) => void;
   onEventClick?: (eventId: number) => void;
   colorMap?: Record<number, string>;
+  onAddAppointmentClick?: (date: Date) => void;
 }
 
 export default function Calendar({
@@ -30,7 +31,8 @@ export default function Calendar({
   year: initialYear,
   onDateSelect,
   onEventClick,
-  colorMap = {}
+  colorMap = {},
+  onAddAppointmentClick,
 }: CalendarProps) {
   const today = new Date();
   const [currentMonth, setCurrentMonth] = useState(initialMonth !== undefined ? initialMonth : today.getMonth());
@@ -146,12 +148,15 @@ export default function Calendar({
     return eventsByDate[dateKey] || [];
   };
 
-  // Get color class for a psychologist or based on status
+  // Get color class baseada no status / psicóloga
   const getColorClass = (psychologistId: number, status?: string) => {
-    // Prioridade para agendamentos via WhatsApp (pending-confirmation)
-    if (status === 'pending-confirmation') {
-      return 'calendar-event-pending';
-    }
+    // Mapeamento por status do agendamento
+    if (status === "confirmed") return "calendar-event-confirmed";
+    if (status === "completed") return "calendar-event-completed";
+    if (status === "canceled") return "calendar-event-canceled";
+    if (status === "first-session") return "calendar-event-first-session";
+    if (status === "scheduled") return "calendar-event-scheduled";
+    if (status === "pending-confirmation") return "calendar-event-pending";
     
     if (colorMap[psychologistId]) {
       return colorMap[psychologistId];
@@ -170,8 +175,8 @@ export default function Calendar({
   return (
     <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
       <div className="flex justify-between items-center mb-4">
-        <div className="flex space-x-2">
-          <button 
+        <div className="flex items-center space-x-2">
+          <button
             className="p-2 border border-neutral-light rounded-md text-neutral-dark hover:bg-neutral-lightest"
             onClick={previousMonth}
           >
@@ -180,34 +185,18 @@ export default function Calendar({
           <h3 className="text-lg font-semibold text-neutral-darkest py-2">
             {monthNames[currentMonth]} {currentYear}
           </h3>
-          <button 
+          <button
             className="p-2 border border-neutral-light rounded-md text-neutral-dark hover:bg-neutral-lightest"
             onClick={nextMonth}
           >
             <ChevronRight className="h-4 w-4" />
           </button>
-        </div>
-        <div className="flex space-x-2">
-          <button 
-            className="px-3 py-1 border border-neutral-light rounded-md text-sm text-neutral-dark hover:bg-neutral-lightest"
+          <button
+            className="ml-2 px-3 py-1 border border-neutral-light rounded-md text-sm text-neutral-dark hover:bg-neutral-lightest"
             onClick={goToToday}
           >
             Hoje
           </button>
-          <button className="px-3 py-1 border border-primary rounded-md text-sm text-primary bg-primary bg-opacity-5 hover:bg-opacity-10">
-            Semana
-          </button>
-          <button className="px-3 py-1 border border-neutral-light rounded-md text-sm text-neutral-dark hover:bg-neutral-lightest">
-            Mês
-          </button>
-        </div>
-      </div>
-      
-      {/* Legenda para status de agendamentos */}
-      <div className="flex flex-wrap gap-4 mb-4 ml-1 text-xs text-neutral-dark">
-        <div className="flex items-center">
-          <div className="w-3 h-3 mr-1 rounded bg-orange-500 bg-opacity-20 border-l-2 border-orange-500"></div>
-          <span>Aguardando confirmação (WhatsApp)</span>
         </div>
       </div>
       
@@ -262,6 +251,19 @@ export default function Calendar({
                   +{eventsForDay.length - 3} mais
                 </div>
               )}
+
+              {onAddAppointmentClick && day.isCurrentMonth && (
+                <button
+                  type="button"
+                  className="mt-2 w-full rounded-md border border-dashed border-neutral-light bg-neutral-lightest py-1 text-[11px] text-primary hover:bg-primary/5"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAddAppointmentClick(day.date);
+                  }}
+                >
+                  + Agendar
+                </button>
+              )}
             </div>
           );
         })}
@@ -290,6 +292,26 @@ export default function Calendar({
         .calendar-event-pending {
           background-color: rgba(249, 115, 22, 0.2);
           border-left: 3px solid #f97316;
+        }
+        .calendar-event-scheduled {
+          background-color: rgba(37, 99, 235, 0.12);
+          border-left: 3px solid #2563EB;
+        }
+        .calendar-event-confirmed {
+          background-color: rgba(22, 163, 74, 0.12);
+          border-left: 3px solid #16A34A;
+        }
+        .calendar-event-completed {
+          background-color: rgba(147, 51, 234, 0.12);
+          border-left: 3px solid #9333EA;
+        }
+        .calendar-event-canceled {
+          background-color: rgba(107, 114, 128, 0.12);
+          border-left: 3px solid #6B7280;
+        }
+        .calendar-event-first-session {
+          background-color: rgba(245, 158, 11, 0.12);
+          border-left: 3px solid #F59E0B;
         }
       `}</style>
     </div>

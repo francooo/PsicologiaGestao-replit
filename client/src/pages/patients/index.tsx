@@ -115,8 +115,8 @@ export default function PatientsList() {
                 <main className="p-4 md:p-6">
                     <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
                         <div>
-                            <h1 className="text-2xl font-bold text-neutral-darkest">Pacientes</h1>
-                            <p className="text-neutral-dark">Gerencie seus pacientes e prontuários</p>
+                            <h1 className="heading-page">Pacientes</h1>
+                            <p className="text-muted">Gerencie seus pacientes e prontuários</p>
                         </div>
                         <Dialog open={isOpen} onOpenChange={setIsOpen}>
                             <DialogTrigger asChild>
