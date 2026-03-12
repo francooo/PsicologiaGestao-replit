@@ -70,14 +70,13 @@ export function setupAuth(app: Express) {
   );
 
   // Google Strategy
-  const googleCallbackUrl = process.env.GOOGLE_CALLBACK_URL ||
-    (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}/auth/google/callback` : null);
-
-  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && googleCallbackUrl) {
+  // callbackURL is built dynamically per-request so it works in both dev and production
+  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     passport.use(new GoogleStrategy({
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: googleCallbackUrl,
+      callbackURL: "/auth/google/callback", // relative — overridden per-request below
+      passReqToCallback: false,
     },
       async (accessToken, refreshToken, profile, done) => {
         try {
@@ -143,17 +142,25 @@ export function setupAuth(app: Express) {
       }
     ));
 
+    // Helper to build the callback URL from the incoming request host
+    const buildCallbackUrl = (req: any) => {
+      const proto = req.get('x-forwarded-proto') || req.protocol || 'https';
+      const host = req.get('x-forwarded-host') || req.get('host') || req.hostname;
+      return `${proto}://${host}/auth/google/callback`;
+    };
+
     // Google Auth Routes
     app.get('/auth/google', (req, res, next) => {
-      passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next);
+      const callbackURL = buildCallbackUrl(req);
+      passport.authenticate('google', { scope: ['profile', 'email'], callbackURL } as any)(req, res, next);
     });
 
     app.get('/auth/google/callback',
       (req, res, next) => {
-        passport.authenticate('google', { failureRedirect: '/auth' })(req, res, next);
+        const callbackURL = buildCallbackUrl(req);
+        passport.authenticate('google', { failureRedirect: '/auth', callbackURL } as any)(req, res, next);
       },
       (req, res) => {
-        // Successful authentication, redirect dashboard.
         res.redirect('/');
       }
     );
