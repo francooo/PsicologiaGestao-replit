@@ -82,7 +82,7 @@ interface PsychologistOption {
 
 const PAGE_SIZE = 20;
 const STATUS_OPTIONS = [
-  { value: "", label: "Todos" },
+  { value: "all", label: "Todos" },
   { value: "ativa", label: "Ativa" },
   { value: "pendente", label: "Pendente" },
   { value: "cancelada", label: "Cancelada" },
@@ -104,10 +104,10 @@ function formatCurrency(value: string | null): string {
 export default function AdminInvoices() {
   const { toast } = useToast();
   const [page, setPage] = useState(0);
-  const [psychologistId, setPsychologistId] = useState<string>("");
+  const [psychologistId, setPsychologistId] = useState<string>("all");
   const [dataEmissaoFrom, setDataEmissaoFrom] = useState("");
   const [dataEmissaoTo, setDataEmissaoTo] = useState("");
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState("all");
   const [search, setSearch] = useState("");
   const [statusMonth, setStatusMonth] = useState((new Date().getMonth() + 1).toString().padStart(2, "0"));
   const [statusYear, setStatusYear] = useState(new Date().getFullYear().toString());
@@ -119,20 +119,20 @@ export default function AdminInvoices() {
     const p = new URLSearchParams();
     p.set("limit", String(PAGE_SIZE));
     p.set("offset", String(page * PAGE_SIZE));
-    if (psychologistId) p.set("psychologist_id", psychologistId);
+    if (psychologistId && psychologistId !== "all") p.set("psychologist_id", psychologistId);
     if (dataEmissaoFrom) p.set("data_emissao_from", dataEmissaoFrom);
     if (dataEmissaoTo) p.set("data_emissao_to", dataEmissaoTo);
-    if (status) p.set("status", status);
+    if (status && status !== "all") p.set("status", status);
     if (search.trim()) p.set("search", search.trim());
     return p.toString();
   }, [page, psychologistId, dataEmissaoFrom, dataEmissaoTo, status, search]);
 
   const summaryParams = useMemo(() => {
     const p = new URLSearchParams();
-    if (psychologistId) p.set("psychologist_id", psychologistId);
+    if (psychologistId && psychologistId !== "all") p.set("psychologist_id", psychologistId);
     if (dataEmissaoFrom) p.set("data_emissao_from", dataEmissaoFrom);
     if (dataEmissaoTo) p.set("data_emissao_to", dataEmissaoTo);
-    if (status) p.set("status", status);
+    if (status && status !== "all") p.set("status", status);
     return p.toString();
   }, [psychologistId, dataEmissaoFrom, dataEmissaoTo, status]);
 
@@ -246,7 +246,7 @@ export default function AdminInvoices() {
                     <SelectValue placeholder="Psicóloga" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Todas as psicólogas</SelectItem>
+                    <SelectItem value="all">Todas as psicólogas</SelectItem>
                     {psychologists.map((p) => (
                       <SelectItem key={p.id} value={String(p.userId)}>
                         {p.user?.fullName ?? `Psicóloga ${p.id}`}
