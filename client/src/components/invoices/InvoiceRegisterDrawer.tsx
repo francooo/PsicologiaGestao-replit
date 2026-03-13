@@ -9,10 +9,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Camera, AlertTriangle } from "lucide-react";
+import { Loader2, Camera, AlertTriangle, FileText } from "lucide-react";
 
-const MAX_FILE_SIZE = 4 * 1024 * 1024; // 4MB
-const ACCEPT_TYPES = "image/jpeg,image/png,image/webp";
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const ACCEPT_TYPES = "image/jpeg,image/png,image/webp,application/pdf";
+const PDF_MIME = "application/pdf";
 
 type Step = 1 | 2 | 3;
 
@@ -127,12 +128,14 @@ export function InvoiceRegisterDrawer({ open, onOpenChange }: InvoiceRegisterDra
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.match(/^image\/(jpeg|png|webp)/)) {
-      toast({ title: "Formato inválido", description: "Use JPEG, PNG ou WebP.", variant: "destructive" });
+    const isPdf = file.type === PDF_MIME;
+    const isImage = file.type.match(/^image\/(jpeg|png|webp)/);
+    if (!isPdf && !isImage) {
+      toast({ title: "Formato inválido", description: "Use PDF, JPEG, PNG ou WebP.", variant: "destructive" });
       return;
     }
     if (file.size > MAX_FILE_SIZE) {
-      toast({ title: "Arquivo grande", description: "Máximo 4MB.", variant: "destructive" });
+      toast({ title: "Arquivo grande", description: "Máximo 5MB.", variant: "destructive" });
       return;
     }
     setImageFile(file);
@@ -140,7 +143,8 @@ export function InvoiceRegisterDrawer({ open, onOpenChange }: InvoiceRegisterDra
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
-      setImageBase64(dataUrl.replace(/^data:image\/\w+;base64,/, ""));
+      const base64 = dataUrl.replace(/^data:[^;]+;base64,/, "");
+      setImageBase64(base64);
     };
     reader.readAsDataURL(file);
   };
@@ -223,11 +227,14 @@ export function InvoiceRegisterDrawer({ open, onOpenChange }: InvoiceRegisterDra
       <div className="py-6 space-y-6">
         {step === 1 && (
           <>
-            <p className="text-sm text-neutral-dark">Tire uma foto ou selecione a imagem da sua nota fiscal (JPEG, PNG ou WebP — máx. 4MB).</p>
+            <p className="text-sm text-neutral-dark">Selecione a nota fiscal em PDF, JPEG, PNG ou WebP — máx. 5MB. Para PDF, o texto será extraído automaticamente. Para imagens, será usada visão computacional.</p>
             <label className="flex flex-col items-center justify-center w-full h-40 border-2 border-dashed border-neutral-300 dark:border-neutral-600 rounded-lg cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
               <input type="file" className="hidden" accept={ACCEPT_TYPES} onChange={handleFileChange} />
-              <Camera className="w-10 h-10 text-neutral-400 mb-2" />
-              <span className="text-sm text-neutral-dark">{imageFile ? imageFile.name : "Clique ou arraste a imagem"}</span>
+              {imageFile?.type === PDF_MIME
+                ? <FileText className="w-10 h-10 text-primary mb-2" />
+                : <Camera className="w-10 h-10 text-neutral-400 mb-2" />
+              }
+              <span className="text-sm text-neutral-dark">{imageFile ? imageFile.name : "Clique ou arraste o arquivo (PDF, JPEG, PNG, WebP)"}</span>
             </label>
             {imageFile && (
               <div className="flex gap-2">

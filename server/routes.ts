@@ -14,7 +14,7 @@ import * as WhatsAppService from "./services/whatsapp";
 import googleCalendarRoutes from "./routes/google-calendar";
 import * as GoogleCalendarService from "./services/google-calendar";
 import patientRecordsRouter from "./routes/patient-records";
-import { analyzeInvoiceImage, type PsychologistProfileForInvoice, AIServiceError, AIQuotaError, UnsupportedFormatError } from "./services/ai";
+import { analyzeInvoiceImage, analyzeInvoicePdf, type PsychologistProfileForInvoice, AIServiceError, AIQuotaError, UnsupportedFormatError } from "./services/ai";
 
 // Configure multer for image upload
 const uploadDir = path.join(process.cwd(), "uploads");
@@ -1695,7 +1695,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ========== INVOICE ROUTES (NFS-e com IA) ==========
 
-  // POST /api/invoices/analyze-image - Análise de imagem da nota fiscal com Groq Vision
+  // POST /api/invoices/analyze-image - Análise de imagem ou PDF da nota fiscal com Groq
   app.post("/api/invoices/analyze-image", async (req, res) => {
     try {
       if (!req.isAuthenticated()) {
@@ -1709,11 +1709,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!image || typeof image !== "string") {
         return res.status(400).json({ message: "Campo 'image' (base64) é obrigatório." });
       }
-      const result = await analyzeInvoiceImage(
-        image,
-        image_type ?? "image/jpeg",
-        psychologist_profile
-      );
+      const mime = (image_type ?? "image/jpeg").toLowerCase();
+      let result: { data: Record<string, { valor: unknown; confianca: number }>; ai_confidence_score: number };
+      if (mime === "application/pdf") {
+        result = await analyzeInvoicePdf(image, psychologist_profile);
+      } else {
+        result = await analyzeInvoiceImage(image, mime, psychologist_profile);
+      }
       res.json({
         success: true,
         data: result.data,
@@ -1729,8 +1731,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error instanceof AIServiceError) {
         return res.status(502).json({ message: error.message });
       }
-      console.error("Error analyzing invoice image:", error);
-      res.status(500).json({ message: "Erro ao analisar imagem da nota fiscal." });
+      console.error("Error analyzing invoice file:", error);
+      res.status(500).json({ message: "Erro ao analisar o arquivo da nota fiscal." });
     }
   });
 
@@ -1752,14 +1754,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (imageBase64 && typeof imageBase64 === "string") {
         try {
-          const ext = imageType.includes("png") ? "png" : imageType.includes("webp") ? "webp" : "jpg";
+          const ext = imageType.includes("pdf") ? "pdf" : imageType.includes("png") ? "png" : imageType.includes("webp") ? "webp" : "jpg";
           const now = new Date();
           const dir = path.join(invoiceUploadDir, String(psychologistId), String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, "0"));
           if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
           const filename = `invoice-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.${ext}`;
           const fullPath = path.join(dir, filename);
           const buf = Buffer.from(imageBase64, "base64");
-          if (buf.length > 4 * 1024 * 1024) return res.status(400).json({ message: "Imagem muito grande (máx. 4MB)." });
+          if (buf.length > 5 * 1024 * 1024) return res.status(400).json({ message: "Arquivo muito grande (máx. 5MB)." });
           fs.writeFileSync(fullPath, buf);
           const relativePath = path.relative(process.cwd(), fullPath).split(path.sep).join("/");
           imagePath = relativePath.startsWith("uploads") ? relativePath : `uploads/invoices/${psychologistId}/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/${filename}`;
@@ -2091,7 +2093,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Arquivo da imagem não encontrado" });
       }
       const ext = path.extname(filePath).toLowerCase();
-      const contentType = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
+      const contentType = ext === ".pdf" ? "application/pdf" : ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
       res.setHeader("Content-Type", contentType);
       res.setHeader("Content-Disposition", "inline");
       res.sendFile(path.resolve(filePath));
@@ -2119,7 +2121,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!filePath || !fs.existsSync(filePath)) {
         return res.status(404).json({ message: "Arquivo da imagem não encontrado" });
       }
-      const filename = `nota-${invoice.numeroNota ?? invoice.id}.jpg`;
+      const fileExt = path.extname(filePath).toLowerCase() || ".jpg";
+      const filename = `nota-${invoice.numeroNota ?? invoice.id}${fileExt}`;
       res.download(filePath, filename);
     } catch (error) {
       console.error("Error downloading invoice:", error);

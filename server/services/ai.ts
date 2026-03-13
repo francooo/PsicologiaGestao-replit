@@ -156,6 +156,104 @@ emitente_divergencias (string ou null: descreva divergências entre dados do emi
 
 Regras: Valores monetários como número decimal (ex: 1200.50). Datas YYYY-MM-DD. CPF/CNPJ/CEP formatados. Campo vazio ou ilegível: valor null.`;
 
+const GROQ_TEXT_MODEL = "llama-3.3-70b-versatile";
+
+const NFS_E_TEXT_EXTRACTION_PROMPT = `Você é um especialista em leitura de Notas Fiscais de Serviços brasileiras (NFS-e), especialmente de profissionais de saúde como psicólogos.
+
+Analise o texto da nota fiscal abaixo e extraia TODOS os campos disponíveis. Para cada campo, informe o valor extraído e um score de confiança de 0 a 1 (0 = não encontrado, 1 = certeza total).
+
+Retorne APENAS um JSON válido, sem explicações, sem markdown, sem texto adicional.
+
+Estrutura obrigatória do JSON (cada chave com objeto { "valor": ... | null, "confianca": número 0-1 }):
+
+chave_nfe, numero_nota, serie, data_emissao (YYYY-MM-DD), codigo_verificacao, protocolo_autorizacao, codigo_municipio_ibge,
+emitente_nome, emitente_cnpj_cpf, emitente_crp, emitente_ie, emitente_im, emitente_endereco, emitente_bairro, emitente_municipio, emitente_uf, emitente_cep, emitente_telefone, emitente_email, emitente_complemento,
+tomador_nome, tomador_cpf_cnpj, tomador_endereco, tomador_bairro, tomador_municipio, tomador_uf, tomador_cep, tomador_email, tomador_telefone, tomador_ie, tomador_im, tomador_complemento,
+descricao_servico, codigo_servico, codigo_cnae, nbs, codigo_municipio_servico,
+iss_retido (boolean), aliquota_iss (decimal ex: 0.05 para 5%),
+valor_servicos, valor_deducoes, base_calculo, valor_iss, valor_pis, valor_cofins, valor_inss, valor_ir, valor_csll, valor_liquido, valor_ibs, valor_cbs, cst, codigo_classificacao_tributaria,
+emitente_divergencias (string ou null: descreva divergências entre dados do emitente na nota e os dados cadastrados fornecidos; null se não houver).
+
+Regras: Valores monetários como número decimal (ex: 1200.50). Datas YYYY-MM-DD. CPF/CNPJ/CEP formatados. Campo vazio ou não encontrado: valor null.`;
+
+export async function analyzeInvoicePdf(
+  pdfBase64: string,
+  psychologistProfile?: PsychologistProfileForInvoice
+): Promise<{ data: Record<string, { valor: unknown; confianca: number }>; ai_confidence_score: number }> {
+  if (!process.env.GROQ_API_KEY) {
+    throw new AIServiceError("GROQ_API_KEY não configurada. Análise de nota fiscal indisponível.");
+  }
+
+  const pdfBuffer = Buffer.from(pdfBase64, "base64");
+
+  let textContent: string;
+  try {
+    const parsed = await pdfParse(pdfBuffer);
+    textContent = parsed.text ?? "";
+    if (!textContent || textContent.trim().length < 20) {
+      throw new UnsupportedFormatError(
+        "Não foi possível extrair texto deste PDF. O arquivo pode ser digitalizado como imagem ou estar protegido. Tente enviar como JPEG ou PNG."
+      );
+    }
+  } catch (error) {
+    if (error instanceof UnsupportedFormatError) throw error;
+    throw new UnsupportedFormatError("Erro ao processar o PDF. Verifique se o arquivo não está corrompido.");
+  }
+
+  const maxChars = 12000;
+  if (textContent.length > maxChars) {
+    textContent = textContent.slice(0, maxChars) + "\n\n[...documento truncado...]";
+  }
+
+  const profileText = psychologistProfile
+    ? `\nDados cadastrados da psicóloga emitente para referência e comparação (informe divergências em emitente_divergencias):\n${JSON.stringify(psychologistProfile, null, 2)}`
+    : "";
+
+  try {
+    const completion = await groq.chat.completions.create({
+      model: GROQ_TEXT_MODEL,
+      messages: [
+        { role: "system", content: NFS_E_TEXT_EXTRACTION_PROMPT + profileText },
+        { role: "user", content: `Texto extraído da nota fiscal:\n\n${textContent}` },
+      ],
+      temperature: 0.2,
+      max_tokens: 2000,
+      response_format: { type: "json_object" },
+    });
+
+    const rawContent = completion.choices[0]?.message?.content;
+    if (!rawContent || typeof rawContent !== "string") {
+      throw new AIServiceError("A IA não retornou dados. Tente novamente.");
+    }
+
+    let parsed: Record<string, { valor: unknown; confianca: number }>;
+    try {
+      const cleaned = rawContent.replace(/^```json\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+      parsed = JSON.parse(cleaned) as Record<string, { valor: unknown; confianca: number }>;
+    } catch {
+      throw new AIServiceError("Não foi possível interpretar a resposta da IA. Tente novamente.");
+    }
+
+    const confidences = Object.values(parsed)
+      .filter((v) => typeof v === "object" && v !== null && "confianca" in v)
+      .map((v) => (v as { confianca: number }).confianca);
+    const ai_confidence_score = confidences.length
+      ? confidences.reduce((a, b) => a + b, 0) / confidences.length
+      : 0;
+
+    return { data: parsed, ai_confidence_score: Math.round(ai_confidence_score * 1000) / 1000 };
+  } catch (error) {
+    if (error instanceof UnsupportedFormatError || error instanceof AIServiceError) throw error;
+    const err = error as { status?: number; statusCode?: number; error?: { status?: number } };
+    const status = err?.status ?? err?.statusCode ?? err?.error?.status;
+    if (status === 429) {
+      throw new AIQuotaError("Limite de requisições atingido. Aguarde alguns instantes e tente novamente.");
+    }
+    console.error("Groq PDF analysis error:", error);
+    throw new AIServiceError("Erro ao analisar o PDF da nota fiscal. Tente novamente.");
+  }
+}
+
 export async function analyzeInvoiceImage(
   imageBase64: string,
   imageType: string,
