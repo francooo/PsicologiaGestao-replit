@@ -4,7 +4,7 @@ const require = createRequire(import.meta.url);
 const pdfParse = require("pdf-parse");
 
 if (!process.env.GROQ_API_KEY) {
-  console.warn("GROQ_API_KEY not set. AI summarization will not work.");
+  console.warn("GROQ_API_KEY not set. AI summarization and invoice NFS-e image analysis will not work.");
 }
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -119,5 +119,118 @@ export class AIQuotaError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "AIQuotaError";
+  }
+}
+
+// --- Invoice (NFS-e) image analysis with vision ---
+
+const GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
+const MAX_BASE64_SIZE_BYTES = 4 * 1024 * 1024; // 4MB Groq limit
+
+export interface PsychologistProfileForInvoice {
+  nome?: string;
+  cnpj_cpf?: string;
+  crp?: string;
+  endereco?: string;
+  municipio?: string;
+  uf?: string;
+  email?: string;
+  telefone?: string;
+}
+
+const NFS_E_EXTRACTION_PROMPT = `Você é um especialista em leitura de Notas Fiscais de Serviços brasileiras (NFS-e), especialmente de profissionais de saúde como psicólogos.
+
+Analise a imagem da nota fiscal e extraia TODOS os campos disponíveis. Para cada campo, informe o valor extraído e um score de confiança de 0 a 1 (0 = não encontrado/ilegível, 1 = certeza total).
+
+Retorne APENAS um JSON válido, sem explicações, sem markdown, sem texto adicional.
+
+Estrutura obrigatória do JSON (cada chave com objeto { "valor": ... | null, "confianca": número 0-1 }):
+
+chave_nfe, numero_nota, serie, data_emissao (YYYY-MM-DD), codigo_verificacao, protocolo_autorizacao, codigo_municipio_ibge,
+emitente_nome, emitente_cnpj_cpf, emitente_crp, emitente_ie, emitente_im, emitente_endereco, emitente_bairro, emitente_municipio, emitente_uf, emitente_cep, emitente_telefone, emitente_email, emitente_complemento,
+tomador_nome, tomador_cpf_cnpj, tomador_endereco, tomador_bairro, tomador_municipio, tomador_uf, tomador_cep, tomador_email, tomador_telefone, tomador_ie, tomador_im, tomador_complemento,
+descricao_servico, codigo_servico, codigo_cnae, nbs, codigo_municipio_servico,
+iss_retido (boolean), aliquota_iss (decimal ex: 0.05 para 5%),
+valor_servicos, valor_deducoes, base_calculo, valor_iss, valor_pis, valor_cofins, valor_inss, valor_ir, valor_csll, valor_liquido, valor_ibs, valor_cbs, cst, codigo_classificacao_tributaria,
+emitente_divergencias (string ou null: descreva divergências entre dados do emitente na nota e os dados cadastrados fornecidos; null se não houver).
+
+Regras: Valores monetários como número decimal (ex: 1200.50). Datas YYYY-MM-DD. CPF/CNPJ/CEP formatados. Campo vazio ou ilegível: valor null.`;
+
+export async function analyzeInvoiceImage(
+  imageBase64: string,
+  imageType: string,
+  psychologistProfile?: PsychologistProfileForInvoice
+): Promise<{ data: Record<string, { valor: unknown; confianca: number }>; ai_confidence_score: number }> {
+  if (!process.env.GROQ_API_KEY) {
+    throw new AIServiceError("GROQ_API_KEY não configurada. Análise de nota fiscal indisponível.");
+  }
+
+  const base64Length = imageBase64.length;
+  const estimatedBytes = (base64Length * 3) / 4;
+  if (estimatedBytes > MAX_BASE64_SIZE_BYTES) {
+    throw new UnsupportedFormatError(
+      "Imagem muito grande. O tamanho máximo para análise é 4MB. Reduza a resolução ou compresse a imagem."
+    );
+  }
+
+  const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
+  const mime = imageType.toLowerCase();
+  if (!allowedTypes.some((t) => mime.includes(t))) {
+    throw new UnsupportedFormatError("Formato de imagem não suportado. Use JPEG, PNG ou WebP.");
+  }
+
+  const mediaType = mime.includes("png") ? "image/png" : mime.includes("webp") ? "image/webp" : "image/jpeg";
+  const dataUrl = `data:${mediaType};base64,${imageBase64}`;
+
+  const profileText = psychologistProfile
+    ? `\nDados cadastrados da psicóloga emitente para referência e comparação (informe divergências em emitente_divergencias):\n${JSON.stringify(psychologistProfile, null, 2)}`
+    : "";
+
+  try {
+    const completion = await groq.chat.completions.create({
+      model: GROQ_VISION_MODEL,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: NFS_E_EXTRACTION_PROMPT + profileText },
+            { type: "image_url", image_url: { url: dataUrl } },
+          ],
+        },
+      ],
+      temperature: 0.2,
+      max_tokens: 2000,
+      response_format: { type: "json_object" },
+    });
+
+    const rawContent = completion.choices[0]?.message?.content;
+    if (!rawContent || typeof rawContent !== "string") {
+      throw new AIServiceError("A IA não retornou dados. Tente outra imagem.");
+    }
+
+    let parsed: Record<string, { valor: unknown; confianca: number }>;
+    try {
+      const cleaned = rawContent.replace(/^```json\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+      parsed = JSON.parse(cleaned) as Record<string, { valor: unknown; confianca: number }>;
+    } catch {
+      throw new AIServiceError("Não foi possível interpretar a resposta da IA. Verifique a qualidade da foto e tente novamente.");
+    }
+
+    const confidences = Object.values(parsed).filter((v) => typeof v === "object" && v !== null && "confianca" in v).map((v) => (v as { confianca: number }).confianca);
+    const ai_confidence_score = confidences.length ? confidences.reduce((a, b) => a + b, 0) / confidences.length : 0;
+
+    return { data: parsed, ai_confidence_score: Math.round(ai_confidence_score * 1000) / 1000 };
+  } catch (error) {
+    if (error instanceof UnsupportedFormatError || error instanceof AIServiceError) throw error;
+    const err = error as { status?: number; statusCode?: number; error?: { status?: number } };
+    const status = err?.status ?? err?.statusCode ?? err?.error?.status;
+    if (status === 429) {
+      throw new AIQuotaError("Limite de requisições atingido. Aguarde alguns instantes e tente novamente.");
+    }
+    if (status === 413) {
+      throw new UnsupportedFormatError("Imagem muito grande. Use no máximo 4MB.");
+    }
+    console.error("Groq vision error:", error);
+    throw new AIServiceError("Erro ao analisar a imagem da nota fiscal. Tente novamente.");
   }
 }

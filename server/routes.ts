@@ -14,6 +14,7 @@ import * as WhatsAppService from "./services/whatsapp";
 import googleCalendarRoutes from "./routes/google-calendar";
 import * as GoogleCalendarService from "./services/google-calendar";
 import patientRecordsRouter from "./routes/patient-records";
+import { analyzeInvoiceImage, type PsychologistProfileForInvoice, AIServiceError, AIQuotaError, UnsupportedFormatError } from "./services/ai";
 
 // Configure multer for image upload
 const uploadDir = path.join(process.cwd(), "uploads");
@@ -1692,240 +1693,434 @@ export async function registerRoutes(app: Express): Promise<Server> {
   console.log("Registering /api/patients routes...");
   app.use("/api/patients", patientRecordsRouter);
 
-  // ========== INVOICE ROUTES ==========
+  // ========== INVOICE ROUTES (NFS-e com IA) ==========
 
-  // POST /api/invoices - Upload de nota fiscal (usuário autenticado)
-  app.post("/api/invoices", (req, res, next) => {
-    if (!req.isAuthenticated()) {
-      return res.status(401).json({ message: "Não autenticado" });
-    }
-
-    invoiceUpload.single("invoiceFile")(req, res, (err) => {
-      if (err instanceof multer.MulterError) {
-        if (err.code === 'LIMIT_FILE_SIZE') {
-          return res.status(400).json({
-            message: "O arquivo é muito grande. O tamanho máximo permitido é 5MB."
-          });
-        }
-        return res.status(400).json({
-          message: `Erro no upload: ${err.message}`
-        });
-      } else if (err) {
-        return res.status(400).json({
-          message: err.message
-        });
-      }
-      next();
-    });
-  }, async (req, res) => {
+  // POST /api/invoices/analyze-image - Análise de imagem da nota fiscal com Groq Vision
+  app.post("/api/invoices/analyze-image", async (req, res) => {
     try {
-      const user = req.user as any;
-      const { referenceMonth } = req.body;
-
-      if (!referenceMonth) {
-        // Remove o arquivo se o mês não foi informado
-        if (req.file) {
-          fs.unlinkSync(req.file.path);
-        }
-        return res.status(400).json({ message: "Mês de referência é obrigatório" });
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Não autenticado" });
       }
-
-      // Validar formato do mês (YYYY-MM)
-      const monthRegex = /^\d{4}-(0[1-9]|1[0-2])$/;
-      if (!monthRegex.test(referenceMonth)) {
-        if (req.file) {
-          fs.unlinkSync(req.file.path);
-        }
-        return res.status(400).json({ message: "Formato do mês inválido. Use YYYY-MM (ex: 2025-01)" });
+      const { image, image_type, psychologist_profile } = req.body as {
+        image?: string;
+        image_type?: string;
+        psychologist_profile?: PsychologistProfileForInvoice;
+      };
+      if (!image || typeof image !== "string") {
+        return res.status(400).json({ message: "Campo 'image' (base64) é obrigatório." });
       }
-
-      if (!req.file) {
-        return res.status(400).json({ message: "Nenhum arquivo enviado" });
-      }
-
-      // Verificar se já existe uma nota para este mês
-      const existingInvoice = await storage.getInvoiceByUserAndMonth(user.id, referenceMonth);
-      if (existingInvoice) {
-        // Remove o arquivo enviado
-        fs.unlinkSync(req.file.path);
-        return res.status(400).json({
-          message: `Já existe uma nota fiscal enviada para o mês ${referenceMonth}`
-        });
-      }
-
-      // Criar a nota fiscal
-      const invoice = await storage.createInvoice({
-        userId: user.id,
-        referenceMonth,
-        filePath: `/uploads/invoices/${req.file.filename}`,
-        originalFilename: req.file.originalname,
-        mimeType: req.file.mimetype,
-        fileSize: req.file.size,
-        status: "enviada"
-      });
-
-      console.log(`Invoice uploaded: ${invoice.id} by user ${user.id} for month ${referenceMonth}`);
-
-      res.status(201).json({
-        ...invoice,
-        message: "Nota fiscal enviada com sucesso"
+      const result = await analyzeInvoiceImage(
+        image,
+        image_type ?? "image/jpeg",
+        psychologist_profile
+      );
+      res.json({
+        success: true,
+        data: result.data,
+        ai_confidence_score: result.ai_confidence_score,
       });
     } catch (error) {
-      console.error("Error uploading invoice:", error);
-      // Remove o arquivo em caso de erro
-      if (req.file) {
-        try { fs.unlinkSync(req.file.path); } catch (e) { }
+      if (error instanceof UnsupportedFormatError) {
+        return res.status(400).json({ message: error.message });
       }
-      res.status(500).json({ message: "Erro ao enviar nota fiscal" });
+      if (error instanceof AIQuotaError) {
+        return res.status(429).json({ message: error.message });
+      }
+      if (error instanceof AIServiceError) {
+        return res.status(502).json({ message: error.message });
+      }
+      console.error("Error analyzing invoice image:", error);
+      res.status(500).json({ message: "Erro ao analisar imagem da nota fiscal." });
     }
   });
 
-  // GET /api/invoices - Lista notas do usuário logado
+  // POST /api/invoices - Salvar nova nota fiscal (payload JSON com campos NFS-e)
+  app.post("/api/invoices", async (req, res) => {
+    try {
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Não autenticado" });
+      }
+      const user = req.user as { id: number; role: string };
+      const body = req.body as Record<string, unknown>;
+      const psychologistId = user.id;
+      let imagePath = body.image_path as string | undefined;
+      let imageUrl = body.image_url as string | undefined;
+      const imageBase64 = body.image as string | undefined;
+      const imageType = (body.image_type as string) || "image/jpeg";
+      if (!imagePath && !imageUrl && !imageBase64) {
+        return res.status(400).json({ message: "Imagem da nota é obrigatória (image_path, image_url ou image em base64)." });
+      }
+      if (imageBase64 && typeof imageBase64 === "string") {
+        try {
+          const ext = imageType.includes("png") ? "png" : imageType.includes("webp") ? "webp" : "jpg";
+          const now = new Date();
+          const dir = path.join(invoiceUploadDir, String(psychologistId), String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, "0"));
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          const filename = `invoice-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.${ext}`;
+          const fullPath = path.join(dir, filename);
+          const buf = Buffer.from(imageBase64, "base64");
+          if (buf.length > 4 * 1024 * 1024) return res.status(400).json({ message: "Imagem muito grande (máx. 4MB)." });
+          fs.writeFileSync(fullPath, buf);
+          const relativePath = path.relative(process.cwd(), fullPath).split(path.sep).join("/");
+          imagePath = relativePath.startsWith("uploads") ? relativePath : `uploads/invoices/${psychologistId}/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/${filename}`;
+        } catch (err) {
+          console.error("Error saving invoice image:", err);
+          return res.status(400).json({ message: "Erro ao salvar imagem da nota." });
+        }
+      }
+      // Duplicidade de chave NF-e é garantida por constraint UNIQUE no banco
+      const valorLiquido = body.valor_liquido != null ? Number(body.valor_liquido) : null;
+      const valorServicos = body.valor_servicos != null ? Number(body.valor_servicos) : null;
+      const invoice = await storage.createInvoice({
+        psychologistId,
+        clinicId: (body.clinic_id as number) ?? null,
+        chaveNfe: (body.chave_nfe as string) ?? null,
+        numeroNota: (body.numero_nota as string) ?? null,
+        serie: (body.serie as string) ?? null,
+        dataEmissao: (body.data_emissao as string) ?? null,
+        emitenteNome: (body.emitente_nome as string) ?? null,
+        emitenteCnpjCpf: (body.emitente_cnpj_cpf as string) ?? null,
+        emitenteCrp: (body.emitente_crp as string) ?? null,
+        emitenteIe: (body.emitente_ie as string) ?? null,
+        emitenteIm: (body.emitente_im as string) ?? null,
+        emitenteEndereco: (body.emitente_endereco as string) ?? null,
+        emitenteBairro: (body.emitente_bairro as string) ?? null,
+        emitenteMunicipio: (body.emitente_municipio as string) ?? null,
+        emitenteUf: (body.emitente_uf as string) ?? null,
+        emitenteCep: (body.emitente_cep as string) ?? null,
+        emitenteTelefone: (body.emitente_telefone as string) ?? null,
+        emitenteEmail: (body.emitente_email as string) ?? null,
+        tomadorNome: (body.tomador_nome as string) ?? null,
+        tomadorCpfCnpj: (body.tomador_cpf_cnpj as string) ?? null,
+        tomadorEndereco: (body.tomador_endereco as string) ?? null,
+        tomadorBairro: (body.tomador_bairro as string) ?? null,
+        tomadorMunicipio: (body.tomador_municipio as string) ?? null,
+        tomadorUf: (body.tomador_uf as string) ?? null,
+        tomadorCep: (body.tomador_cep as string) ?? null,
+        tomadorEmail: (body.tomador_email as string) ?? null,
+        patientId: (body.patient_id as number) ?? null,
+        descricaoServico: (body.descricao_servico as string) ?? null,
+        codigoServico: (body.codigo_servico as string) ?? null,
+        codigoCnae: (body.codigo_cnae as string) ?? null,
+        issRetido: Boolean(body.iss_retido),
+        aliquotaIss: body.aliquota_iss != null ? String(body.aliquota_iss) : null,
+        valorServicos: valorServicos != null ? String(valorServicos) : null,
+        valorDeducoes: body.valor_deducoes != null ? String(Number(body.valor_deducoes)) : null,
+        baseCalculo: body.base_calculo != null ? String(Number(body.base_calculo)) : null,
+        valorIss: body.valor_iss != null ? String(Number(body.valor_iss)) : null,
+        valorPis: body.valor_pis != null ? String(Number(body.valor_pis)) : null,
+        valorCofins: body.valor_cofins != null ? String(Number(body.valor_cofins)) : null,
+        valorInss: body.valor_inss != null ? String(Number(body.valor_inss)) : null,
+        valorIr: body.valor_ir != null ? String(Number(body.valor_ir)) : null,
+        valorCsll: body.valor_csll != null ? String(Number(body.valor_csll)) : null,
+        valorLiquido: valorLiquido != null ? String(valorLiquido) : (valorServicos != null ? String(valorServicos) : null),
+        imageUrl: imageUrl ?? null,
+        imagePath: imagePath ?? null,
+        aiRawResponse: (body.ai_raw_response as object) ?? null,
+        aiConfidenceScore: body.ai_confidence_score != null ? String(Number(body.ai_confidence_score)) : null,
+        aiExtractedAt: body.ai_extracted_at ? new Date(body.ai_extracted_at as string) : null,
+        revisadoPelaPsicologa: Boolean(body.revisado_pela_psicologa),
+        observacoes: (body.observacoes as string) ?? null,
+        status: (body.status as string) ?? "ativa",
+      });
+      res.status(201).json({ ...invoice, message: "Nota fiscal registrada com sucesso" });
+    } catch (error) {
+      console.error("Error creating invoice:", error);
+      res.status(500).json({ message: "Erro ao salvar nota fiscal" });
+    }
+  });
+
+  // GET /api/invoices - Lista notas do usuário logado (paginação e filtros)
   app.get("/api/invoices", async (req, res) => {
     try {
       if (!req.isAuthenticated()) {
         return res.status(401).json({ message: "Não autenticado" });
       }
-
-      const user = req.user as any;
-      console.log(`[DEBUG] GET /api/invoices - user.id: ${user.id}, type: ${typeof user.id}`);
-
-      const invoices = await storage.getInvoicesByUserId(user.id);
-      console.log(`[DEBUG] GET /api/invoices - found ${invoices.length} invoices for user ${user.id}`);
-
-      // Disable all caching to prevent data leakage between users
-      res.set({
-        'Cache-Control': 'private, no-store, no-cache, max-age=0, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0',
-        'Vary': 'Cookie',
-        'ETag': ''
-      });
-      res.json(invoices);
+      const user = req.user as { id: number };
+      const limit = Math.min(Number(req.query.limit) || 20, 100);
+      const offset = Number(req.query.offset) || 0;
+      const dataEmissaoFrom = req.query.data_emissao_from as string | undefined;
+      const dataEmissaoTo = req.query.data_emissao_to as string | undefined;
+      const status = req.query.status as string | undefined;
+      const search = req.query.search as string | undefined;
+      const result = await storage.getInvoicesByUserId(user.id, { limit, offset, dataEmissaoFrom, dataEmissaoTo, status, search });
+      res.set("Cache-Control", "private, no-store, no-cache, max-age=0, must-revalidate");
+      res.json(result);
     } catch (error) {
       console.error("Error fetching invoices:", error);
       res.status(500).json({ message: "Erro ao buscar notas fiscais" });
     }
   });
 
-  // GET /api/admin/invoices - Lista todas as notas (somente admin)
+  // GET /api/invoices/summary - Totais para cards (psicóloga)
+  app.get("/api/invoices/summary", async (req, res) => {
+    try {
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Não autenticado" });
+      }
+      const user = req.user as { id: number };
+      const dataEmissaoFrom = req.query.data_emissao_from as string | undefined;
+      const dataEmissaoTo = req.query.data_emissao_to as string | undefined;
+      const status = req.query.status as string | undefined;
+      const summary = await storage.getInvoicesSummary(user.id, { dataEmissaoFrom, dataEmissaoTo, status });
+      res.json(summary);
+    } catch (error) {
+      console.error("Error fetching invoice summary:", error);
+      res.status(500).json({ message: "Erro ao buscar resumo" });
+    }
+  });
+
+  // GET /api/invoices/:id - Detalhes de uma nota (própria ou admin)
+  app.get("/api/invoices/:id", async (req, res) => {
+    try {
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Não autenticado" });
+      }
+      const user = req.user as { id: number; role: string };
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ message: "ID inválido" });
+      const invoice = await storage.getInvoice(id);
+      if (!invoice) return res.status(404).json({ message: "Nota fiscal não encontrada" });
+      if (invoice.psychologistId !== user.id && user.role !== "admin") {
+        return res.status(403).json({ message: "Acesso negado" });
+      }
+      res.json(invoice);
+    } catch (error) {
+      console.error("Error fetching invoice:", error);
+      res.status(500).json({ message: "Erro ao buscar nota fiscal" });
+    }
+  });
+
+  // PUT /api/invoices/:id - Editar nota (apenas dona)
+  app.put("/api/invoices/:id", async (req, res) => {
+    try {
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Não autenticado" });
+      }
+      const user = req.user as { id: number };
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ message: "ID inválido" });
+      const invoice = await storage.getInvoice(id);
+      if (!invoice) return res.status(404).json({ message: "Nota fiscal não encontrada" });
+      if (invoice.psychologistId !== user.id) {
+        return res.status(403).json({ message: "Apenas a psicóloga que registrou pode editar." });
+      }
+      const body = req.body as Record<string, unknown>;
+      const updated = await storage.updateInvoice(id, {
+        numeroNota: body.numero_nota as string | undefined,
+        serie: body.serie as string | undefined,
+        dataEmissao: body.data_emissao as string | undefined,
+        tomadorNome: body.tomador_nome as string | undefined,
+        tomadorCpfCnpj: body.tomador_cpf_cnpj as string | undefined,
+        tomadorEndereco: body.tomador_endereco as string | undefined,
+        tomadorMunicipio: body.tomador_municipio as string | undefined,
+        tomadorUf: body.tomador_uf as string | undefined,
+        tomadorCep: body.tomador_cep as string | undefined,
+        tomadorEmail: body.tomador_email as string | undefined,
+        patientId: body.patient_id != null ? (body.patient_id as number) : undefined,
+        descricaoServico: body.descricao_servico as string | undefined,
+        valorServicos: body.valor_servicos != null ? String(Number(body.valor_servicos)) : undefined,
+        valorLiquido: body.valor_liquido != null ? String(Number(body.valor_liquido)) : undefined,
+        observacoes: body.observacoes as string | undefined,
+        status: body.status as string | undefined,
+      });
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating invoice:", error);
+      res.status(500).json({ message: "Erro ao atualizar nota fiscal" });
+    }
+  });
+
+  // PATCH /api/invoices/:id/status - Alterar status (dona ou admin)
+  app.patch("/api/invoices/:id/status", async (req, res) => {
+    try {
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Não autenticado" });
+      }
+      const user = req.user as { id: number; role: string };
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ message: "ID inválido" });
+      const invoice = await storage.getInvoice(id);
+      if (!invoice) return res.status(404).json({ message: "Nota fiscal não encontrada" });
+      if (invoice.psychologistId !== user.id && user.role !== "admin") {
+        return res.status(403).json({ message: "Acesso negado" });
+      }
+      const { status } = req.body as { status?: string };
+      if (!status || !["ativa", "cancelada", "pendente"].includes(status)) {
+        return res.status(400).json({ message: "Status inválido. Use: ativa, cancelada ou pendente." });
+      }
+      const updated = await storage.updateInvoice(id, { status });
+      res.json(updated);
+    } catch (error) {
+      console.error("Error patching invoice status:", error);
+      res.status(500).json({ message: "Erro ao alterar status" });
+    }
+  });
+
+  // GET /api/admin/invoices - Lista todas as notas com filtros e paginação (admin)
   app.get("/api/admin/invoices", async (req, res) => {
     try {
       if (!req.isAuthenticated()) {
         return res.status(401).json({ message: "Não autenticado" });
       }
-
-      const user = req.user as any;
+      const user = req.user as { role: string };
       if (user.role !== "admin") {
         return res.status(403).json({ message: "Acesso negado. Apenas administradores." });
       }
-
-      // Filtros opcionais
-      const { userId, referenceMonth } = req.query;
-
-      let invoices = await storage.getAllInvoicesWithUsers();
-
-      // Aplicar filtros
-      if (userId) {
-        invoices = invoices.filter(inv => inv.userId === parseInt(userId as string));
-      }
-      if (referenceMonth) {
-        invoices = invoices.filter(inv => inv.referenceMonth === referenceMonth);
-      }
-
-      res.json(invoices);
+      const limit = Math.min(Number(req.query.limit) || 20, 100);
+      const offset = Number(req.query.offset) || 0;
+      const psychologistId = req.query.psychologist_id != null ? parseInt(req.query.psychologist_id as string, 10) : undefined;
+      const dataEmissaoFrom = req.query.data_emissao_from as string | undefined;
+      const dataEmissaoTo = req.query.data_emissao_to as string | undefined;
+      const status = req.query.status as string | undefined;
+      const search = req.query.search as string | undefined;
+      const result = await storage.getInvoicesAdmin({ limit, offset, psychologistId, dataEmissaoFrom, dataEmissaoTo, status, search });
+      res.json(result);
     } catch (error) {
       console.error("Error fetching admin invoices:", error);
       res.status(500).json({ message: "Erro ao buscar notas fiscais" });
     }
   });
 
-  // GET /api/admin/invoices/status - Status de envio por mês (quem enviou/não enviou)
+  // GET /api/admin/invoices/summary - Totais consolidados (admin)
+  app.get("/api/admin/invoices/summary", async (req, res) => {
+    try {
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Não autenticado" });
+      }
+      const user = req.user as { role: string };
+      if (user.role !== "admin") {
+        return res.status(403).json({ message: "Acesso negado. Apenas administradores." });
+      }
+      const psychologistId = req.query.psychologist_id != null ? parseInt(req.query.psychologist_id as string, 10) : undefined;
+      const dataEmissaoFrom = req.query.data_emissao_from as string | undefined;
+      const dataEmissaoTo = req.query.data_emissao_to as string | undefined;
+      const status = req.query.status as string | undefined;
+      const summary = await storage.getInvoicesSummaryAdmin({ psychologistId, dataEmissaoFrom, dataEmissaoTo, status });
+      res.json(summary);
+    } catch (error) {
+      console.error("Error fetching admin invoice summary:", error);
+      res.status(500).json({ message: "Erro ao buscar resumo" });
+    }
+  });
+
+  // GET /api/admin/invoices/export - Exportar CSV (admin)
+  app.get("/api/admin/invoices/export", async (req, res) => {
+    try {
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Não autenticado" });
+      }
+      const user = req.user as { role: string };
+      if (user.role !== "admin") {
+        return res.status(403).json({ message: "Acesso negado. Apenas administradores." });
+      }
+      const psychologistId = req.query.psychologist_id != null ? parseInt(req.query.psychologist_id as string, 10) : undefined;
+      const dataEmissaoFrom = req.query.data_emissao_from as string | undefined;
+      const dataEmissaoTo = req.query.data_emissao_to as string | undefined;
+      const status = req.query.status as string | undefined;
+      const { invoices } = await storage.getInvoicesAdmin({ limit: 10000, offset: 0, psychologistId, dataEmissaoFrom, dataEmissaoTo, status });
+      const headers = ["Chave NF-e", "Número", "Série", "Data Emissão", "Psicóloga", "Tomador", "Valor Líquido", "Status", "Registrada em"];
+      const rows = invoices.map((inv) => [
+        inv.chaveNfe ?? "",
+        inv.numeroNota ?? "",
+        inv.serie ?? "",
+        inv.dataEmissao ?? "",
+        inv.user?.fullName ?? "",
+        inv.tomadorNome ?? "",
+        inv.valorLiquido ?? "",
+        inv.status ?? "",
+        inv.dataUpload ? new Date(inv.dataUpload).toLocaleString("pt-BR") : "",
+      ]);
+      const csv = [headers.join(";"), ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(";"))].join("\n");
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", "attachment; filename=notas-fiscais.csv");
+      res.send("\uFEFF" + csv);
+    } catch (error) {
+      console.error("Error exporting invoices:", error);
+      res.status(500).json({ message: "Erro ao exportar" });
+    }
+  });
+
+  // GET /api/admin/invoices/status - Status por mês (quem tem nota no mês)
   app.get("/api/admin/invoices/status", async (req, res) => {
     try {
       if (!req.isAuthenticated()) {
         return res.status(401).json({ message: "Não autenticado" });
       }
-
-      const user = req.user as any;
+      const user = req.user as { role: string };
       if (user.role !== "admin") {
         return res.status(403).json({ message: "Acesso negado. Apenas administradores." });
       }
-
-      const { referenceMonth } = req.query;
-      if (!referenceMonth) {
-        return res.status(400).json({ message: "Mês de referência é obrigatório" });
+      const referenceMonth = req.query.referenceMonth as string;
+      if (!referenceMonth || !/^\d{4}-(0[1-9]|1[0-2])$/.test(referenceMonth)) {
+        return res.status(400).json({ message: "Mês de referência é obrigatório (YYYY-MM)" });
       }
-
-      // Buscar todos os usuários (exceto admin)
+      const [year, month] = referenceMonth.split("-").map(Number);
+      const dataEmissaoFrom = `${year}-${String(month).padStart(2, "0")}-01`;
+      const lastDay = new Date(year, month, 0).getDate();
+      const dataEmissaoTo = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+      const { invoices } = await storage.getInvoicesAdmin({ limit: 10000, offset: 0, dataEmissaoFrom, dataEmissaoTo });
+      const psychologistIdsWithInvoice = new Set(invoices.map((inv) => inv.psychologistId));
       const allUsers = await storage.getAllUsers();
-      const nonAdminUsers = allUsers.filter(u => u.role !== "admin");
-
-      // Buscar notas do mês
-      const invoices = await storage.getInvoicesByReferenceMonth(referenceMonth as string);
-      const userIdsWithInvoice = new Set(invoices.map(inv => inv.userId));
-
-      const sent = nonAdminUsers.filter(u => userIdsWithInvoice.has(u.id)).map(u => ({
-        id: u.id,
-        fullName: u.fullName,
-        email: u.email,
-        role: u.role
-      }));
-
-      const pending = nonAdminUsers.filter(u => !userIdsWithInvoice.has(u.id)).map(u => ({
-        id: u.id,
-        fullName: u.fullName,
-        email: u.email,
-        role: u.role
-      }));
-
-      res.json({
-        referenceMonth,
-        sent,
-        pending,
-        totalUsers: nonAdminUsers.length,
-        totalSent: sent.length,
-        totalPending: pending.length
-      });
+      const nonAdminUsers = allUsers.filter((u) => u.role !== "admin");
+      const sent = nonAdminUsers.filter((u) => psychologistIdsWithInvoice.has(u.id)).map((u) => ({ id: u.id, fullName: u.fullName, email: u.email, role: u.role }));
+      const pending = nonAdminUsers.filter((u) => !psychologistIdsWithInvoice.has(u.id)).map((u) => ({ id: u.id, fullName: u.fullName, email: u.email, role: u.role }));
+      res.json({ referenceMonth, sent, pending, totalUsers: nonAdminUsers.length, totalSent: sent.length, totalPending: pending.length });
     } catch (error) {
       console.error("Error fetching invoice status:", error);
       res.status(500).json({ message: "Erro ao buscar status de notas fiscais" });
     }
   });
 
-  // GET /api/invoices/:id/download - Download da nota (verifica permissão)
+  // GET /api/invoices/:id/image - Exibir imagem da nota (inline, para visualização no modal)
+  app.get("/api/invoices/:id/image", async (req, res) => {
+    try {
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Não autenticado" });
+      }
+      const user = req.user as { id: number; role: string };
+      const invoiceId = parseInt(req.params.id, 10);
+      if (isNaN(invoiceId)) return res.status(400).json({ message: "ID inválido" });
+      const invoice = await storage.getInvoice(invoiceId);
+      if (!invoice) return res.status(404).json({ message: "Nota fiscal não encontrada" });
+      if (invoice.psychologistId !== user.id && user.role !== "admin") {
+        return res.status(403).json({ message: "Acesso negado" });
+      }
+      const filePath = invoice.imagePath ? path.join(process.cwd(), invoice.imagePath) : null;
+      if (!filePath || !fs.existsSync(filePath)) {
+        return res.status(404).json({ message: "Arquivo da imagem não encontrado" });
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      const contentType = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Disposition", "inline");
+      res.sendFile(path.resolve(filePath));
+    } catch (error) {
+      console.error("Error serving invoice image:", error);
+      res.status(500).json({ message: "Erro ao exibir imagem" });
+    }
+  });
+
+  // GET /api/invoices/:id/download - Download da imagem da nota (verifica permissão)
   app.get("/api/invoices/:id/download", async (req, res) => {
     try {
       if (!req.isAuthenticated()) {
         return res.status(401).json({ message: "Não autenticado" });
       }
-
-      const user = req.user as any;
-      const invoiceId = parseInt(req.params.id);
-
-      if (isNaN(invoiceId)) {
-        return res.status(400).json({ message: "ID inválido" });
-      }
-
+      const user = req.user as { id: number; role: string };
+      const invoiceId = parseInt(req.params.id, 10);
+      if (isNaN(invoiceId)) return res.status(400).json({ message: "ID inválido" });
       const invoice = await storage.getInvoice(invoiceId);
-      if (!invoice) {
-        return res.status(404).json({ message: "Nota fiscal não encontrada" });
-      }
-
-      // Verificar permissão: usuário é o dono ou é admin
-      if (invoice.userId !== user.id && user.role !== "admin") {
+      if (!invoice) return res.status(404).json({ message: "Nota fiscal não encontrada" });
+      if (invoice.psychologistId !== user.id && user.role !== "admin") {
         return res.status(403).json({ message: "Acesso negado" });
       }
-
-      // Construir caminho do arquivo
-      const filePath = path.join(process.cwd(), invoice.filePath);
-
-      if (!fs.existsSync(filePath)) {
-        return res.status(404).json({ message: "Arquivo não encontrado" });
+      const filePath = invoice.imagePath ? path.join(process.cwd(), invoice.imagePath) : null;
+      if (!filePath || !fs.existsSync(filePath)) {
+        return res.status(404).json({ message: "Arquivo da imagem não encontrado" });
       }
-
-      // Enviar o arquivo com o nome original
-      res.download(filePath, invoice.originalFilename);
+      const filename = `nota-${invoice.numeroNota ?? invoice.id}.jpg`;
+      res.download(filePath, filename);
     } catch (error) {
       console.error("Error downloading invoice:", error);
       res.status(500).json({ message: "Erro ao baixar nota fiscal" });
@@ -1938,33 +2133,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!req.isAuthenticated()) {
         return res.status(401).json({ message: "Não autenticado" });
       }
-
-      const user = req.user as any;
-      const invoiceId = parseInt(req.params.id);
-
-      if (isNaN(invoiceId)) {
-        return res.status(400).json({ message: "ID inválido" });
-      }
-
+      const user = req.user as { id: number };
+      const invoiceId = parseInt(req.params.id, 10);
+      if (isNaN(invoiceId)) return res.status(400).json({ message: "ID inválido" });
       const invoice = await storage.getInvoice(invoiceId);
-      if (!invoice) {
-        return res.status(404).json({ message: "Nota fiscal não encontrada" });
-      }
-
-      // Verificar permissão: apenas o dono pode excluir
-      if (invoice.userId !== user.id) {
+      if (!invoice) return res.status(404).json({ message: "Nota fiscal não encontrada" });
+      if (invoice.psychologistId !== user.id) {
         return res.status(403).json({ message: "Acesso negado. Você só pode excluir suas próprias notas." });
       }
-
-      // Remover arquivo do disco
-      const filePath = path.join(process.cwd(), invoice.filePath);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+      if (invoice.imagePath) {
+        const filePath = path.join(process.cwd(), invoice.imagePath);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       }
-
-      // Remover do banco
       await storage.deleteInvoice(invoiceId);
-
       res.json({ message: "Nota fiscal excluída com sucesso" });
     } catch (error) {
       console.error("Error deleting invoice:", error);

@@ -23,7 +23,7 @@ import session from "express-session";
 import createMemoryStore from "memorystore";
 import connectPg from "connect-pg-simple";
 import { db, pool } from "./db";
-import { eq, and, gte, lte, sql } from "drizzle-orm";
+import { eq, and, gte, lte, sql, desc, ilike, or } from "drizzle-orm";
 import fs from "fs";
 import path from "path";
 
@@ -99,15 +99,18 @@ export interface IStorage {
   getAllRolePermissions(): Promise<RolePermission[]>;
   getRolePermissionsByRole(role: string): Promise<RolePermission[]>;
 
-  // Invoice related methods
+  // Invoice related methods (NFS-e)
   getInvoice(id: number): Promise<Invoice | undefined>;
   createInvoice(invoice: InsertInvoice): Promise<Invoice>;
+  updateInvoice(id: number, data: Partial<Invoice>): Promise<Invoice | undefined>;
   deleteInvoice(id: number): Promise<boolean>;
-  getInvoicesByUserId(userId: number): Promise<Invoice[]>;
+  getInvoicesByUserId(userId: number, opts?: { limit?: number; offset?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: Invoice[]; total: number }>;
+  getInvoicesSummary(psychologistId: number, opts?: { dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }>;
   getAllInvoices(): Promise<Invoice[]>;
   getInvoicesByReferenceMonth(referenceMonth: string): Promise<Invoice[]>;
-  getInvoicesByReferenceMonth(referenceMonth: string): Promise<Invoice[]>;
   getInvoiceByUserAndMonth(userId: number, referenceMonth: string): Promise<Invoice | undefined>;
+  getInvoicesAdmin(opts?: { limit?: number; offset?: number; psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: (Invoice & { user: User })[]; total: number }>;
+  getInvoicesSummaryAdmin(opts?: { psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }>;
 
   // Patient Record System Methods
   // Patients
@@ -719,23 +722,35 @@ export class MemStorage implements IStorage {
   async deleteInvoice(id: number): Promise<boolean> {
     return false;
   }
-  async getInvoicesByUserId(userId: number): Promise<Invoice[]> {
-    return [];
+  async getInvoicesByUserId(_userId: number, _opts?: { limit?: number; offset?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: Invoice[]; total: number }> {
+    return { invoices: [], total: 0 };
+  }
+  async getInvoicesSummary(_psychologistId: number, _opts?: { dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }> {
+    return { totalCount: 0, sumValorServicos: "0", sumValorLiquido: "0" };
   }
   async getAllInvoices(): Promise<Invoice[]> {
     return [];
   }
-  async getInvoicesByReferenceMonth(referenceMonth: string): Promise<Invoice[]> {
+  async getInvoicesByReferenceMonth(_referenceMonth: string): Promise<Invoice[]> {
     return [];
   }
-  async getInvoiceByUserAndMonth(userId: number, referenceMonth: string): Promise<Invoice | undefined> {
+  async getInvoiceByUserAndMonth(_userId: number, _referenceMonth: string): Promise<Invoice | undefined> {
     return undefined;
+  }
+  async getInvoicesAdmin(_opts?: { limit?: number; offset?: number; psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: (Invoice & { user: User })[]; total: number }> {
+    return { invoices: [], total: 0 };
+  }
+  async getInvoicesSummaryAdmin(_opts?: { psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }> {
+    return { totalCount: 0, sumValorServicos: "0", sumValorLiquido: "0" };
   }
   async getInvoiceWithUser(id: number): Promise<(Invoice & { user: User }) | undefined> {
     return undefined;
   }
   async getAllInvoicesWithUsers(): Promise<(Invoice & { user: User })[]> {
     return [];
+  }
+  async updateInvoice(_id: number, _data: Partial<Invoice>): Promise<Invoice | undefined> {
+    return undefined;
   }
 
   // Patient Record System Stubs (Not implemented in MemStorage)
@@ -1119,7 +1134,7 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(rolePermissions).where(eq(rolePermissions.role, role));
   }
 
-  // Invoice methods
+  // Invoice methods (NFS-e)
   async getInvoice(id: number): Promise<Invoice | undefined> {
     const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
     return invoice;
@@ -1127,7 +1142,12 @@ export class DatabaseStorage implements IStorage {
 
   async createInvoice(invoice: InsertInvoice): Promise<Invoice> {
     const [newInvoice] = await db.insert(invoices).values(invoice).returning();
-    return newInvoice;
+    return newInvoice!;
+  }
+
+  async updateInvoice(id: number, data: Partial<Invoice>): Promise<Invoice | undefined> {
+    const [updated] = await db.update(invoices).set({ ...data, updatedAt: new Date() }).where(eq(invoices.id, id)).returning();
+    return updated;
   }
 
   async deleteInvoice(id: number): Promise<boolean> {
@@ -1135,64 +1155,91 @@ export class DatabaseStorage implements IStorage {
     return !!deleted;
   }
 
-  async getInvoicesByUserId(userId: number): Promise<Invoice[]> {
-    return await db.select().from(invoices).where(eq(invoices.userId, userId));
+  async getInvoicesByUserId(psychologistId: number, opts?: { limit?: number; offset?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: Invoice[]; total: number }> {
+    const conditions = [eq(invoices.psychologistId, psychologistId)];
+    if (opts?.dataEmissaoFrom) conditions.push(gte(invoices.dataEmissao, opts.dataEmissaoFrom));
+    if (opts?.dataEmissaoTo) conditions.push(lte(invoices.dataEmissao, opts.dataEmissaoTo));
+    if (opts?.status) conditions.push(eq(invoices.status, opts.status));
+    if (opts?.search) {
+      const term = `%${opts.search}%`;
+      conditions.push(or(ilike(invoices.tomadorNome, term), ilike(invoices.tomadorCpfCnpj, term))!);
+    }
+    const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
+    const totalResult = await db.select({ count: sql<number>`count(*)::int` }).from(invoices).where(whereClause);
+    const total = totalResult[0]?.count ?? 0;
+    let query = db.select().from(invoices).where(whereClause).orderBy(desc(invoices.dataUpload));
+    if (opts?.limit != null) query = query.limit(opts.limit) as typeof query;
+    if (opts?.offset != null) query = query.offset(opts.offset) as typeof query;
+    const rows = await query;
+    return { invoices: rows, total };
+  }
+
+  async getInvoicesSummary(psychologistId: number, opts?: { dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }> {
+    const conditions = [eq(invoices.psychologistId, psychologistId)];
+    if (opts?.dataEmissaoFrom) conditions.push(gte(invoices.dataEmissao, opts.dataEmissaoFrom));
+    if (opts?.dataEmissaoTo) conditions.push(lte(invoices.dataEmissao, opts.dataEmissaoTo));
+    if (opts?.status) conditions.push(eq(invoices.status, opts.status));
+    const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
+    const [row] = await db.select({
+      totalCount: sql<number>`count(*)::int`,
+      sumValorServicos: sql<string>`coalesce(sum(${invoices.valorServicos})::text, '0')`,
+      sumValorLiquido: sql<string>`coalesce(sum(${invoices.valorLiquido})::text, '0')`,
+    }).from(invoices).where(whereClause);
+    return { totalCount: row?.totalCount ?? 0, sumValorServicos: row?.sumValorServicos ?? "0", sumValorLiquido: row?.sumValorLiquido ?? "0" };
   }
 
   async getAllInvoices(): Promise<Invoice[]> {
     return await db.select().from(invoices);
   }
 
-  async getInvoicesByReferenceMonth(referenceMonth: string): Promise<Invoice[]> {
-    return await db.select().from(invoices).where(eq(invoices.referenceMonth, referenceMonth));
+  async getInvoicesByReferenceMonth(_referenceMonth: string): Promise<Invoice[]> {
+    return await db.select().from(invoices);
   }
 
-  async getInvoiceByUserAndMonth(userId: number, referenceMonth: string): Promise<Invoice | undefined> {
-    const [invoice] = await db.select().from(invoices)
-      .where(and(eq(invoices.userId, userId), eq(invoices.referenceMonth, referenceMonth)));
-    return invoice;
+  async getInvoiceByUserAndMonth(_userId: number, _referenceMonth: string): Promise<Invoice | undefined> {
+    return undefined;
+  }
+
+  async getInvoicesAdmin(opts?: { limit?: number; offset?: number; psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: (Invoice & { user: User })[]; total: number }> {
+    const conditions: ReturnType<typeof eq>[] = [];
+    if (opts?.psychologistId != null) conditions.push(eq(invoices.psychologistId, opts.psychologistId));
+    if (opts?.dataEmissaoFrom) conditions.push(gte(invoices.dataEmissao, opts.dataEmissaoFrom));
+    if (opts?.dataEmissaoTo) conditions.push(lte(invoices.dataEmissao, opts.dataEmissaoTo));
+    if (opts?.status) conditions.push(eq(invoices.status, opts.status));
+    if (opts?.search) {
+      const term = `%${opts.search}%`;
+      conditions.push(or(ilike(invoices.tomadorNome, term), ilike(invoices.tomadorCpfCnpj, term))!);
+    }
+    const whereClause = conditions.length === 0 ? sql`1=1` : conditions.length === 1 ? conditions[0] : and(...conditions);
+    const totalCountResult = await db.select({ count: sql<number>`count(*)::int` }).from(invoices).where(whereClause);
+    const totalCount = totalCountResult[0]?.count ?? 0;
+    const limit = opts?.limit ?? 20;
+    const offset = opts?.offset ?? 0;
+    const result = await db.select().from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).where(whereClause).orderBy(desc(invoices.dataUpload)).limit(limit).offset(offset);
+    const invoicesWithUsers = result.map((r) => ({ ...r.invoices, user: r.users }));
+    return { invoices: invoicesWithUsers, total: totalCount };
+  }
+
+  async getInvoicesSummaryAdmin(opts?: { psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }> {
+    const conditions: ReturnType<typeof eq>[] = [];
+    if (opts?.psychologistId != null) conditions.push(eq(invoices.psychologistId, opts.psychologistId));
+    if (opts?.dataEmissaoFrom) conditions.push(gte(invoices.dataEmissao, opts.dataEmissaoFrom));
+    if (opts?.dataEmissaoTo) conditions.push(lte(invoices.dataEmissao, opts.dataEmissaoTo));
+    if (opts?.status) conditions.push(eq(invoices.status, opts.status));
+    const whereClause = conditions.length === 0 ? sql`1=1` : conditions.length === 1 ? conditions[0] : and(...conditions);
+    const [row] = await db.select({ totalCount: sql<number>`count(*)::int`, sumValorServicos: sql<string>`coalesce(sum(${invoices.valorServicos})::text, '0')`, sumValorLiquido: sql<string>`coalesce(sum(${invoices.valorLiquido})::text, '0')` }).from(invoices).where(whereClause);
+    return { totalCount: row?.totalCount ?? 0, sumValorServicos: row?.sumValorServicos ?? "0", sumValorLiquido: row?.sumValorLiquido ?? "0" };
   }
 
   async getInvoiceWithUser(id: number): Promise<(Invoice & { user: User }) | undefined> {
-    const result = await db.select({
-      id: invoices.id,
-      userId: invoices.userId,
-      referenceMonth: invoices.referenceMonth,
-      filePath: invoices.filePath,
-      originalFilename: invoices.originalFilename,
-      mimeType: invoices.mimeType,
-      fileSize: invoices.fileSize,
-      status: invoices.status,
-      createdAt: invoices.createdAt,
-      updatedAt: invoices.updatedAt,
-      user: users
-    })
-      .from(invoices)
-      .innerJoin(users, eq(invoices.userId, users.id))
-      .where(eq(invoices.id, id));
-
+    const result = await db.select().from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).where(eq(invoices.id, id));
     if (result.length === 0) return undefined;
-    return { ...result[0], user: result[0].user };
+    return { ...result[0].invoices, user: result[0].users };
   }
 
   async getAllInvoicesWithUsers(): Promise<(Invoice & { user: User })[]> {
-    const result = await db.select({
-      id: invoices.id,
-      userId: invoices.userId,
-      referenceMonth: invoices.referenceMonth,
-      filePath: invoices.filePath,
-      originalFilename: invoices.originalFilename,
-      mimeType: invoices.mimeType,
-      fileSize: invoices.fileSize,
-      status: invoices.status,
-      createdAt: invoices.createdAt,
-      updatedAt: invoices.updatedAt,
-      user: users
-    })
-      .from(invoices)
-      .innerJoin(users, eq(invoices.userId, users.id));
-
-    return result.map(r => ({ ...r, user: r.user }));
+    const result = await db.select().from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).orderBy(desc(invoices.dataUpload));
+    return result.map((r) => ({ ...r.invoices, user: r.users }));
   }
 
   // Patient Record System Implementation

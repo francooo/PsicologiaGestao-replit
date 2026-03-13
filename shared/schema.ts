@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, date, time, decimal, timestamp, primaryKey } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, date, time, decimal, timestamp, primaryKey, jsonb, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -366,33 +366,93 @@ export const passwordResetTokensRelations = relations(passwordResetTokens, ({ on
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type InsertPasswordResetToken = z.infer<typeof insertPasswordResetTokenSchema>;
 
-// Invoices (Notas Fiscais)
-export const invoices = pgTable("invoices", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id),
-  referenceMonth: text("reference_month").notNull(), // Formato: YYYY-MM (ex: 2025-01)
-  filePath: text("file_path").notNull(),
-  originalFilename: text("original_filename").notNull(),
-  mimeType: text("mime_type").notNull(),
-  fileSize: integer("file_size").notNull(), // em bytes
-  status: text("status").notNull().default("enviada"), // enviada, pendente, aprovada
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+// Invoices (Notas Fiscais NFS-e — Leitura Inteligente por IA)
+export const invoices = pgTable(
+  "invoices",
+  {
+    id: serial("id").primaryKey(),
+    psychologistId: integer("psychologist_id").notNull().references(() => users.id),
+    clinicId: integer("clinic_id"),
+    // Identificação da nota
+    chaveNfe: text("chave_nfe"),
+    numeroNota: text("numero_nota"),
+    serie: text("serie"),
+    dataEmissao: date("data_emissao"),
+    dataUpload: timestamp("data_upload", { withTimezone: true }).defaultNow(),
+    codigoVerificacao: text("codigo_verificacao"),
+    protocoloAutorizacao: text("protocolo_autorizacao"),
+    codigoMunicipioIbge: text("codigo_municipio_ibge"),
+    // Emitente (prestador)
+    emitenteNome: text("emitente_nome"),
+    emitenteCnpjCpf: text("emitente_cnpj_cpf"),
+    emitenteCrp: text("emitente_crp"),
+    emitenteIe: text("emitente_ie"),
+    emitenteIm: text("emitente_im"),
+    emitenteEndereco: text("emitente_endereco"),
+    emitenteBairro: text("emitente_bairro"),
+    emitenteMunicipio: text("emitente_municipio"),
+    emitenteUf: text("emitente_uf"),
+    emitenteCep: text("emitente_cep"),
+    emitenteTelefone: text("emitente_telefone"),
+    emitenteEmail: text("emitente_email"),
+    emitenteComplemento: text("emitente_complemento"),
+    // Tomador (cliente/paciente)
+    tomadorNome: text("tomador_nome"),
+    tomadorCpfCnpj: text("tomador_cpf_cnpj"),
+    tomadorEndereco: text("tomador_endereco"),
+    tomadorBairro: text("tomador_bairro"),
+    tomadorMunicipio: text("tomador_municipio"),
+    tomadorUf: text("tomador_uf"),
+    tomadorCep: text("tomador_cep"),
+    tomadorEmail: text("tomador_email"),
+    tomadorTelefone: text("tomador_telefone"),
+    tomadorIe: text("tomador_ie"),
+    tomadorIm: text("tomador_im"),
+    tomadorComplemento: text("tomador_complemento"),
+    patientId: integer("patient_id"),
+    // Serviço
+    descricaoServico: text("descricao_servico"),
+    codigoServico: text("codigo_servico"),
+    codigoCnae: text("codigo_cnae"),
+    nbs: text("nbs"),
+    codigoMunicipioServico: text("codigo_municipio_servico"),
+    issRetido: boolean("iss_retido").default(false),
+    aliquotaIss: decimal("aliquota_iss", { precision: 5, scale: 4 }),
+    // Valores
+    valorServicos: decimal("valor_servicos", { precision: 12, scale: 2 }),
+    valorDeducoes: decimal("valor_deducoes", { precision: 12, scale: 2 }).default("0"),
+    baseCalculo: decimal("base_calculo", { precision: 12, scale: 2 }),
+    valorIss: decimal("valor_iss", { precision: 12, scale: 2 }),
+    valorPis: decimal("valor_pis", { precision: 12, scale: 2 }),
+    valorCofins: decimal("valor_cofins", { precision: 12, scale: 2 }),
+    valorInss: decimal("valor_inss", { precision: 12, scale: 2 }),
+    valorIr: decimal("valor_ir", { precision: 12, scale: 2 }),
+    valorCsll: decimal("valor_csll", { precision: 12, scale: 2 }),
+    valorLiquido: decimal("valor_liquido", { precision: 12, scale: 2 }),
+    valorIbs: decimal("valor_ibs", { precision: 12, scale: 2 }),
+    valorCbs: decimal("valor_cbs", { precision: 12, scale: 2 }),
+    cst: text("cst"),
+    codigoClassificacaoTributaria: text("codigo_classificacao_tributaria"),
+    // Controle e IA
+    imageUrl: text("image_url"),
+    imagePath: text("image_path"),
+    aiRawResponse: jsonb("ai_raw_response"),
+    aiConfidenceScore: decimal("ai_confidence_score", { precision: 4, scale: 3 }),
+    aiExtractedAt: timestamp("ai_extracted_at", { withTimezone: true }),
+    revisadoPelaPsicologa: boolean("revisado_pela_psicologa").default(false),
+    observacoes: text("observacoes"),
+    status: text("status").notNull().default("ativa"), // ativa, cancelada, pendente
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => [unique("invoices_psychologist_chave_nfe").on(t.psychologistId, t.chaveNfe)]
+);
 
-export const insertInvoiceSchema = createInsertSchema(invoices).pick({
-  userId: true,
-  referenceMonth: true,
-  filePath: true,
-  originalFilename: true,
-  mimeType: true,
-  fileSize: true,
-  status: true,
-});
+export const insertInvoiceSchema = createInsertSchema(invoices);
 
 export const invoicesRelations = relations(invoices, ({ one }) => ({
   user: one(users, {
-    fields: [invoices.userId],
+    fields: [invoices.psychologistId],
     references: [users.id],
     relationName: "userInvoices",
   }),
