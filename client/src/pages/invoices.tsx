@@ -70,7 +70,7 @@ interface SummaryResponse {
 
 const PAGE_SIZE = 20;
 const STATUS_OPTIONS = [
-  { value: "", label: "Todos" },
+  { value: "all", label: "Todos" },
   { value: "ativa", label: "Ativa" },
   { value: "pendente", label: "Pendente" },
   { value: "cancelada", label: "Cancelada" },
@@ -95,7 +95,7 @@ export default function Invoices() {
   const [page, setPage] = useState(0);
   const [dataEmissaoFrom, setDataEmissaoFrom] = useState("");
   const [dataEmissaoTo, setDataEmissaoTo] = useState("");
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState("all");
   const [search, setSearch] = useState("");
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
 
@@ -105,7 +105,7 @@ export default function Invoices() {
     p.set("offset", String(page * PAGE_SIZE));
     if (dataEmissaoFrom) p.set("data_emissao_from", dataEmissaoFrom);
     if (dataEmissaoTo) p.set("data_emissao_to", dataEmissaoTo);
-    if (status) p.set("status", status);
+    if (status && status !== "all") p.set("status", status);
     if (search.trim()) p.set("search", search.trim());
     return p.toString();
   }, [page, dataEmissaoFrom, dataEmissaoTo, status, search]);
@@ -114,7 +114,7 @@ export default function Invoices() {
     const p = new URLSearchParams();
     if (dataEmissaoFrom) p.set("data_emissao_from", dataEmissaoFrom);
     if (dataEmissaoTo) p.set("data_emissao_to", dataEmissaoTo);
-    if (status) p.set("status", status);
+    if (status && status !== "all") p.set("status", status);
     return p.toString();
   }, [dataEmissaoFrom, dataEmissaoTo, status]);
 
