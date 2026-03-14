@@ -224,6 +224,10 @@ export default function Appointments() {
     notes: a.notes,
   }));
 
+  const patientOptions = Array.from(
+    new Set(formattedAppointments.map(a => a.patientName))
+  ).sort();
+
   // ── Week appointments by date ──
   const weeklyByDate = formattedAppointments.reduce<Record<string, typeof formattedAppointments>>((acc, a) => {
     if (!acc[a.date]) acc[a.date] = [];
@@ -387,7 +391,7 @@ export default function Appointments() {
   const dailyEvents = formattedAppointments.filter(a => a.date === formatDateForRequest(selectedDate));
 
   const filteredAppointments = formattedAppointments.filter(a => {
-    if (filterPatient && a.psychologistId !== Number(filterPatient)) return false;
+    if (filterPatient && a.patientName !== filterPatient) return false;
     if (filterStatus && a.status !== filterStatus) return false;
     return true;
   });
@@ -559,8 +563,8 @@ export default function Appointments() {
                   className="px-2 py-1.5 border border-slate-200 rounded-md text-[12px] text-slate-600 bg-white outline-none focus:border-[#1e7e8c]"
                 >
                   <option value="">Todos os pacientes</option>
-                  {(psychologists as any[]).map(p => (
-                    <option key={p.id} value={p.id}>{p.user.fullName}</option>
+                  {patientOptions.map(name => (
+                    <option key={name} value={name}>{name}</option>
                   ))}
                 </select>
 
