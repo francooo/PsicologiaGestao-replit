@@ -7,7 +7,6 @@ import AuthPage from "@/pages/auth-page";
 import Dashboard from "@/pages/dashboard";
 import Appointments from "@/pages/appointments";
 import Psychologists from "@/pages/psychologists";
-import Rooms from "@/pages/rooms";
 import Financial from "@/pages/financial";
 import CashFlow from "@/pages/cash-flow";
 import Permissions from "@/pages/permissions";
@@ -29,7 +28,6 @@ function Router() {
       <ProtectedRoute path="/dashboard" component={Dashboard} />
       <ProtectedRoute path="/appointments" component={Appointments} />
       <ProtectedRoute path="/psychologists" component={Psychologists} />
-      <ProtectedRoute path="/rooms" component={Rooms} />
       <ProtectedRoute path="/financial" component={Financial} />
       <ProtectedRoute path="/cash-flow" component={CashFlow} />
       <ProtectedRoute path="/invoices" component={Invoices} />

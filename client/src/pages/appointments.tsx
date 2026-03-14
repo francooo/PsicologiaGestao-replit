@@ -69,7 +69,7 @@ import {
 import { format, addDays, startOfWeek, endOfWeek } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { type Patient } from "@shared/schema";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { cn } from "@/lib/utils";
 
 // ─── Schemas ────────────────────────────────────────────────────────────────
@@ -123,24 +123,15 @@ function timeToMinutes(t: string) {
 export default function Appointments() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [location, setLocation] = useLocation();
+  const [, setLocation] = useLocation();
+  const searchString = useSearch();
 
-  // Read tab from URL
-  const getTab = () => {
-    if (typeof window === 'undefined') return 'consultas';
-    const p = new URLSearchParams(window.location.search);
-    return p.get('tab') || 'consultas';
-  };
-  const [activeTab, setActiveTab] = useState<'consultas' | 'rooms'>(getTab() as any);
-
-  useEffect(() => {
-    const p = new URLSearchParams(window.location.search);
-    const tab = (p.get('tab') || 'consultas') as 'consultas' | 'rooms';
-    setActiveTab(tab);
-  }, [location]);
+  const activeTab = (() => {
+    const p = new URLSearchParams(searchString);
+    return (p.get('tab') === 'rooms' ? 'rooms' : 'consultas') as 'consultas' | 'rooms';
+  })();
 
   const switchTab = (tab: 'consultas' | 'rooms') => {
-    setActiveTab(tab);
     setLocation(tab === 'rooms' ? '/appointments?tab=rooms' : '/appointments');
   };
 

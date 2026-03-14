@@ -1,12 +1,11 @@
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
-import { Link, useLocation } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { useState, useEffect } from "react";
 import {
   LayoutDashboard,
   CalendarDays,
   Users,
-  DoorOpen,
   BarChart3,
   Lock,
   Settings,
@@ -25,6 +24,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 export default function Sidebar() {
   const { user, logoutMutation } = useAuth();
   const [location] = useLocation();
+  const searchString = useSearch();
   const [agendamentosOpen, setAgendamentosOpen] = useState(false);
 
   const isAppointmentsPath = location === '/appointments' || location.startsWith('/appointments');
@@ -36,8 +36,7 @@ export default function Sidebar() {
   const isActive = (path: string) => location === path;
   const isActiveTab = (tab: string) => {
     if (!isAppointmentsPath) return false;
-    const search = typeof window !== 'undefined' ? window.location.search : '';
-    const params = new URLSearchParams(search);
+    const params = new URLSearchParams(searchString);
     const currentTab = params.get('tab') || 'consultas';
     return currentTab === tab;
   };
@@ -55,12 +54,6 @@ export default function Sidebar() {
 
   const mainItems = [
     {
-      name: "Dashboard",
-      icon: <LayoutDashboard className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
-      href: "/dashboard",
-      roles: ["admin", "psychologist", "receptionist"],
-    },
-    {
       name: "Pacientes",
       icon: <Contact className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
       href: "/patients",
@@ -71,12 +64,6 @@ export default function Sidebar() {
       icon: <Users className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
       href: "/psychologists",
       roles: ["admin", "receptionist"],
-    },
-    {
-      name: "Salas",
-      icon: <DoorOpen className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
-      href: "/rooms",
-      roles: ["admin", "psychologist", "receptionist"],
     },
   ];
 
