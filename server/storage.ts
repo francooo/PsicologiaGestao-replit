@@ -63,6 +63,7 @@ export interface IStorage {
   getAppointmentsByPsychologistId(psychologistId: number): Promise<Appointment[]>;
   getAppointmentsByDate(date: Date): Promise<Appointment[]>;
   getAppointmentsByDateRange(startDate: Date, endDate: Date): Promise<Appointment[]>;
+  getAppointmentsByPsychologistIdAndDateRange(psychologistId: number, startDate: Date, endDate: Date): Promise<Appointment[]>;
 
   // Transaction related methods
   getTransaction(id: number): Promise<Transaction | undefined>;
@@ -448,6 +449,11 @@ export class MemStorage implements IStorage {
         const appointmentDate = new Date(appointment.date);
         return appointmentDate >= startDate && appointmentDate <= endDate;
       });
+  }
+
+  async getAppointmentsByPsychologistIdAndDateRange(psychologistId: number, startDate: Date, endDate: Date): Promise<Appointment[]> {
+    return (await this.getAppointmentsByDateRange(startDate, endDate))
+      .filter(a => a.psychologistId === psychologistId);
   }
 
   // Transaction methods
@@ -983,6 +989,15 @@ export class DatabaseStorage implements IStorage {
   async getAppointmentsByDateRange(startDate: Date, endDate: Date): Promise<Appointment[]> {
     return await db.select().from(appointments)
       .where(and(
+        gte(appointments.date, startDate.toISOString()),
+        lte(appointments.date, endDate.toISOString())
+      ));
+  }
+
+  async getAppointmentsByPsychologistIdAndDateRange(psychologistId: number, startDate: Date, endDate: Date): Promise<Appointment[]> {
+    return await db.select().from(appointments)
+      .where(and(
+        eq(appointments.psychologistId, psychologistId),
         gte(appointments.date, startDate.toISOString()),
         lte(appointments.date, endDate.toISOString())
       ));

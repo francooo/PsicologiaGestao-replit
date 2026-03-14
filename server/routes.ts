@@ -368,10 +368,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       let appointments;
 
-      if (req.query.psychologistId) {
-        appointments = await storage.getAppointmentsByPsychologistId(
-          parseInt(req.query.psychologistId as string)
+      const user = req.user as any;
+      let autoPsychologistId: number | null = null;
+      if (user?.role === 'psychologist') {
+        const psychProfile = await storage.getPsychologistByUserId(user.id);
+        if (psychProfile) autoPsychologistId = psychProfile.id;
+      }
+
+      const explicitPsychId = req.query.psychologistId
+        ? parseInt(req.query.psychologistId as string)
+        : autoPsychologistId;
+
+      if (explicitPsychId && req.query.startDate && req.query.endDate) {
+        appointments = await storage.getAppointmentsByPsychologistIdAndDateRange(
+          explicitPsychId,
+          new Date(req.query.startDate as string),
+          new Date(req.query.endDate as string)
         );
+      } else if (explicitPsychId && req.query.date) {
+        const dateAppts = await storage.getAppointmentsByDate(
+          new Date(req.query.date as string)
+        );
+        appointments = dateAppts.filter(a => a.psychologistId === explicitPsychId);
+      } else if (explicitPsychId) {
+        appointments = await storage.getAppointmentsByPsychologistId(explicitPsychId);
       } else if (req.query.date) {
         appointments = await storage.getAppointmentsByDate(
           new Date(req.query.date as string)
