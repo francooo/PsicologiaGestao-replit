@@ -1,6 +1,7 @@
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import { Link, useLocation } from "wouter";
+import { useState, useEffect } from "react";
 import {
   LayoutDashboard,
   CalendarDays,
@@ -12,136 +13,131 @@ import {
   LogOut,
   UserCircle,
   LineChart,
-  DollarSign,
   FileText,
   ClipboardList,
-  Contact
+  Contact,
+  ChevronDown,
+  CalendarCheck2,
+  BookOpen,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 export default function Sidebar() {
   const { user, logoutMutation } = useAuth();
   const [location] = useLocation();
+  const [agendamentosOpen, setAgendamentosOpen] = useState(false);
 
-  const isActive = (path: string) => {
-    return location === path;
+  const isAppointmentsPath = location === '/appointments' || location.startsWith('/appointments');
+
+  useEffect(() => {
+    if (isAppointmentsPath) setAgendamentosOpen(true);
+  }, [isAppointmentsPath]);
+
+  const isActive = (path: string) => location === path;
+  const isActiveTab = (tab: string) => {
+    if (!isAppointmentsPath) return false;
+    const search = typeof window !== 'undefined' ? window.location.search : '';
+    const params = new URLSearchParams(search);
+    const currentTab = params.get('tab') || 'consultas';
+    return currentTab === tab;
   };
 
-  const navigationItems = [
+  const handleLogout = () => logoutMutation.mutate();
+
+  const getRoleLabel = (role?: string | null) => {
+    switch (role) {
+      case "admin": return "Admin";
+      case "psychologist": return "Psicóloga";
+      case "receptionist": return "Recepção";
+      default: return role || "Usuário";
+    }
+  };
+
+  const mainItems = [
     {
       name: "Dashboard",
-      icon: <LayoutDashboard className="w-5 h-5 mr-3 text-primary" />,
+      icon: <LayoutDashboard className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
       href: "/dashboard",
-      allowedRoles: ["admin", "psychologist", "receptionist"],
-      section: "main" as const,
-    },
-    {
-      name: "Agendamentos",
-      icon: <CalendarDays className="w-5 h-5 mr-3 text-primary" />,
-      href: "/appointments",
-      allowedRoles: ["admin", "psychologist", "receptionist"],
-      section: "main" as const,
+      roles: ["admin", "psychologist", "receptionist"],
     },
     {
       name: "Pacientes",
-      icon: <Contact className="w-5 h-5 mr-3 text-primary" />,
+      icon: <Contact className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
       href: "/patients",
-      allowedRoles: ["admin", "psychologist", "receptionist"],
-      section: "main" as const,
+      roles: ["admin", "psychologist", "receptionist"],
     },
     {
       name: "Psicólogas",
-      icon: <Users className="w-5 h-5 mr-3 text-primary" />,
+      icon: <Users className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
       href: "/psychologists",
-      allowedRoles: ["admin", "receptionist"],
-      section: "main" as const,
+      roles: ["admin", "receptionist"],
     },
     {
       name: "Salas",
-      icon: <DoorOpen className="w-5 h-5 mr-3 text-primary" />,
+      icon: <DoorOpen className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
       href: "/rooms",
-      allowedRoles: ["admin", "psychologist", "receptionist"],
-      section: "main" as const,
+      roles: ["admin", "psychologist", "receptionist"],
     },
+  ];
+
+  const financialItems = [
     {
       name: "Financeiro",
-      icon: <BarChart3 className="w-5 h-5 mr-3 text-primary" />,
+      icon: <BarChart3 className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
       href: "/financial",
-      allowedRoles: ["admin", "psychologist", "receptionist"],
-      section: "financial" as const,
+      roles: ["admin", "psychologist", "receptionist"],
     },
     {
       name: "Fluxo de Caixa",
-      icon: <LineChart className="w-5 h-5 mr-3 text-primary" />,
+      icon: <LineChart className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
       href: "/cash-flow",
-      allowedRoles: ["admin", "psychologist", "receptionist"],
-      section: "financial" as const,
+      roles: ["admin", "psychologist", "receptionist"],
     },
     {
       name: "Minhas Notas Fiscais",
-      icon: <FileText className="w-5 h-5 mr-3 text-primary" />,
+      icon: <FileText className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
       href: "/invoices",
-      allowedRoles: ["admin", "psychologist", "receptionist"],
-      section: "financial" as const,
+      roles: ["admin", "psychologist", "receptionist"],
     },
     {
       name: "Gestão de Notas",
-      icon: <ClipboardList className="w-5 h-5 mr-3 text-primary" />,
+      icon: <ClipboardList className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
       href: "/admin/invoices",
-      allowedRoles: ["admin"],
-      section: "financial" as const,
+      roles: ["admin"],
     },
+  ];
+
+  const systemItems = [
     {
       name: "Permissões",
-      icon: <Lock className="w-5 h-5 mr-3 text-primary" />,
+      icon: <Lock className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
       href: "/permissions",
-      allowedRoles: ["admin"],
-      section: "system" as const,
+      roles: ["admin"],
     },
     {
       name: "Meu Perfil",
-      icon: <UserCircle className="w-5 h-5 mr-3 text-primary" />,
+      icon: <UserCircle className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
       href: "/profile",
-      allowedRoles: ["admin", "psychologist", "receptionist"],
-      section: "system" as const,
+      roles: ["admin", "psychologist", "receptionist"],
     },
     {
       name: "Configurações",
-      icon: <Settings className="w-5 h-5 mr-3 text-primary" />,
+      icon: <Settings className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
       href: "/settings",
-      allowedRoles: ["admin", "psychologist", "receptionist"],
-      section: "system" as const,
-    }
+      roles: ["admin", "psychologist", "receptionist"],
+    },
   ];
 
-  const handleLogout = () => {
-    logoutMutation.mutate();
-  };
+  const userRole = user?.role || "";
 
-  // Filter items based on user role
-  const filteredItems = navigationItems.filter((item) =>
-    item.allowedRoles.includes(user?.role || "")
+  const visibleMain = mainItems.filter(i => i.roles.includes(userRole));
+  const visibleFinancial = financialItems.filter(i => i.roles.includes(userRole));
+  const visibleSystem = systemItems.filter(i => i.roles.includes(userRole));
+
+  const navLinkClass = (active: boolean) => cn(
+    "flex items-center rounded-md px-3 py-2 mb-1 text-[13px] font-medium text-slate-600 hover:bg-neutral-lightest transition-colors",
+    active && "bg-primary/10 text-primary"
   );
-
-  const mainItems = filteredItems.filter((item) => item.section === "main");
-  const financialItems = filteredItems.filter(
-    (item) => item.section === "financial"
-  );
-  const systemItems = filteredItems.filter((item) => item.section === "system");
-
-  const getRoleLabel = (role?: string | null) => {
-    if (!role) return "Usuário";
-    switch (role) {
-      case "admin":
-        return "Admin";
-      case "psychologist":
-        return "Psicóloga";
-      case "receptionist":
-        return "Recepção";
-      default:
-        return role;
-    }
-  };
 
   return (
     <aside className="hidden md:flex md:flex-col w-64 h-screen fixed left-0 top-0 bg-white border-r border-neutral-light z-20 overflow-y-auto">
@@ -150,50 +146,87 @@ export default function Sidebar() {
         <h1 className="text-primary font-bold text-[17px] leading-tight tracking-[-0.02em]">
           ConsultaPsi
         </h1>
-        <p className="mt-0.5 text-xs text-neutral-dark">
-          Gestão de Consultório
-        </p>
+        <p className="mt-0.5 text-xs text-neutral-dark">Gestão de Consultório</p>
       </div>
 
-      {/* User Profile Section */}
+      {/* User */}
       <div className="px-5 py-3.5 border-b border-neutral-light">
         <div className="flex items-center gap-3">
           <Avatar className="w-9 h-9 border border-primary/30 bg-primary text-white">
-            <AvatarImage
-              src={user?.profileImage || undefined}
-              alt={user?.fullName || "Usuário"}
-            />
-            <AvatarFallback
-              showPsychologySymbol={false}
-              className="text-sm font-semibold bg-primary text-white"
-            >
+            <AvatarImage src={user?.profileImage || undefined} alt={user?.fullName || "Usuário"} />
+            <AvatarFallback showPsychologySymbol={false} className="text-sm font-semibold bg-primary text-white">
               {user?.fullName?.charAt(0) || "U"}
             </AvatarFallback>
           </Avatar>
           <div>
-            <h3 className="text-[13px] font-semibold text-neutral-darkest leading-snug">
-              {user?.fullName || "Usuário"}
-            </h3>
-            <p className="text-[11px] text-neutral-dark">
-              {getRoleLabel(user?.role)}
-            </p>
+            <h3 className="text-[13px] font-semibold text-neutral-darkest leading-snug">{user?.fullName || "Usuário"}</h3>
+            <p className="text-[11px] text-neutral-dark">{getRoleLabel(user?.role)}</p>
           </div>
         </div>
       </div>
 
-      {/* Navigation Menu */}
-      <nav className="py-3 text-sm text-neutral-dark">
+      {/* Nav */}
+      <nav className="py-3 text-sm text-neutral-dark flex-1">
         <ul className="px-2">
-          {mainItems.map((item) => (
+          {/* Dashboard */}
+          <li>
+            <Link href="/dashboard" className={navLinkClass(isActive('/dashboard') || isActive('/'))}>
+              <LayoutDashboard className="w-5 h-5 mr-3 text-primary flex-shrink-0" />
+              Dashboard
+            </Link>
+          </li>
+
+          {/* Agendamentos — grupo expansível */}
+          <li className="mb-1">
+            <button
+              onClick={() => setAgendamentosOpen(o => !o)}
+              className={cn(
+                "flex items-center justify-between w-full rounded-md px-3 py-2 text-[13px] font-medium text-slate-600 hover:bg-neutral-lightest transition-colors",
+                isAppointmentsPath && "bg-primary/10 text-primary"
+              )}
+            >
+              <span className="flex items-center">
+                <CalendarDays className="w-5 h-5 mr-3 text-primary flex-shrink-0" />
+                Agendamentos
+              </span>
+              <ChevronDown
+                className={cn("w-4 h-4 text-slate-400 transition-transform duration-200", agendamentosOpen && "rotate-180")}
+              />
+            </button>
+
+            {agendamentosOpen && (
+              <ul className="mt-1 ml-7 border-l-2 border-[#c4dfe3] pl-3 space-y-0.5">
+                <li>
+                  <Link
+                    href="/appointments"
+                    className={cn(
+                      "flex items-center gap-2 px-2 py-1.5 rounded-r-md text-[13px] font-medium text-slate-500 hover:text-[#1e7e8c] hover:bg-[#e8f4f6] transition-colors",
+                      isAppointmentsPath && !isActiveTab('rooms') && "text-[#1e7e8c] font-semibold bg-[#e8f4f6]"
+                    )}
+                  >
+                    <CalendarCheck2 className="w-4 h-4 flex-shrink-0" />
+                    Minhas Consultas
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/appointments?tab=rooms"
+                    className={cn(
+                      "flex items-center gap-2 px-2 py-1.5 rounded-r-md text-[13px] font-medium text-slate-500 hover:text-[#1e7e8c] hover:bg-[#e8f4f6] transition-colors",
+                      isActiveTab('rooms') && "text-[#1e7e8c] font-semibold bg-[#e8f4f6]"
+                    )}
+                  >
+                    <BookOpen className="w-4 h-4 flex-shrink-0" />
+                    Reservas de Salas
+                  </Link>
+                </li>
+              </ul>
+            )}
+          </li>
+
+          {visibleMain.map(item => (
             <li key={item.href}>
-              <Link
-                href={item.href}
-                className={cn(
-                  "flex items-center rounded-md px-3 py-2 mb-1 text-[13px] font-medium text-slate-600 hover:bg-neutral-lightest",
-                  isActive(item.href) &&
-                    "bg-primary/10 text-primary"
-                )}
-              >
+              <Link href={item.href} className={navLinkClass(isActive(item.href))}>
                 {item.icon}
                 <span>{item.name}</span>
               </Link>
@@ -201,22 +234,13 @@ export default function Sidebar() {
           ))}
         </ul>
 
-        {financialItems.length > 0 && (
+        {visibleFinancial.length > 0 && (
           <>
-            <p className="mt-3 mb-1 px-5 text-[10px] font-semibold tracking-[0.12em] text-neutral-dark uppercase">
-              Financeiro
-            </p>
+            <p className="mt-3 mb-1 px-5 text-[10px] font-semibold tracking-[0.12em] text-neutral-dark uppercase">Financeiro</p>
             <ul className="px-2">
-              {financialItems.map((item) => (
+              {visibleFinancial.map(item => (
                 <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    className={cn(
-                      "flex items-center rounded-md px-3 py-2 mb-1 text-[13px] font-medium text-slate-600 hover:bg-neutral-lightest",
-                      isActive(item.href) &&
-                        "bg-primary/10 text-primary"
-                    )}
-                  >
+                  <Link href={item.href} className={navLinkClass(isActive(item.href))}>
                     {item.icon}
                     <span>{item.name}</span>
                   </Link>
@@ -226,22 +250,13 @@ export default function Sidebar() {
           </>
         )}
 
-        {systemItems.length > 0 && (
+        {visibleSystem.length > 0 && (
           <>
-            <p className="mt-3 mb-1 px-5 text-[10px] font-semibold tracking-[0.12em] text-neutral-dark uppercase">
-              Sistema
-            </p>
+            <p className="mt-3 mb-1 px-5 text-[10px] font-semibold tracking-[0.12em] text-neutral-dark uppercase">Sistema</p>
             <ul className="px-2">
-              {systemItems.map((item) => (
+              {visibleSystem.map(item => (
                 <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    className={cn(
-                      "flex items-center rounded-md px-3 py-2 mb-1 text-[13px] font-medium text-slate-600 hover:bg-neutral-lightest",
-                      isActive(item.href) &&
-                        "bg-primary/10 text-primary"
-                    )}
-                  >
+                  <Link href={item.href} className={navLinkClass(isActive(item.href))}>
                     {item.icon}
                     <span>{item.name}</span>
                   </Link>
@@ -252,8 +267,8 @@ export default function Sidebar() {
         )}
       </nav>
 
-      {/* Logout footer */}
-      <div className="mt-auto border-t border-neutral-light px-3 py-3">
+      {/* Logout */}
+      <div className="border-t border-neutral-light px-3 py-3">
         <button
           onClick={handleLogout}
           className="w-full flex items-center rounded-md px-3 py-2 text-[13px] font-medium text-slate-600 hover:bg-neutral-lightest"

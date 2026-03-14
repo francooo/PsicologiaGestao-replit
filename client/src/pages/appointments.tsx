@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -6,7 +6,7 @@ import { z } from "zod";
 import { useAuth } from "@/hooks/use-auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { insertAppointmentSchema } from "@shared/schema";
+import { insertAppointmentSchema, insertRoomBookingSchema } from "@shared/schema";
 import Sidebar from "@/components/sidebar";
 import MobileNav from "@/components/mobile-nav";
 import Calendar from "@/components/calendar";
@@ -14,13 +14,13 @@ import DailyHoursView from "@/components/daily-hours-view";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { 
-  Form, 
-  FormControl, 
-  FormField, 
-  FormItem, 
-  FormLabel, 
-  FormMessage 
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
 } from "@/components/ui/form";
 import {
   Dialog,
@@ -38,9 +38,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Plus, Share, ExternalLink, ChevronLeft, ChevronRight } from "lucide-react";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Command,
   CommandEmpty,
@@ -49,150 +56,260 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import {
+  Loader2,
+  Plus,
+  Share,
+  ExternalLink,
+  ChevronLeft,
+  ChevronRight,
+  Info,
+  Trash2,
+} from "lucide-react";
+import { format, addDays, startOfWeek, endOfWeek } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { type Patient } from "@shared/schema";
+import { useLocation } from "wouter";
+import { cn } from "@/lib/utils";
 
-// Extend appointment schema for form validation
+// ─── Schemas ────────────────────────────────────────────────────────────────
+
 const appointmentFormSchema = insertAppointmentSchema.extend({
   date: z.string().min(1, "Data é obrigatória"),
   startTime: z.string().min(1, "Horário de início é obrigatório"),
   endTime: z.string().min(1, "Horário de término é obrigatório"),
-  // Campo apenas de front-end para facilitar o preenchimento de horário de término
   duration: z.enum(["50", "60", "90"]).optional(),
 });
-
 type AppointmentFormValues = z.infer<typeof appointmentFormSchema>;
 
-// WhatsApp share form schema
 const whatsAppShareSchema = z.object({
   psychologistId: z.string().min(1, "Selecione uma psicóloga"),
   startDate: z.string().min(1, "Data inicial é obrigatória"),
   endDate: z.string().min(1, "Data final é obrigatória"),
   message: z.string().optional(),
 });
-
 type WhatsAppShareFormValues = z.infer<typeof whatsAppShareSchema>;
+
+const bookingFormSchema = insertRoomBookingSchema.extend({
+  date: z.string().min(1, "Data é obrigatória"),
+  startTime: z.string().min(1, "Horário de início é obrigatório"),
+  endTime: z.string().min(1, "Horário de término é obrigatório"),
+});
+type BookingFormValues = z.infer<typeof bookingFormSchema>;
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const formatDateForRequest = (date: Date) => date.toISOString().split('T')[0];
+
+const PSYCH_COLORS = [
+  { bg: 'bg-[#e8f4f6]', text: 'text-[#155f6b]', borderColor: '#1e7e8c', dot: 'bg-[#1e7e8c]' },
+  { bg: 'bg-[#fef3e2]', text: 'text-[#92400e]', borderColor: '#d97706', dot: 'bg-[#d97706]' },
+  { bg: 'bg-[#f3e8ff]', text: 'text-[#5b21b6]', borderColor: '#7c3aed', dot: 'bg-[#7c3aed]' },
+  { bg: 'bg-[#f0fdf4]', text: 'text-[#14532d]', borderColor: '#16a34a', dot: 'bg-[#16a34a]' },
+  { bg: 'bg-[#fce7f3]', text: 'text-[#831843]', borderColor: '#db2777', dot: 'bg-[#db2777]' },
+];
+
+function getPsychColor(idx: number) {
+  return PSYCH_COLORS[idx % PSYCH_COLORS.length];
+}
+
+function timeToMinutes(t: string) {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + (m || 0);
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function Appointments() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const [location, setLocation] = useLocation();
+
+  // Read tab from URL
+  const getTab = () => {
+    if (typeof window === 'undefined') return 'consultas';
+    const p = new URLSearchParams(window.location.search);
+    return p.get('tab') || 'consultas';
+  };
+  const [activeTab, setActiveTab] = useState<'consultas' | 'rooms'>(getTab() as any);
+
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const tab = (p.get('tab') || 'consultas') as 'consultas' | 'rooms';
+    setActiveTab(tab);
+  }, [location]);
+
+  const switchTab = (tab: 'consultas' | 'rooms') => {
+    setActiveTab(tab);
+    setLocation(tab === 'rooms' ? '/appointments?tab=rooms' : '/appointments');
+  };
+
+  // ── Shared state ──
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [isNewAppointmentDialogOpen, setIsNewAppointmentDialogOpen] = useState(false);
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
-  const [selectedAppointment, setSelectedAppointment] = useState<number | null>(null);
-  const [viewMode, setViewMode] = useState<"month" | "week" | "day">("month");
+  const [viewMode, setViewMode] = useState<"month" | "week" | "day">("week");
   const [isPatientSearchOpen, setIsPatientSearchOpen] = useState(false);
+  const [filterPatient, setFilterPatient] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
 
-  // Format date for API requests
-  const formatDateForRequest = (date: Date) => {
-    return date.toISOString().split('T')[0];
-  };
+  // ── Room bookings tab state ──
+  const [roomDate, setRoomDate] = useState<Date>(new Date());
+  const [roomTab, setRoomTab] = useState<'all' | number>('all');
+  const [isNewBookingDialogOpen, setIsNewBookingDialogOpen] = useState(false);
+  const [deleteBookingId, setDeleteBookingId] = useState<number | null>(null);
 
-  // Get current month's start and end dates
+  // ── Date ranges ──
   const getMonthDateRange = (date: Date) => {
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    
+    const y = date.getFullYear(), m = date.getMonth();
     return {
-      startDate: formatDateForRequest(firstDay),
-      endDate: formatDateForRequest(lastDay)
+      startDate: formatDateForRequest(new Date(y, m, 1)),
+      endDate: formatDateForRequest(new Date(y, m + 1, 0)),
     };
   };
-
-  // Get date range for queries (mês usado na visão de calendário)
   const dateRange = getMonthDateRange(selectedDate);
 
-  // Get current week range for week view
-  const getWeekDateRange = (date: Date) => {
-    const dayOfWeek = date.getDay(); // 0 (Dom) - 6 (Sáb)
-    const start = new Date(date);
-    start.setDate(date.getDate() - dayOfWeek);
-    const end = new Date(start);
-    end.setDate(start.getDate() + 6);
+  const weekStart = startOfWeek(selectedDate, { weekStartsOn: 0 });
+  const weekEnd = endOfWeek(selectedDate, { weekStartsOn: 0 });
 
-    return { start, end };
-  };
-
-  const weekRange = getWeekDateRange(selectedDate);
-
-  // Fetch appointments
-  const { data: appointments, isLoading } = useQuery({
+  // ── Queries: consultas ──
+  const { data: appointments = [], isLoading } = useQuery({
     queryKey: ['/api/appointments', dateRange],
     queryFn: async () => {
       const res = await fetch(`/api/appointments?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}`);
-      if (!res.ok) throw new Error('Failed to fetch appointments');
+      if (!res.ok) throw new Error('Failed');
       return res.json();
     }
   });
 
-  // Fetch psychologists
-  const { data: psychologists, isLoading: isLoadingPsychologists } = useQuery({
+  const { data: psychologists = [], isLoading: loadingPsychs } = useQuery({
     queryKey: ['/api/psychologists'],
     queryFn: async () => {
       const res = await fetch('/api/psychologists');
-      if (!res.ok) throw new Error('Failed to fetch psychologists');
+      if (!res.ok) throw new Error('Failed');
       return res.json();
     }
   });
 
-  // Fetch rooms
-  const { data: rooms, isLoading: isLoadingRooms } = useQuery({
+  const { data: rooms = [], isLoading: loadingRooms } = useQuery({
     queryKey: ['/api/rooms'],
     queryFn: async () => {
       const res = await fetch('/api/rooms');
-      if (!res.ok) throw new Error('Failed to fetch rooms');
+      if (!res.ok) throw new Error('Failed');
       return res.json();
     }
   });
 
-  // Fetch patients (para auto-complete de paciente no agendamento)
-  const { data: patients } = useQuery<Patient[]>({
-    queryKey: ["/api/patients"],
+  const { data: patients } = useQuery<Patient[]>({ queryKey: ['/api/patients'] });
+
+  // ── Queries: room bookings ──
+  const roomDateStr = formatDateForRequest(roomDate);
+  const { data: roomBookings = [], isLoading: loadingRoomBookings } = useQuery({
+    queryKey: ['/api/room-bookings', { date: roomDateStr }],
+    queryFn: async () => {
+      const res = await fetch(`/api/room-bookings?date=${roomDateStr}`);
+      if (!res.ok) throw new Error('Failed');
+      return res.json();
+    }
   });
 
-  // Format appointments for calendar
-  const formattedAppointments = appointments?.map(appointment => ({
-    id: appointment.id,
-    title: `${appointment.patientName}`,
-    date: appointment.date,
-    startTime: appointment.startTime,
-    endTime: appointment.endTime,
-    patientName: appointment.patientName,
-    psychologistId: appointment.psychologistId,
-    psychologistName: appointment.psychologist?.user?.fullName || 'Não definido',
-    roomId: appointment.roomId,
-    roomName: appointment.room?.name || 'Não definida',
-    status: appointment.status,
-  })) || [];
+  // ── Psychologist color map ──
+  const psychColorMap: Record<number, typeof PSYCH_COLORS[0]> = {};
+  (psychologists as any[]).forEach((p, i) => { psychColorMap[p.id] = getPsychColor(i); });
 
-  // Agrupar agendamentos por data para a visão semanal
-  const weeklyAppointmentsByDate = formattedAppointments.reduce<Record<string, typeof formattedAppointments>>(
-    (acc, appointment) => {
-      const dateKey = appointment.date;
-      if (!acc[dateKey]) acc[dateKey] = [];
-      acc[dateKey].push(appointment);
-      return acc;
+  // ── Formatted appointments ──
+  const formattedAppointments = (appointments as any[]).map(a => ({
+    id: a.id,
+    title: a.patientName,
+    date: a.date,
+    startTime: a.startTime,
+    endTime: a.endTime,
+    patientName: a.patientName,
+    psychologistId: a.psychologistId,
+    psychologistName: a.psychologist?.user?.fullName || 'N/A',
+    roomId: a.roomId,
+    roomName: a.room?.name || 'N/A',
+    status: a.status,
+    notes: a.notes,
+  }));
+
+  // ── Week appointments by date ──
+  const weeklyByDate = formattedAppointments.reduce<Record<string, typeof formattedAppointments>>((acc, a) => {
+    if (!acc[a.date]) acc[a.date] = [];
+    acc[a.date].push(a);
+    return acc;
+  }, {});
+
+  // ── Mutations: appointments ──
+  const createAppointmentMutation = useMutation({
+    mutationFn: async (data: AppointmentFormValues) => {
+      const { duration, ...payload } = data;
+      const res = await apiRequest("POST", "/api/appointments", {
+        ...payload,
+        psychologistId: Number(payload.psychologistId),
+        roomId: Number(payload.roomId),
+      });
+      return res.json();
     },
-    {}
-  );
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/appointments'] });
+      toast({ title: "Agendamento criado", description: "O agendamento foi criado com sucesso." });
+      setIsNewAppointmentDialogOpen(false);
+      appointmentForm.reset();
+    },
+    onError: (e: any) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
+  });
 
-  const formatDateForDisplay = (date: Date, pattern: string) => {
-    return format(date, pattern, { locale: ptBR });
-  };
+  const shareWhatsAppMutation = useMutation({
+    mutationFn: async (data: WhatsAppShareFormValues) => {
+      const res = await apiRequest("POST", "/api/share/whatsapp", {
+        psychologistId: Number(data.psychologistId),
+        startDate: data.startDate,
+        endDate: data.endDate,
+        message: data.message,
+      });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      window.open(data.link, '_blank');
+      setIsShareDialogOpen(false);
+      toast({ title: "Link gerado", description: "O link do WhatsApp foi gerado." });
+    },
+    onError: (e: any) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
+  });
 
-  const calculateEndTime = (startTime: string, durationMinutes: string) => {
-    const [hours, minutes] = startTime.split(":");
-    const duration = parseInt(durationMinutes, 10);
-    const startDate = new Date();
-    startDate.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
-    const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
-    const endHours = endDate.getHours().toString().padStart(2, "0");
-    const endMinutes = endDate.getMinutes().toString().padStart(2, "0");
-    return `${endHours}:${endMinutes}`;
-  };
+  // ── Mutations: room bookings ──
+  const createBookingMutation = useMutation({
+    mutationFn: async (data: BookingFormValues) => {
+      const res = await apiRequest("POST", "/api/room-bookings", {
+        ...data,
+        psychologistId: Number(data.psychologistId),
+        roomId: Number(data.roomId),
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/room-bookings'] });
+      toast({ title: "Reserva criada", description: "Sala reservada com sucesso." });
+      setIsNewBookingDialogOpen(false);
+      bookingForm.reset();
+    },
+    onError: (e: any) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
+  });
 
-  // Create appointment form
+  const deleteBookingMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/room-bookings/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/room-bookings'] });
+      toast({ title: "Reserva removida" });
+      setDeleteBookingId(null);
+    },
+    onError: (e: any) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
+  });
+
+  // ── Forms ──
   const appointmentForm = useForm<AppointmentFormValues>({
     resolver: zodResolver(appointmentFormSchema),
     defaultValues: {
@@ -208,851 +325,910 @@ export default function Appointments() {
     }
   });
 
-  // WhatsApp share form
   const shareForm = useForm<WhatsAppShareFormValues>({
     resolver: zodResolver(whatsAppShareSchema),
     defaultValues: {
       psychologistId: "",
       startDate: formatDateForRequest(new Date()),
-      endDate: formatDateForRequest(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)), // 7 days from now
-      message: "Olá! Seguem os horários disponíveis para agendamento com nossa equipe de psicologia.",
+      endDate: formatDateForRequest(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
+      message: "Olá! Seguem os horários disponíveis para agendamento.",
     }
   });
 
-  // Create appointment mutation
-  const createAppointmentMutation = useMutation({
-    mutationFn: async (data: AppointmentFormValues) => {
-      const response = await apiRequest("POST", "/api/appointments", {
-        ...data,
-        psychologistId: Number(data.psychologistId),
-        roomId: Number(data.roomId),
-      });
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/appointments'] });
-      toast({
-        title: "Agendamento criado",
-        description: "O agendamento foi criado com sucesso.",
-        variant: "default",
-      });
-      setIsNewAppointmentDialogOpen(false);
-      appointmentForm.reset();
-    },
-    onError: (error) => {
-      toast({
-        title: "Erro",
-        description: `Falha ao criar agendamento: ${error.message}`,
-        variant: "destructive",
-      });
+  const bookingForm = useForm<BookingFormValues>({
+    resolver: zodResolver(bookingFormSchema),
+    defaultValues: {
+      psychologistId: 0,
+      roomId: 0,
+      date: formatDateForRequest(roomDate),
+      startTime: "09:00",
+      endTime: "10:00",
+      purpose: "Consulta",
     }
   });
 
-  // WhatsApp share mutation
-  const shareWhatsAppMutation = useMutation({
-    mutationFn: async (data: WhatsAppShareFormValues) => {
-      const response = await apiRequest("POST", "/api/share/whatsapp", {
-        psychologistId: Number(data.psychologistId),
-        startDate: data.startDate,
-        endDate: data.endDate,
-        message: data.message,
-      });
-      return response.json();
-    },
-    onSuccess: (data) => {
-      window.open(data.link, '_blank');
-      setIsShareDialogOpen(false);
-      toast({
-        title: "Link gerado",
-        description: "O link do WhatsApp foi gerado e aberto em uma nova aba.",
-        variant: "default",
-      });
-    },
-    onError: (error) => {
-      toast({
-        title: "Erro",
-        description: `Falha ao gerar link: ${error.message}`,
-        variant: "destructive",
-      });
-    }
-  });
-
-  // Handle appointment form submission
-  const onAppointmentSubmit = (data: AppointmentFormValues) => {
-    const { duration, ...payload } = data;
-    createAppointmentMutation.mutate(payload as AppointmentFormValues);
+  // ── Handlers ──
+  const calculateEndTime = (start: string, durMin: string) => {
+    const [h, m] = start.split(':').map(Number);
+    const total = h * 60 + m + parseInt(durMin);
+    return `${Math.floor(total / 60).toString().padStart(2, '0')}:${(total % 60).toString().padStart(2, '0')}`;
   };
 
-  // Handle WhatsApp share form submission
-  const onShareSubmit = (data: WhatsAppShareFormValues) => {
-    shareWhatsAppMutation.mutate(data);
-  };
-
-  // Handle date selection in calendar
   const handleDateSelect = (date: Date) => {
     setSelectedDate(date);
     appointmentForm.setValue('date', formatDateForRequest(date));
   };
 
-  // Handle appointment click in calendar
-  const handleAppointmentClick = (appointmentId: number) => {
-    setSelectedAppointment(appointmentId);
-    // Logic to show appointment details would go here
-  };
+  const handleAppointmentClick = (_id: number) => {};
 
   const handleQuickAddAppointmentForDate = (date: Date) => {
-    const currentDuration = appointmentForm.getValues("duration") || "50";
-    const defaultStartTime = "09:00";
     appointmentForm.setValue("date", formatDateForRequest(date));
-    appointmentForm.setValue("startTime", defaultStartTime);
-    appointmentForm.setValue("endTime", calculateEndTime(defaultStartTime, currentDuration));
+    appointmentForm.setValue("startTime", "09:00");
+    appointmentForm.setValue("endTime", "09:50");
     setSelectedDate(date);
-    setViewMode("day");
     setIsNewAppointmentDialogOpen(true);
   };
 
-  const goToToday = () => {
-    const today = new Date();
-    setSelectedDate(today);
+  const goToToday = () => setSelectedDate(new Date());
+  const goToPrev = () => {
+    const d = new Date(selectedDate);
+    if (viewMode === 'day') d.setDate(d.getDate() - 1);
+    else if (viewMode === 'week') d.setDate(d.getDate() - 7);
+    else d.setMonth(d.getMonth() - 1);
+    setSelectedDate(d);
+  };
+  const goToNext = () => {
+    const d = new Date(selectedDate);
+    if (viewMode === 'day') d.setDate(d.getDate() + 1);
+    else if (viewMode === 'week') d.setDate(d.getDate() + 7);
+    else d.setMonth(d.getMonth() + 1);
+    setSelectedDate(d);
   };
 
-  const goToPreviousPeriod = () => {
-    const newDate = new Date(selectedDate);
-    if (viewMode === "day") {
-      newDate.setDate(newDate.getDate() - 1);
-    } else if (viewMode === "week") {
-      newDate.setDate(newDate.getDate() - 7);
-    } else {
-      newDate.setMonth(newDate.getMonth() - 1);
+  const periodLabel = (() => {
+    if (viewMode === 'day') return format(selectedDate, "d 'de' MMMM yyyy", { locale: ptBR });
+    if (viewMode === 'week') {
+      return format(weekStart, "MMMM yyyy", { locale: ptBR }).replace(/^\w/, c => c.toUpperCase());
     }
-    setSelectedDate(newDate);
-  };
-
-  const goToNextPeriod = () => {
-    const newDate = new Date(selectedDate);
-    if (viewMode === "day") {
-      newDate.setDate(newDate.getDate() + 1);
-    } else if (viewMode === "week") {
-      newDate.setDate(newDate.getDate() + 7);
-    } else {
-      newDate.setMonth(newDate.getMonth() + 1);
-    }
-    setSelectedDate(newDate);
-  };
-
-  const currentPeriodLabel = (() => {
-    if (viewMode === "day") {
-      return formatDateForDisplay(selectedDate, "d 'de' MMMM yyyy");
-    }
-    if (viewMode === "week") {
-      const startLabel = formatDateForDisplay(weekRange.start, "d 'de' MMMM");
-      const endLabel = formatDateForDisplay(weekRange.end, "d 'de' MMMM yyyy");
-      return `Semana de ${startLabel} a ${endLabel}`;
-    }
-    return formatDateForDisplay(selectedDate, "MMMM yyyy");
+    return format(selectedDate, "MMMM yyyy", { locale: ptBR }).replace(/^\w/, c => c.toUpperCase());
   })();
 
-  // Loading state
-  const isPageLoading = isLoading || isLoadingPsychologists || isLoadingRooms;
+  const dailyEvents = formattedAppointments.filter(a => a.date === formatDateForRequest(selectedDate));
 
-  // Eventos filtrados para o dia selecionado (usados na visualização diária)
-  const dailyEventsForSelectedDate = formattedAppointments.filter(
-    (appointment) => appointment.date === formatDateForRequest(selectedDate)
-  );
+  const filteredAppointments = formattedAppointments.filter(a => {
+    if (filterPatient && a.psychologistId !== Number(filterPatient)) return false;
+    if (filterStatus && a.status !== filterStatus) return false;
+    return true;
+  });
 
+  const filteredWeeklyByDate = filteredAppointments.reduce<Record<string, typeof filteredAppointments>>((acc, a) => {
+    if (!acc[a.date]) acc[a.date] = [];
+    acc[a.date].push(a);
+    return acc;
+  }, {});
+
+  // ── Render ──
   return (
-    <div className="flex h-screen bg-neutral-lightest">
+    <div className="flex h-screen bg-[#f7f8fa]">
       <Sidebar />
-      
-      <div className="flex-1 overflow-x-hidden ml-0 md:ml-64 pt-16 md:pt-0">
+
+      <div className="flex-1 flex flex-col ml-0 md:ml-64 pt-16 md:pt-0 overflow-hidden">
         <MobileNav />
-        
-        <main className="p-4 md:p-6 pb-20 md:pb-6">
-          {/* Agendamentos Header */}
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
-            <div>
-              <h1 className="heading-page">Agendamentos</h1>
-              <p className="text-muted">Gerenciamento de consultas</p>
-            </div>
-            <div className="flex mt-4 md:mt-0 space-x-2">
-              <Dialog open={isShareDialogOpen} onOpenChange={setIsShareDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" className="flex items-center">
-                    <Share className="mr-2 h-4 w-4" />
-                    Compartilhar Horários
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Compartilhar Disponibilidade</DialogTitle>
-                    <DialogDescription>
-                      Compartilhe os horários disponíveis de uma psicóloga através do WhatsApp.
-                    </DialogDescription>
-                  </DialogHeader>
-                  
-                  <Form {...shareForm}>
-                    <form onSubmit={shareForm.handleSubmit(onShareSubmit)} className="space-y-4 mt-4">
-                      <FormField
-                        control={shareForm.control}
-                        name="psychologistId"
-                        render={({ field }) => (
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-7 py-4 bg-white border-b border-slate-200 flex-shrink-0">
+          <div>
+            {activeTab === 'consultas' ? (
+              <>
+                <h1 className="text-[17px] font-bold text-slate-800">Minhas Consultas</h1>
+                <p className="text-[11px] text-slate-400 mt-0.5">Agenda de {user?.fullName?.split(' ')[0] || 'usuário'}</p>
+              </>
+            ) : (
+              <>
+                <h1 className="text-[17px] font-bold text-slate-800">Reservas de Salas</h1>
+                <p className="text-[11px] text-slate-400 mt-0.5">Grade de ocupação das salas</p>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {activeTab === 'consultas' ? (
+              <>
+                <Dialog open={isShareDialogOpen} onOpenChange={setIsShareDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm" className="flex items-center gap-1.5 text-[13px]">
+                      <Share className="h-3.5 w-3.5" />
+                      Compartilhar Horários
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Compartilhar Disponibilidade</DialogTitle>
+                      <DialogDescription>Compartilhe os horários disponíveis via WhatsApp.</DialogDescription>
+                    </DialogHeader>
+                    <Form {...shareForm}>
+                      <form onSubmit={shareForm.handleSubmit(d => shareWhatsAppMutation.mutate(d))} className="space-y-4 mt-4">
+                        <FormField control={shareForm.control} name="psychologistId" render={({ field }) => (
                           <FormItem>
-                            <FormLabel>Selecione a Psicóloga</FormLabel>
-                            <Select 
-                              onValueChange={field.onChange} 
-                              defaultValue={field.value}
-                            >
-                              <FormControl>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Selecione uma psicóloga" />
-                                </SelectTrigger>
-                              </FormControl>
+                            <FormLabel>Psicóloga</FormLabel>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                              <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
                               <SelectContent>
-                                {psychologists?.map((psychologist) => (
-                                  <SelectItem 
-                                    key={psychologist.id} 
-                                    value={psychologist.id.toString()}
-                                  >
-                                    {psychologist.user.fullName}
-                                  </SelectItem>
+                                {(psychologists as any[]).map(p => (
+                                  <SelectItem key={p.id} value={p.id.toString()}>{p.user.fullName}</SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                             <FormMessage />
                           </FormItem>
-                        )}
-                      />
-                      
-                      <div className="grid grid-cols-2 gap-4">
-                        <FormField
-                          control={shareForm.control}
-                          name="startDate"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Data Inicial</FormLabel>
-                              <FormControl>
-                                <Input type="date" {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        
-                        <FormField
-                          control={shareForm.control}
-                          name="endDate"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Data Final</FormLabel>
-                              <FormControl>
-                                <Input type="date" {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                      
-                      <FormField
-                        control={shareForm.control}
-                        name="message"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Mensagem (opcional)</FormLabel>
-                            <FormControl>
-                              <Textarea 
-                                placeholder="Informe uma mensagem personalizada..." 
-                                className="resize-none" 
-                                {...field} 
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      
-                      <DialogFooter>
-                        <Button type="submit" className="bg-green-600 hover:bg-green-700" disabled={shareWhatsAppMutation.isPending}>
-                          {shareWhatsAppMutation.isPending ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Gerando link...
-                            </>
-                          ) : (
-                            <>
-                              <ExternalLink className="mr-2 h-4 w-4" />
-                              Compartilhar via WhatsApp
-                            </>
-                          )}
-                        </Button>
-                      </DialogFooter>
-                    </form>
-                  </Form>
-                </DialogContent>
-              </Dialog>
-              
-              <Dialog open={isNewAppointmentDialogOpen} onOpenChange={setIsNewAppointmentDialogOpen}>
+                        )} />
+                        <div className="grid grid-cols-2 gap-4">
+                          <FormField control={shareForm.control} name="startDate" render={({ field }) => (
+                            <FormItem><FormLabel>Data Inicial</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
+                          )} />
+                          <FormField control={shareForm.control} name="endDate" render={({ field }) => (
+                            <FormItem><FormLabel>Data Final</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
+                          )} />
+                        </div>
+                        <FormField control={shareForm.control} name="message" render={({ field }) => (
+                          <FormItem><FormLabel>Mensagem</FormLabel><FormControl><Textarea className="resize-none" {...field} /></FormControl><FormMessage /></FormItem>
+                        )} />
+                        <DialogFooter>
+                          <Button type="submit" className="bg-green-600 hover:bg-green-700" disabled={shareWhatsAppMutation.isPending}>
+                            {shareWhatsAppMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ExternalLink className="mr-2 h-4 w-4" />}
+                            Compartilhar via WhatsApp
+                          </Button>
+                        </DialogFooter>
+                      </form>
+                    </Form>
+                  </DialogContent>
+                </Dialog>
+
+                <Dialog open={isNewAppointmentDialogOpen} onOpenChange={setIsNewAppointmentDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" className="flex items-center gap-1.5 text-[13px]">
+                      <Plus className="h-3.5 w-3.5" />
+                      Nova Consulta
+                    </Button>
+                  </DialogTrigger>
+                  <AppointmentDialog
+                    form={appointmentForm}
+                    psychologists={psychologists as any[]}
+                    rooms={rooms as any[]}
+                    patients={patients}
+                    isPatientSearchOpen={isPatientSearchOpen}
+                    setIsPatientSearchOpen={setIsPatientSearchOpen}
+                    isPending={createAppointmentMutation.isPending}
+                    onClose={() => setIsNewAppointmentDialogOpen(false)}
+                    onSubmit={(data: AppointmentFormValues) => createAppointmentMutation.mutate(data)}
+                    calculateEndTime={calculateEndTime}
+                  />
+                </Dialog>
+              </>
+            ) : (
+              <Dialog open={isNewBookingDialogOpen} onOpenChange={setIsNewBookingDialogOpen}>
                 <DialogTrigger asChild>
-                  <Button className="flex items-center">
-                    <Plus className="mr-2 h-4 w-4" />
-                    Novo Agendamento
+                  <Button size="sm" className="flex items-center gap-1.5 text-[13px]">
+                    <Plus className="h-3.5 w-3.5" />
+                    Reservar Sala
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="max-w-2xl max-h-[90vh] p-0 overflow-hidden flex flex-col">
-                  <DialogHeader className="flex flex-row items-center justify-between px-6 py-4 border-b border-neutral-light">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                        <Plus className="h-5 w-5" />
-                      </div>
-                      <div className="text-left">
-                        <DialogTitle className="text-lg font-semibold tracking-tight">
-                          Novo Agendamento
-                        </DialogTitle>
-                        <DialogDescription className="text-sm text-neutral-dark">
-                          Agende uma sessão para um paciente.
-                        </DialogDescription>
-                      </div>
-                    </div>
-                  </DialogHeader>
-
-                  <Form {...appointmentForm}>
-                    <form
-                      onSubmit={appointmentForm.handleSubmit(onAppointmentSubmit)}
-                      className="flex flex-col flex-1 min-h-0 overflow-hidden"
-                    >
-                      {/* Corpo rolável do formulário */}
-                      <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-                        {/* Paciente + Psicóloga */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                          <FormField
-                            control={appointmentForm.control}
-                            name="patientName"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Paciente</FormLabel>
-                                <FormControl>
-                                  <Input
-                                    placeholder="Buscar ou digitar paciente..."
-                                    {...field}
-                                  />
-                                </FormControl>
-                                <FormMessage />
-                                {/* Busca/auto-complete de paciente */}
-                                <div className="mt-2">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setIsPatientSearchOpen(true)}
-                                  >
-                                    Buscar paciente existente
-                                  </Button>
-                                  <Command
-                                    shouldFilter={true}
-                                    className={
-                                      isPatientSearchOpen
-                                        ? "mt-2 border rounded-md"
-                                        : "hidden"
-                                    }
-                                  >
-                                    <CommandInput placeholder="Buscar por nome, e-mail ou CPF..." />
-                                    <CommandList>
-                                      <CommandEmpty>
-                                        Nenhum paciente encontrado.
-                                      </CommandEmpty>
-                                      <CommandGroup heading="Pacientes">
-                                        {patients?.map((patient) => (
-                                          <CommandItem
-                                            key={patient.id}
-                                            value={patient.fullName}
-                                            onSelect={() => {
-                                              appointmentForm.setValue(
-                                                "patientName",
-                                                patient.fullName
-                                              );
-                                              setIsPatientSearchOpen(false);
-                                            }}
-                                          >
-                                            <div className="flex flex-col">
-                                              <span className="text-sm font-medium">
-                                                {patient.fullName}
-                                              </span>
-                                              {patient.email && (
-                                                <span className="text-xs text-neutral-dark">
-                                                  {patient.email}
-                                                </span>
-                                              )}
-                                            </div>
-                                          </CommandItem>
-                                        ))}
-                                      </CommandGroup>
-                                    </CommandList>
-                                  </Command>
-                                </div>
-                              </FormItem>
-                            )}
-                          />
-
-                          <FormField
-                            control={appointmentForm.control}
-                            name="psychologistId"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Psicóloga</FormLabel>
-                                <FormControl>
-                                  <Select
-                                    onValueChange={(value) =>
-                                      field.onChange(parseInt(value))
-                                    }
-                                    defaultValue={field.value.toString()}
-                                  >
-                                    <FormControl>
-                                      <SelectTrigger>
-                                        <SelectValue placeholder="Selecione uma psicóloga" />
-                                      </SelectTrigger>
-                                    </FormControl>
-                                    <SelectContent>
-                                      {psychologists?.map((psychologist) => (
-                                        <SelectItem
-                                          key={psychologist.id}
-                                          value={psychologist.id.toString()}
-                                        >
-                                          {psychologist.user.fullName}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        </div>
-
-                        {/* Sala + Status */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                          <FormField
-                            control={appointmentForm.control}
-                            name="roomId"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Sala</FormLabel>
-                                <FormControl>
-                                  <Select
-                                    onValueChange={(value) =>
-                                      field.onChange(parseInt(value))
-                                    }
-                                    defaultValue={field.value.toString()}
-                                  >
-                                    <FormControl>
-                                      <SelectTrigger>
-                                        <SelectValue placeholder="Selecione uma sala" />
-                                      </SelectTrigger>
-                                    </FormControl>
-                                    <SelectContent>
-                                      {rooms?.map((room) => (
-                                        <SelectItem
-                                          key={room.id}
-                                          value={room.id.toString()}
-                                        >
-                                          {room.name}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-
-                          <FormField
-                            control={appointmentForm.control}
-                            name="status"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Status</FormLabel>
-                                <FormControl>
-                                  <Select
-                                    onValueChange={field.onChange}
-                                    defaultValue={field.value}
-                                  >
-                                    <FormControl>
-                                      <SelectTrigger>
-                                        <SelectValue placeholder="Selecione o status" />
-                                      </SelectTrigger>
-                                    </FormControl>
-                                    <SelectContent>
-                                      <SelectItem value="scheduled">
-                                        Agendado
-                                      </SelectItem>
-                                      <SelectItem value="confirmed">
-                                        Confirmado
-                                      </SelectItem>
-                                      <SelectItem value="canceled">
-                                        Cancelado
-                                      </SelectItem>
-                                      <SelectItem value="completed">
-                                        Concluído
-                                      </SelectItem>
-                                      <SelectItem value="first-session">
-                                        Primeira Sessão
-                                      </SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        </div>
-
-                        {/* Data / Horário / Duração em cartão destacado */}
-                        <div className="rounded-xl border border-primary/15 bg-primary/5 p-4 space-y-4">
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <FormField
-                              control={appointmentForm.control}
-                              name="date"
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Data da consulta</FormLabel>
-                                  <FormControl>
-                                    <Input type="date" {...field} />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-
-                            <FormField
-                              control={appointmentForm.control}
-                              name="startTime"
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Início</FormLabel>
-                                  <FormControl>
-                                    <Input
-                                      type="time"
-                                      {...field}
-                                      onChange={(event) => {
-                                        field.onChange(event);
-                                        const duration =
-                                          appointmentForm.getValues(
-                                            "duration"
-                                          ) || "50";
-                                        appointmentForm.setValue(
-                                          "endTime",
-                                          calculateEndTime(
-                                            event.target.value,
-                                            duration
-                                          )
-                                        );
-                                      }}
-                                    />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-
-                            <FormField
-                              control={appointmentForm.control}
-                              name="endTime"
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>Término</FormLabel>
-                                  <FormControl>
-                                    <Input type="time" {...field} />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-                          </div>
-
-                          <FormField
-                            control={appointmentForm.control}
-                            name="duration"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Duração da sessão</FormLabel>
-                                <FormControl>
-                                  <Select
-                                    onValueChange={(value) => {
-                                      field.onChange(value);
-                                      const start =
-                                        appointmentForm.getValues("startTime");
-                                      if (start) {
-                                        appointmentForm.setValue(
-                                          "endTime",
-                                          calculateEndTime(start, value)
-                                        );
-                                      }
-                                    }}
-                                    defaultValue={field.value}
-                                  >
-                                    <FormControl>
-                                      <SelectTrigger>
-                                        <SelectValue placeholder="Selecione a duração" />
-                                      </SelectTrigger>
-                                    </FormControl>
-                                    <SelectContent>
-                                      <SelectItem value="50">
-                                        50 minutos
-                                      </SelectItem>
-                                      <SelectItem value="60">
-                                        60 minutos
-                                      </SelectItem>
-                                      <SelectItem value="90">
-                                        90 minutos
-                                      </SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        </div>
-
-                        {/* Observações */}
-                        <FormField
-                          control={appointmentForm.control}
-                          name="notes"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Observações</FormLabel>
-                              <FormControl>
-                                <Textarea
-                                  placeholder="Informações adicionais sobre o agendamento"
-                                  className="resize-none min-h-[80px]"
-                                  {...field}
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-
-                      {/* Rodapé fixo do modal */}
-                      <DialogFooter className="flex-shrink-0 px-6 py-4 border-t border-neutral-light bg-neutral-light/60 flex flex-row items-center justify-end gap-3">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setIsNewAppointmentDialogOpen(false)}
-                        >
-                          Cancelar
-                        </Button>
-                        <Button type="submit" disabled={createAppointmentMutation.isPending}>
-                          {createAppointmentMutation.isPending ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Criando...
-                            </>
-                          ) : (
-                            "Criar Agendamento"
-                          )}
-                        </Button>
-                      </DialogFooter>
-                    </form>
-                  </Form>
-                </DialogContent>
-              </Dialog>
-            </div>
-          </div>
-          
-          {/* Toolbar do calendário: abas de visão + navegação de período + legenda */}
-          <div className="flex flex-col gap-4 mb-6 lg:flex-row lg:items-center lg:justify-between">
-            {/* Abas de visão */}
-            <div className="flex items-center gap-4">
-              <div className="inline-flex rounded-lg bg-neutral-light p-1">
-                <Button
-                  variant={viewMode === "month" ? "default" : "ghost"}
-                  size="sm"
-                  className="px-4"
-                  onClick={() => setViewMode("month")}
-                >
-                  Mês
-                </Button>
-                <Button
-                  variant={viewMode === "week" ? "default" : "ghost"}
-                  size="sm"
-                  className="px-4"
-                  onClick={() => setViewMode("week")}
-                >
-                  Semana
-                </Button>
-                <Button
-                  variant={viewMode === "day" ? "default" : "ghost"}
-                  size="sm"
-                  className="px-4"
-                  onClick={() => setViewMode("day")}
-                >
-                  Dia
-                </Button>
-              </div>
-
-              {/* Navegação de período */}
-              <div className="flex items-center gap-2 ml-2">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={goToPreviousPeriod}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <span className="text-sm font-semibold text-neutral-darkest min-w-[150px]">
-                  {currentPeriodLabel}
-                </span>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={goToNextPeriod}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="ml-1"
-                  onClick={() => {
-                    goToToday();
-                    setViewMode("day");
-                  }}
-                >
-                  Hoje
-                </Button>
-              </div>
-            </div>
-
-            {/* Legenda por status */}
-            <div className="flex flex-wrap gap-4 text-xs text-neutral-dark">
-              <div className="flex items-center gap-2">
-                <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
-                <span>Agendado</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-                <span>Confirmado</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
-                <span>Aguardando (WhatsApp)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="inline-block h-2 w-2 rounded-full bg-purple-500" />
-                <span>Concluído</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="inline-block h-2 w-2 rounded-full bg-neutral-500" />
-                <span>Cancelado</span>
-              </div>
-            </div>
-          </div>
-
-          {isPageLoading ? (
-            <div className="flex justify-center items-center h-64">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            </div>
-          ) : (
-            <>
-              {/* Visualização do dia (24 horas) */}
-              {viewMode === 'day' && (
-                <DailyHoursView 
-                  date={selectedDate}
-                  events={dailyEventsForSelectedDate}
-                  onAppointmentClick={handleAppointmentClick}
-                  onTimeSlotClick={(timeSlot, date) => {
-                    appointmentForm.setValue('date', formatDateForRequest(date));
-                    appointmentForm.setValue('startTime', timeSlot);
-                    
-                    const duration = appointmentForm.getValues("duration") || "50";
-                    appointmentForm.setValue('endTime', calculateEndTime(timeSlot, duration));
-                    
-                    setIsNewAppointmentDialogOpen(true);
-                  }}
+                <BookingDialog
+                  form={bookingForm}
+                  psychologists={psychologists as any[]}
+                  rooms={rooms as any[]}
+                  isPending={createBookingMutation.isPending}
+                  onClose={() => setIsNewBookingDialogOpen(false)}
+                  onSubmit={d => createBookingMutation.mutate(d)}
                 />
-              )}
-              
-              {/* Visualização semanal */}
-              {viewMode === "week" && (
-                <div className="mb-6 rounded-lg bg-white p-4 shadow-sm">
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-7">
-                    {Array.from({ length: 7 }).map((_, index) => {
-                      const current = new Date(weekRange.start);
-                      current.setDate(weekRange.start.getDate() + index);
-                      const dateKey = formatDateForRequest(current);
-                      const eventsForDay = weeklyAppointmentsByDate[dateKey] || [];
+              </Dialog>
+            )}
+          </div>
+        </div>
 
-                      return (
-                        <div
-                          key={index}
-                          className="flex flex-col rounded-md border border-neutral-light bg-neutral-lightest p-3"
-                        >
-                          <div className="mb-2 text-sm font-semibold text-neutral-darkest">
-                            {formatDateForDisplay(current, "EEE dd/MM")}
-                          </div>
-
-                          <div className="flex-1 space-y-1">
-                            {eventsForDay.map((event) => (
-                              <button
-                                key={event.id}
-                                type="button"
-                                className="w-full rounded-md border-l-4 bg-white px-2 py-1 text-left text-xs hover:bg-neutral-lightest"
-                                onClick={() => handleAppointmentClick(event.id)}
-                              >
-                                <div className="font-medium">
-                                  {event.startTime} - {event.endTime}
-                                </div>
-                                <div className="text-[11px] text-neutral-dark">
-                                  {event.patientName}
-                                </div>
-                                <div className="text-[11px] text-neutral-500">
-                                  {event.psychologistName} · {event.roomName}
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="xs"
-                            className="mt-2 text-xs"
-                            onClick={() => handleQuickAddAppointmentForDate(current)}
-                          >
-                            + Agendar
-                          </Button>
-                        </div>
-                      );
-                    })}
-                  </div>
+        {/* Tab content */}
+        {activeTab === 'consultas' ? (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Calendar toolbar */}
+            <div className="px-7 py-3 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
+              <div className="flex items-center gap-3 flex-wrap">
+                {/* View toggle */}
+                <div className="inline-flex bg-slate-100 rounded-lg p-0.5 gap-0.5">
+                  {(['month','week','day'] as const).map(v => (
+                    <button
+                      key={v}
+                      onClick={() => setViewMode(v)}
+                      className={cn(
+                        "px-3 py-1.5 rounded-md text-[12.5px] font-medium transition-all",
+                        viewMode === v ? "bg-[#1e7e8c] text-white shadow-sm" : "text-slate-500 hover:text-slate-700"
+                      )}
+                    >
+                      {v === 'month' ? 'Mês' : v === 'week' ? 'Semana' : 'Dia'}
+                    </button>
+                  ))}
                 </div>
-              )}
-              
-              {/* Visualização do mês (calendário) */}
-              {viewMode === 'month' && (
+
+                {/* Date nav */}
+                <div className="flex items-center gap-1.5">
+                  <button onClick={goToPrev} className="w-7 h-7 rounded-md border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:border-[#1e7e8c] hover:text-[#1e7e8c] transition-colors">
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <span className="text-[14px] font-bold text-slate-800 min-w-[130px] text-center">{periodLabel}</span>
+                  <button onClick={goToNext} className="w-7 h-7 rounded-md border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:border-[#1e7e8c] hover:text-[#1e7e8c] transition-colors">
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                  <button onClick={() => { goToToday(); setViewMode('week'); }} className="px-3 py-1 border border-slate-200 rounded-md text-[12.5px] font-medium text-slate-500 hover:border-[#1e7e8c] hover:text-[#1e7e8c] transition-colors bg-white">
+                    Hoje
+                  </button>
+                </div>
+
+                {/* Filters */}
+                <select
+                  value={filterPatient}
+                  onChange={e => setFilterPatient(e.target.value)}
+                  className="px-2 py-1.5 border border-slate-200 rounded-md text-[12px] text-slate-600 bg-white outline-none focus:border-[#1e7e8c]"
+                >
+                  <option value="">Todos os pacientes</option>
+                  {(psychologists as any[]).map(p => (
+                    <option key={p.id} value={p.id}>{p.user.fullName}</option>
+                  ))}
+                </select>
+
+                <select
+                  value={filterStatus}
+                  onChange={e => setFilterStatus(e.target.value)}
+                  className="px-2 py-1.5 border border-slate-200 rounded-md text-[12px] text-slate-600 bg-white outline-none focus:border-[#1e7e8c]"
+                >
+                  <option value="">Todos os status</option>
+                  <option value="confirmed">Confirmado</option>
+                  <option value="scheduled">Aguardando</option>
+                  <option value="completed">Concluído</option>
+                  <option value="canceled">Cancelado</option>
+                </select>
+              </div>
+
+              {/* Legend */}
+              <div className="flex items-center gap-4 text-[11.5px] text-slate-500">
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#1e7e8c]" />Confirmado</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#d97706]" />Aguardando</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#16a34a]" />Concluído</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-slate-400" />Cancelado</span>
+              </div>
+            </div>
+
+            {/* Calendar area */}
+            <div className="flex-1 overflow-hidden px-7 py-4">
+              {isLoading || loadingPsychs || loadingRooms ? (
+                <div className="flex justify-center items-center h-full">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                </div>
+              ) : (
                 <>
-                  <Calendar 
-                    events={formattedAppointments}
-                    month={selectedDate.getMonth()}
-                    year={selectedDate.getFullYear()}
-                    onDateSelect={(date) => {
-                      handleDateSelect(date);
-                      setViewMode('day'); // Muda para visualização diária ao clicar em um dia
-                    }}
-                    onEventClick={handleAppointmentClick}
-                    onAddAppointmentClick={handleQuickAddAppointmentForDate}
-                  />
+                  {viewMode === 'day' && (
+                    <DailyHoursView
+                      date={selectedDate}
+                      events={dailyEvents}
+                      onAppointmentClick={handleAppointmentClick}
+                      onTimeSlotClick={(timeSlot, date) => {
+                        appointmentForm.setValue('date', formatDateForRequest(date));
+                        appointmentForm.setValue('startTime', timeSlot);
+                        appointmentForm.setValue('endTime', calculateEndTime(timeSlot, '50'));
+                        setIsNewAppointmentDialogOpen(true);
+                      }}
+                    />
+                  )}
+
+                  {viewMode === 'week' && (
+                    <WeekGrid
+                      weekStart={weekStart}
+                      today={new Date()}
+                      appointmentsByDate={filteredWeeklyByDate}
+                      onAddClick={handleQuickAddAppointmentForDate}
+                    />
+                  )}
+
+                  {viewMode === 'month' && (
+                    <Calendar
+                      events={filteredAppointments}
+                      month={selectedDate.getMonth()}
+                      year={selectedDate.getFullYear()}
+                      onDateSelect={date => { handleDateSelect(date); setViewMode('day'); }}
+                      onEventClick={handleAppointmentClick}
+                      onAddAppointmentClick={handleQuickAddAppointmentForDate}
+                    />
+                  )}
                 </>
               )}
-            </>
-          )}
-        </main>
+            </div>
+          </div>
+        ) : (
+          /* ── Reservas de Salas ── */
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Room tabs + date nav */}
+            <div className="px-7 py-3 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
+              {/* Room tabs */}
+              <div className="flex items-center gap-1 flex-wrap">
+                <button
+                  onClick={() => setRoomTab('all')}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12.5px] font-medium border-b-2 transition-colors",
+                    roomTab === 'all' ? "border-[#1e7e8c] text-[#1e7e8c]" : "border-transparent text-slate-500 hover:text-slate-700"
+                  )}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                  </svg>
+                  Visão Geral
+                </button>
+                {(rooms as any[]).map(r => (
+                  <button
+                    key={r.id}
+                    onClick={() => setRoomTab(r.id)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-md text-[12.5px] font-medium border-b-2 transition-colors",
+                      roomTab === r.id ? "border-[#1e7e8c] text-[#1e7e8c]" : "border-transparent text-slate-500 hover:text-slate-700"
+                    )}
+                  >
+                    {r.name}
+                  </button>
+                ))}
+              </div>
+
+              {/* Date nav */}
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setRoomDate(d => addDays(d, -1))}
+                  className="w-7 h-7 rounded-md border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:border-[#1e7e8c] hover:text-[#1e7e8c] transition-colors"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <span className="text-[13px] font-semibold text-slate-700 min-w-[130px] text-center">
+                  {format(roomDate, "d 'de' MMMM yyyy", { locale: ptBR })}
+                </span>
+                <button
+                  onClick={() => setRoomDate(d => addDays(d, 1))}
+                  className="w-7 h-7 rounded-md border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:border-[#1e7e8c] hover:text-[#1e7e8c] transition-colors"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setRoomDate(new Date())}
+                  className="px-3 py-1 border border-slate-200 rounded-md text-[12.5px] font-medium text-slate-500 hover:border-[#1e7e8c] hover:text-[#1e7e8c] transition-colors bg-white"
+                >
+                  Hoje
+                </button>
+              </div>
+            </div>
+
+            {/* Privacy notice */}
+            <div className="px-7 py-2 bg-[#f8fafc] border-b border-slate-100 flex items-center gap-2">
+              <Info className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+              <p className="text-[11.5px] text-slate-400">Dados de pacientes não são exibidos — apenas psicóloga, sala e horário</p>
+            </div>
+
+            {/* Room grid */}
+            <div className="flex-1 overflow-auto px-7 py-4">
+              {loadingRoomBookings ? (
+                <div className="flex justify-center items-center h-64">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                </div>
+              ) : (
+                <RoomGrid
+                  rooms={rooms as any[]}
+                  bookings={roomBookings as any[]}
+                  psychColorMap={psychColorMap}
+                  selectedRoom={roomTab}
+                  user={user}
+                  onDelete={id => setDeleteBookingId(id)}
+                />
+              )}
+            </div>
+
+            {/* Legend */}
+            {(psychologists as any[]).length > 0 && (
+              <div className="px-7 py-3 border-t border-slate-200 bg-white flex flex-wrap items-center gap-4">
+                {(psychologists as any[]).map((p, i) => {
+                  const c = getPsychColor(i);
+                  return (
+                    <span key={p.id} className="flex items-center gap-1.5 text-[12px] text-slate-600">
+                      <span className={`w-2.5 h-2.5 rounded-full ${c.dot}`} />
+                      {p.user.fullName}
+                      {p.userId === user?.id && ' (você)'}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Delete booking confirmation */}
+      <AlertDialog open={deleteBookingId !== null} onOpenChange={open => !open && setDeleteBookingId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover reserva?</AlertDialogTitle>
+            <AlertDialogDescription>Esta ação não pode ser desfeita.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              onClick={() => deleteBookingId !== null && deleteBookingMutation.mutate(deleteBookingId)}
+            >
+              {deleteBookingMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Remover'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+// ─── WeekGrid (calendário semanal tipo grade de horas) ────────────────────────
+
+const HOURS = Array.from({ length: 14 }, (_, i) => i + 7); // 07 → 20
+const HOUR_H = 64; // pixels per hour
+
+function WeekGrid({
+  weekStart,
+  today,
+  appointmentsByDate,
+  onAddClick,
+}: {
+  weekStart: Date;
+  today: Date;
+  appointmentsByDate: Record<string, any[]>;
+  onAddClick: (date: Date) => void;
+}) {
+  const todayStr = formatDateForRequest(today);
+  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+
+  const statusColor = (status: string) => {
+    switch (status) {
+      case 'confirmed': return 'bg-[#e8f4f6] border-[#1e7e8c] text-[#155f6b]';
+      case 'scheduled': return 'bg-[#fef3e2] border-[#d97706] text-[#92400e]';
+      case 'completed': return 'bg-[#f0fdf4] border-[#16a34a] text-[#14532d]';
+      case 'canceled':  return 'bg-slate-100 border-slate-300 text-slate-500';
+      case 'first-session': return 'bg-[#f3e8ff] border-[#7c3aed] text-[#5b21b6]';
+      default: return 'bg-[#e8f4f6] border-[#1e7e8c] text-[#155f6b]';
+    }
+  };
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col" style={{ height: `${HOUR_H * HOURS.length + 48}px` }}>
+      {/* Day headers */}
+      <div className="grid border-b border-slate-200 flex-shrink-0" style={{ gridTemplateColumns: `54px repeat(7, 1fr)` }}>
+        <div className="p-2" />
+        {days.map((day, i) => {
+          const ds = formatDateForRequest(day);
+          const isToday = ds === todayStr;
+          return (
+            <div key={i} className={cn("px-2 py-2 text-center border-l border-slate-100", isToday && "bg-[#f0f9fa]")}>
+              <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                {format(day, 'EEE', { locale: ptBR })}
+              </div>
+              <div className={cn(
+                "mt-1 text-[18px] font-bold text-slate-600 leading-none",
+                isToday && "w-8 h-8 rounded-full bg-[#1e7e8c] text-white text-[14px] flex items-center justify-center mx-auto"
+              )}>
+                {format(day, 'd')}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Time grid */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="relative" style={{ gridTemplateColumns: `54px repeat(7, 1fr)`, display: 'grid', height: `${HOUR_H * HOURS.length}px` }}>
+          {/* Hour labels */}
+          <div className="relative">
+            {HOURS.map(h => (
+              <div key={h} className="absolute w-full flex items-start justify-end pr-2 pt-0.5" style={{ top: `${(h - 7) * HOUR_H}px`, height: `${HOUR_H}px` }}>
+                <span className="text-[10.5px] text-slate-400 font-medium">{h.toString().padStart(2, '0')}:00</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Day columns */}
+          {days.map((day, di) => {
+            const ds = formatDateForRequest(day);
+            const isToday = ds === todayStr;
+            const events = appointmentsByDate[ds] || [];
+
+            return (
+              <div
+                key={di}
+                className={cn("relative border-l border-slate-100 cursor-pointer group", isToday && "bg-[#f0f9fa]/40")}
+                onClick={() => onAddClick(day)}
+              >
+                {/* Hour lines */}
+                {HOURS.map(h => (
+                  <div key={h} className="absolute w-full border-t border-slate-100" style={{ top: `${(h - 7) * HOUR_H}px` }} />
+                ))}
+
+                {/* Event cards */}
+                {events.map(ev => {
+                  const startMin = timeToMinutes(ev.startTime);
+                  const endMin = timeToMinutes(ev.endTime);
+                  const top = (startMin - 7 * 60) / 60 * HOUR_H;
+                  const height = Math.max((endMin - startMin) / 60 * HOUR_H, 24);
+
+                  return (
+                    <div
+                      key={ev.id}
+                      onClick={e => e.stopPropagation()}
+                      className={cn(
+                        "absolute left-0.5 right-0.5 rounded-md border-l-[3px] px-1.5 py-1 overflow-hidden",
+                        statusColor(ev.status)
+                      )}
+                      style={{ top: `${top}px`, height: `${height}px` }}
+                    >
+                      <div className="text-[10px] font-semibold leading-tight truncate">
+                        {ev.startTime} – {ev.endTime}
+                      </div>
+                      {height > 30 && (
+                        <div className="text-[10px] leading-tight truncate font-medium">{ev.patientName}</div>
+                      )}
+                      {height > 46 && (
+                        <div className="text-[9.5px] leading-tight truncate opacity-75">
+                          {ev.roomName} · {ev.status === 'completed' ? 'Concluído' : ev.status === 'confirmed' ? 'Presencial' : 'Agendado'}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Add hint on hover */}
+                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 flex items-center justify-center pointer-events-none transition-opacity">
+                  <span className="text-[10px] text-slate-400">+ Agendar</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
+  );
+}
+
+// ─── RoomGrid ────────────────────────────────────────────────────────────────
+
+function RoomGrid({
+  rooms,
+  bookings,
+  psychColorMap,
+  selectedRoom,
+  user,
+  onDelete,
+}: {
+  rooms: any[];
+  bookings: any[];
+  psychColorMap: Record<number, typeof PSYCH_COLORS[0]>;
+  selectedRoom: 'all' | number;
+  user: any;
+  onDelete: (id: number) => void;
+}) {
+  const displayRooms = selectedRoom === 'all' ? rooms : rooms.filter(r => r.id === selectedRoom);
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+      {/* Header */}
+      <div className="grid border-b border-slate-200" style={{ gridTemplateColumns: `72px repeat(${displayRooms.length}, 1fr)` }}>
+        <div className="p-3 bg-[#f8fafc]" />
+        {displayRooms.map(r => (
+          <div key={r.id} className="px-3 py-3 text-center bg-[#f8fafc] border-l border-slate-200">
+            <div className="text-[10.5px] font-bold uppercase tracking-wide text-slate-400">{r.name}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Time rows */}
+      {HOURS.map(h => {
+        const hourStr = `${h.toString().padStart(2, '0')}:00`;
+        return (
+          <div key={h} className="grid border-t border-slate-100" style={{ gridTemplateColumns: `72px repeat(${displayRooms.length}, 1fr)`, minHeight: '60px' }}>
+            <div className="px-3 pt-2 text-[11px] text-slate-400 font-medium">{hourStr}</div>
+            {displayRooms.map(room => {
+              const slot = bookings.filter(b => {
+                if (b.roomId !== room.id) return false;
+                const bStart = timeToMinutes(b.startTime);
+                const bEnd = timeToMinutes(b.endTime);
+                return bStart >= h * 60 && bStart < (h + 1) * 60;
+              });
+
+              return (
+                <div key={room.id} className="border-l border-slate-100 p-1 relative min-h-[60px]">
+                  {slot.map(b => {
+                    const c = psychColorMap[b.psychologistId] || PSYCH_COLORS[0];
+                    const isMe = b.psychologist?.userId === user?.id;
+                    const duration = timeToMinutes(b.endTime) - timeToMinutes(b.startTime);
+                    const heightRatio = duration / 60;
+
+                    return (
+                      <div
+                        key={b.id}
+                        className={cn("rounded-md px-2 py-1 mb-1 relative group", c.bg)}
+                        style={{ borderLeft: `3px solid ${c.borderColor}` }}
+                      >
+                        <div className={cn("text-[11px] font-semibold leading-tight truncate", c.text)}>
+                          {b.psychologist?.user?.fullName || 'Psicóloga'}
+                          {isMe && ' (você)'}
+                        </div>
+                        <div className={cn("text-[10.5px] leading-tight", c.text, "opacity-80")}>
+                          {b.startTime} – {b.endTime} · {b.purpose || 'Consulta'}
+                        </div>
+                        <button
+                          onClick={() => onDelete(b.id)}
+                          className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-red-400 hover:text-red-600"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+
+      {bookings.length === 0 && (
+        <div className="py-12 text-center text-slate-400 text-sm">
+          Nenhuma reserva para esta data
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── AppointmentDialog ────────────────────────────────────────────────────────
+
+function AppointmentDialog({
+  form,
+  psychologists,
+  rooms,
+  patients,
+  isPatientSearchOpen,
+  setIsPatientSearchOpen,
+  isPending,
+  onClose,
+  onSubmit,
+  calculateEndTime,
+}: any) {
+  return (
+    <DialogContent className="max-w-2xl max-h-[90vh] p-0 overflow-hidden flex flex-col">
+      <DialogHeader className="flex flex-row items-center gap-3 px-6 py-4 border-b border-neutral-light">
+        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+          <Plus className="h-5 w-5" />
+        </div>
+        <div className="text-left">
+          <DialogTitle className="text-lg font-semibold">Novo Agendamento</DialogTitle>
+          <DialogDescription className="text-sm text-neutral-dark">Agende uma sessão para um paciente.</DialogDescription>
+        </div>
+      </DialogHeader>
+
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <FormField control={form.control} name="patientName" render={({ field }: any) => (
+                <FormItem>
+                  <FormLabel>Paciente</FormLabel>
+                  <FormControl><Input placeholder="Buscar ou digitar..." {...field} /></FormControl>
+                  <FormMessage />
+                  <div className="mt-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => setIsPatientSearchOpen(true)}>
+                      Buscar paciente existente
+                    </Button>
+                    <Command shouldFilter className={isPatientSearchOpen ? "mt-2 border rounded-md" : "hidden"}>
+                      <CommandInput placeholder="Buscar por nome..." />
+                      <CommandList>
+                        <CommandEmpty>Nenhum paciente encontrado.</CommandEmpty>
+                        <CommandGroup heading="Pacientes">
+                          {patients?.map((p: any) => (
+                            <CommandItem key={p.id} value={p.fullName} onSelect={() => {
+                              form.setValue("patientName", p.fullName);
+                              setIsPatientSearchOpen(false);
+                            }}>
+                              <div className="flex flex-col">
+                                <span className="text-sm font-medium">{p.fullName}</span>
+                                {p.email && <span className="text-xs text-neutral-dark">{p.email}</span>}
+                              </div>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </div>
+                </FormItem>
+              )} />
+
+              <FormField control={form.control} name="psychologistId" render={({ field }: any) => (
+                <FormItem>
+                  <FormLabel>Psicóloga</FormLabel>
+                  <Select onValueChange={v => field.onChange(parseInt(v))} defaultValue={field.value.toString()}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      {psychologists.map((p: any) => (
+                        <SelectItem key={p.id} value={p.id.toString()}>{p.user.fullName}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <FormField control={form.control} name="roomId" render={({ field }: any) => (
+                <FormItem>
+                  <FormLabel>Sala</FormLabel>
+                  <Select onValueChange={v => field.onChange(parseInt(v))} defaultValue={field.value.toString()}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      {rooms.map((r: any) => (
+                        <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+
+              <FormField control={form.control} name="status" render={({ field }: any) => (
+                <FormItem>
+                  <FormLabel>Status</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="scheduled">Aguardando</SelectItem>
+                      <SelectItem value="confirmed">Confirmado</SelectItem>
+                      <SelectItem value="completed">Concluído</SelectItem>
+                      <SelectItem value="canceled">Cancelado</SelectItem>
+                      <SelectItem value="first-session">Primeira Sessão</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+            </div>
+
+            <div className="rounded-xl border border-primary/15 bg-primary/5 p-4 space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                <FormField control={form.control} name="date" render={({ field }: any) => (
+                  <FormItem><FormLabel>Data</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
+                )} />
+                <FormField control={form.control} name="startTime" render={({ field }: any) => (
+                  <FormItem>
+                    <FormLabel>Início</FormLabel>
+                    <FormControl>
+                      <Input type="time" {...field} onChange={e => {
+                        field.onChange(e);
+                        const dur = form.getValues("duration") || "50";
+                        form.setValue("endTime", calculateEndTime(e.target.value, dur));
+                      }} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="endTime" render={({ field }: any) => (
+                  <FormItem><FormLabel>Término</FormLabel><FormControl><Input type="time" {...field} /></FormControl><FormMessage /></FormItem>
+                )} />
+              </div>
+              <FormField control={form.control} name="duration" render={({ field }: any) => (
+                <FormItem>
+                  <FormLabel>Duração</FormLabel>
+                  <Select onValueChange={v => { field.onChange(v); const s = form.getValues("startTime"); if (s) form.setValue("endTime", calculateEndTime(s, v)); }} defaultValue={field.value}>
+                    <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="50">50 minutos</SelectItem>
+                      <SelectItem value="60">60 minutos</SelectItem>
+                      <SelectItem value="90">90 minutos</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+            </div>
+
+            <FormField control={form.control} name="notes" render={({ field }: any) => (
+              <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea className="resize-none min-h-[80px]" {...field} /></FormControl><FormMessage /></FormItem>
+            )} />
+          </div>
+
+          <DialogFooter className="flex-shrink-0 px-6 py-4 border-t border-neutral-light bg-neutral-light/60">
+            <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>
+            <Button type="submit" disabled={isPending}>
+              {isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Criando...</> : "Criar Agendamento"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </Form>
+    </DialogContent>
+  );
+}
+
+// ─── BookingDialog ────────────────────────────────────────────────────────────
+
+function BookingDialog({ form, psychologists, rooms, isPending, onClose, onSubmit }: any) {
+  return (
+    <DialogContent className="max-w-lg">
+      <DialogHeader>
+        <DialogTitle>Nova Reserva de Sala</DialogTitle>
+        <DialogDescription>Reserve uma sala para um horário específico.</DialogDescription>
+      </DialogHeader>
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 mt-2">
+          <FormField control={form.control} name="psychologistId" render={({ field }: any) => (
+            <FormItem>
+              <FormLabel>Psicóloga</FormLabel>
+              <Select onValueChange={v => field.onChange(parseInt(v))} defaultValue={field.value?.toString()}>
+                <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
+                <SelectContent>
+                  {psychologists.map((p: any) => (
+                    <SelectItem key={p.id} value={p.id.toString()}>{p.user.fullName}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )} />
+
+          <FormField control={form.control} name="roomId" render={({ field }: any) => (
+            <FormItem>
+              <FormLabel>Sala</FormLabel>
+              <Select onValueChange={v => field.onChange(parseInt(v))} defaultValue={field.value?.toString()}>
+                <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
+                <SelectContent>
+                  {rooms.map((r: any) => (
+                    <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )} />
+
+          <FormField control={form.control} name="purpose" render={({ field }: any) => (
+            <FormItem>
+              <FormLabel>Tipo</FormLabel>
+              <Select onValueChange={field.onChange} defaultValue={field.value}>
+                <FormControl><SelectTrigger><SelectValue placeholder="Tipo de uso" /></SelectTrigger></FormControl>
+                <SelectContent>
+                  <SelectItem value="Consulta">Consulta</SelectItem>
+                  <SelectItem value="Supervisão">Supervisão</SelectItem>
+                  <SelectItem value="Formação">Formação</SelectItem>
+                  <SelectItem value="Uso pessoal">Uso pessoal</SelectItem>
+                  <SelectItem value="Outro">Outro</SelectItem>
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )} />
+
+          <div className="grid grid-cols-3 gap-3">
+            <FormField control={form.control} name="date" render={({ field }: any) => (
+              <FormItem><FormLabel>Data</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
+            )} />
+            <FormField control={form.control} name="startTime" render={({ field }: any) => (
+              <FormItem><FormLabel>Início</FormLabel><FormControl><Input type="time" {...field} /></FormControl><FormMessage /></FormItem>
+            )} />
+            <FormField control={form.control} name="endTime" render={({ field }: any) => (
+              <FormItem><FormLabel>Término</FormLabel><FormControl><Input type="time" {...field} /></FormControl><FormMessage /></FormItem>
+            )} />
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>
+            <Button type="submit" disabled={isPending}>
+              {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Reservar
+            </Button>
+          </DialogFooter>
+        </form>
+      </Form>
+    </DialogContent>
   );
 }

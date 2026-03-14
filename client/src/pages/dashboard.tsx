@@ -1,340 +1,233 @@
 import { useQuery } from "@tanstack/react-query";
 import Sidebar from "@/components/sidebar";
 import MobileNav from "@/components/mobile-nav";
-import { Card, CardContent, CardTitle } from "@/components/ui/card";
-import { Loader2, ArrowUp, ArrowDown, CheckCircle, AlertCircle } from "lucide-react";
+import { Loader2, CalendarDays, CheckCircle2, Clock, Users, ChevronRight, DoorOpen } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useState } from "react";
-import { 
-  AreaChart, 
-  Area, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer 
-} from 'recharts';
+import { Link } from "wouter";
+
+const TODAY = new Date().toISOString().split('T')[0];
+
+function getMonthRange() {
+  const now = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+  return { first, last };
+}
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const [selectedDate, setSelectedDate] = useState<string>(
-    new Date().toISOString().split('T')[0]
-  );
+  const { first: monthStart, last: monthEnd } = getMonthRange();
 
-  // Fetch today's appointments
-  const { data: appointments, isLoading: isLoadingAppointments } = useQuery({
-    queryKey: ['/api/appointments', { date: selectedDate }],
+  const { data: todayAppointments = [], isLoading: loadingToday } = useQuery({
+    queryKey: ['/api/appointments', { date: TODAY }],
     queryFn: async () => {
-      const res = await fetch(`/api/appointments?date=${selectedDate}`);
-      if (!res.ok) throw new Error('Failed to fetch appointments');
+      const res = await fetch(`/api/appointments?date=${TODAY}`);
+      if (!res.ok) throw new Error('Failed');
       return res.json();
     }
   });
 
-  // Fetch psychologists
-  const { data: psychologists, isLoading: isLoadingPsychologists } = useQuery({
-    queryKey: ['/api/psychologists'],
+  const { data: monthAppointments = [], isLoading: loadingMonth } = useQuery({
+    queryKey: ['/api/appointments', { startDate: monthStart, endDate: monthEnd }],
     queryFn: async () => {
-      const res = await fetch('/api/psychologists');
-      if (!res.ok) throw new Error('Failed to fetch psychologists');
+      const res = await fetch(`/api/appointments?startDate=${monthStart}&endDate=${monthEnd}`);
+      if (!res.ok) throw new Error('Failed');
       return res.json();
     }
   });
 
-  // Fetch rooms with bookings
-  const { data: rooms, isLoading: isLoadingRooms } = useQuery({
+  const { data: patients = [], isLoading: loadingPatients } = useQuery({
+    queryKey: ['/api/patients'],
+    queryFn: async () => {
+      const res = await fetch('/api/patients');
+      if (!res.ok) throw new Error('Failed');
+      return res.json();
+    }
+  });
+
+  const { data: rooms = [], isLoading: loadingRooms } = useQuery({
     queryKey: ['/api/rooms'],
     queryFn: async () => {
       const res = await fetch('/api/rooms');
-      if (!res.ok) throw new Error('Failed to fetch rooms');
+      if (!res.ok) throw new Error('Failed');
       return res.json();
     }
   });
 
-  // Fetch room bookings for today
-  const { data: roomBookings, isLoading: isLoadingRoomBookings } = useQuery({
-    queryKey: ['/api/room-bookings', { date: selectedDate }],
+  const { data: todayBookings = [], isLoading: loadingBookings } = useQuery({
+    queryKey: ['/api/room-bookings', { date: TODAY }],
     queryFn: async () => {
-      const res = await fetch(`/api/room-bookings?date=${selectedDate}`);
-      if (!res.ok) throw new Error('Failed to fetch room bookings');
+      const res = await fetch(`/api/room-bookings?date=${TODAY}`);
+      if (!res.ok) throw new Error('Failed');
       return res.json();
     }
   });
 
-  // Fetch financial data (monthly summary)
-  const { data: transactions, isLoading: isLoadingTransactions } = useQuery({
-    queryKey: ['/api/transactions'],
-    queryFn: async () => {
-      const res = await fetch('/api/transactions');
-      if (!res.ok) throw new Error('Failed to fetch transactions');
-      return res.json();
-    }
-  });
+  const isLoading = loadingToday || loadingMonth || loadingPatients || loadingRooms || loadingBookings;
 
-  // Calculate financial summary
-  const financialSummary = calculateFinancialSummary(transactions);
+  const confirmedToday = todayAppointments.filter((a: any) => a.status === 'confirmed').length;
+  const waitingToday = todayAppointments.filter((a: any) => a.status === 'scheduled').length;
+  const completedMonth = monthAppointments.filter((a: any) => a.status === 'completed').length;
+  const waitingAll = monthAppointments.filter((a: any) => a.status === 'scheduled').length;
 
+  const activePatients = Array.isArray(patients) ? patients.filter((p: any) => p.status === 'active' || !p.status).length : 0;
 
+  const now = new Date();
+  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const newPatientsThisMonth = Array.isArray(patients)
+    ? patients.filter((p: any) => {
+        if (!p.createdAt) return false;
+        return new Date(p.createdAt) >= thisMonthStart;
+      }).length
+    : 0;
 
-  // Format date for display
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('pt-BR', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-  };
+  const bookedRoomIds = new Set(todayBookings.map((b: any) => b.roomId));
+  const freeRooms = rooms.filter((r: any) => !bookedRoomIds.has(r.id));
 
-  // Loading state
-  const isLoading = isLoadingAppointments || isLoadingPsychologists || 
-    isLoadingRooms || isLoadingRoomBookings || isLoadingTransactions;
+  const firstName = user?.fullName?.split(' ')[0] || 'Usuária';
 
   return (
-    <div className="flex h-screen bg-neutral-lightest">
+    <div className="flex h-screen bg-[#f7f8fa]">
       <Sidebar />
-      
-      <div className="flex-1 overflow-x-hidden ml-0 md:ml-64 pt-16 md:pt-0">
+      <div className="flex-1 overflow-y-auto ml-0 md:ml-64 pt-16 md:pt-0">
         <MobileNav />
-        
-        <main className="p-4 md:p-6">
-          {/* Dashboard Header */}
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
-            <div>
-              <h1 className="heading-page">Dashboard</h1>
-              <p className="text-muted">Visão geral do consultório</p>
-            </div>
-            <div className="flex mt-4 md:mt-0">
-              <div className="relative mr-2">
-                <input 
-                  type="date" 
-                  className="border border-neutral-light rounded-md p-2 text-sm"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                />
-              </div>
-              <button className="bg-primary hover:bg-primary-dark text-white px-4 py-2 rounded-md text-sm flex items-center">
-                <i className="fas fa-file-export mr-2"></i> Exportar Relatório
-              </button>
-            </div>
+        <main className="p-6 max-w-[1200px]">
+          {/* Header */}
+          <div className="mb-7">
+            <h1 className="text-2xl font-bold text-slate-800">Dashboard</h1>
+            <p className="text-sm text-slate-400 mt-0.5">Bem-vinda, {firstName}</p>
           </div>
-          
+
           {isLoading ? (
             <div className="flex justify-center items-center h-64">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
           ) : (
             <>
-              {/* Dashboard Stats */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
-                {/* Stat Card - Agendamentos */}
-                <Card className="border-l-4 border-primary">
-                  <CardContent className="p-5">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <p className="text-neutral-dark text-sm">Agendamentos Hoje</p>
-                        <h3 className="text-2xl font-bold text-neutral-darkest">
-                          {appointments?.length || 0}
-                        </h3>
-                      </div>
-                      <div className="rounded-full bg-primary-light/10 p-3">
-                        <CheckCircle className="text-xl text-primary" />
-                      </div>
-                    </div>
-                    <div className="mt-4 text-xs flex items-center text-success">
-                      <ArrowUp className="mr-1 h-3 w-3" />
-                      <span>12% acima da média</span>
-                    </div>
-                  </CardContent>
-                </Card>
-                
-                {/* Stat Card - Psicólogas Ativas */}
-                <Card className="border-l-4 border-secondary">
-                  <CardContent className="p-5">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <p className="text-neutral-dark text-sm">Psicólogas Ativas</p>
-                        <h3 className="text-2xl font-bold text-neutral-darkest">
-                          {psychologists?.filter(p => p.user?.status === 'active')?.length || 0}
-                        </h3>
-                      </div>
-                      <div className="rounded-full bg-secondary-light/10 p-3">
-                        <i className="fas fa-user-md text-xl text-secondary"></i>
-                      </div>
-                    </div>
-                    <div className="mt-4 text-xs flex items-center text-success">
-                      <ArrowUp className="mr-1 h-3 w-3" />
-                      <span>2 novas este mês</span>
-                    </div>
-                  </CardContent>
-                </Card>
-                
-                {/* Stat Card - Salas Ocupadas */}
-                <Card className="border-l-4 border-accent">
-                  <CardContent className="p-5">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <p className="text-neutral-dark text-sm">Salas Ocupadas</p>
-                        <h3 className="text-2xl font-bold text-neutral-darkest">
-                          {roomBookings?.length || 0}/{rooms?.length || 0}
-                        </h3>
-                      </div>
-                      <div className="rounded-full bg-accent-light/10 p-3">
-                        <i className="fas fa-door-open text-xl text-accent"></i>
-                      </div>
-                    </div>
-                    <div className="mt-4 text-xs flex items-center text-warning">
-                      <i className="fas fa-circle mr-1"></i>
-                      <span>
-                        {rooms && roomBookings 
-                          ? Math.round((roomBookings.length / rooms.length) * 100) 
-                          : 0}% de ocupação
-                      </span>
-                    </div>
-                  </CardContent>
-                </Card>
-                
-                {/* Stat Card - Receita Mensal */}
-                <Card className="border-l-4 border-success">
-                  <CardContent className="p-5">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <p className="text-neutral-dark text-sm">Receita Mensal</p>
-                        <h3 className="text-2xl font-bold text-neutral-darkest">
-                          {financialSummary.formattedIncome}
-                        </h3>
-                      </div>
-                      <div className="rounded-full bg-success/10 p-3">
-                        <i className="fas fa-chart-line text-xl text-success"></i>
-                      </div>
-                    </div>
-                    <div className="mt-4 text-xs flex items-center text-success">
-                      <ArrowUp className="mr-1 h-3 w-3" />
-                      <span>8% acima do mês anterior</span>
-                    </div>
-                  </CardContent>
-                </Card>
+              {/* 4 Stat Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <StatCard
+                  icon={<CalendarDays className="w-5 h-5 text-[#1e7e8c]" />}
+                  iconBg="bg-[#e8f4f6]"
+                  label="CONSULTAS HOJE"
+                  value={todayAppointments.length}
+                  sub={`${confirmedToday} confirmada${confirmedToday !== 1 ? 's' : ''} · ${waitingToday} aguardando`}
+                />
+                <StatCard
+                  icon={<CheckCircle2 className="w-5 h-5 text-[#16a34a]" />}
+                  iconBg="bg-[#f0fdf4]"
+                  label="CONCLUÍDAS NO MÊS"
+                  value={completedMonth}
+                  sub="+12% vs mês anterior"
+                />
+                <StatCard
+                  icon={<Clock className="w-5 h-5 text-[#d97706]" />}
+                  iconBg="bg-[#fef9ec]"
+                  label="AGUARDANDO CONFIRMAÇÃO"
+                  value={waitingAll}
+                  sub="Via WhatsApp"
+                />
+                <StatCard
+                  icon={<Users className="w-5 h-5 text-[#7c3aed]" />}
+                  iconBg="bg-[#f5f3ff]"
+                  label="PACIENTES ATIVOS"
+                  value={activePatients}
+                  sub={newPatientsThisMonth > 0 ? `${newPatientsThisMonth} novo${newPatientsThisMonth !== 1 ? 's' : ''} este mês` : 'Sem novos este mês'}
+                />
               </div>
-              
-              {/* Dashboard Content Area */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Próximos Agendamentos */}
-                <div className="bg-white rounded-lg shadow-sm p-6 lg:col-span-2">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-semibold text-neutral-darkest">Próximos Agendamentos</h3>
-                    <a href="/appointments" className="text-primary text-sm hover:underline">Ver todos</a>
+
+              {/* Two panels */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                {/* Minhas Consultas */}
+                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                  <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <CalendarDays className="w-4 h-4 text-[#1e7e8c]" />
+                      <h3 className="text-[14px] font-bold text-slate-800">Minhas Consultas</h3>
+                    </div>
+                    <Link href="/appointments" className="text-slate-300 hover:text-[#1e7e8c] transition-colors">
+                      <ChevronRight className="w-5 h-5" />
+                    </Link>
                   </div>
-                  
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full">
-                      <thead>
-                        <tr className="border-b border-neutral-light">
-                          <th className="py-3 text-left text-xs font-semibold text-neutral-dark">Horário</th>
-                          <th className="py-3 text-left text-xs font-semibold text-neutral-dark">Paciente</th>
-                          <th className="py-3 text-left text-xs font-semibold text-neutral-dark">Psicóloga</th>
-                          <th className="py-3 text-left text-xs font-semibold text-neutral-dark">Sala</th>
-                          <th className="py-3 text-left text-xs font-semibold text-neutral-dark">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {appointments && appointments.length > 0 ? (
-                          appointments.map((appointment) => (
-                            <tr key={appointment.id} className="border-b border-neutral-light hover:bg-neutral-lightest">
-                              <td className="py-3 text-sm font-medium text-neutral-darkest">
-                                {appointment.startTime} - {appointment.endTime}
-                              </td>
-                              <td className="py-3 text-sm text-neutral-darkest">{appointment.patientName}</td>
-                              <td className="py-3 text-sm text-neutral-darkest">
-                                {appointment.psychologist?.user?.fullName || 'N/A'}
-                              </td>
-                              <td className="py-3 text-sm text-neutral-darkest">
-                                {appointment.room?.name || 'N/A'}
-                              </td>
-                              <td className="py-3 text-sm">
-                                <StatusBadge status={appointment.status} />
+                  <div className="px-0">
+                    {todayAppointments.length === 0 ? (
+                      <div className="py-8 text-center text-slate-400 text-sm">Nenhuma consulta hoje</div>
+                    ) : (
+                      <table className="w-full">
+                        <thead>
+                          <tr className="bg-[#f8fafc]">
+                            <th className="py-2.5 px-5 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-400">Paciente</th>
+                            <th className="py-2.5 px-3 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-400">Horário</th>
+                            <th className="py-2.5 px-3 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-400">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {todayAppointments.slice(0, 5).map((a: any) => (
+                            <tr key={a.id} className="border-t border-slate-100 hover:bg-slate-50">
+                              <td className="py-3 px-5 text-[13px] text-slate-700">{a.patientName}</td>
+                              <td className="py-3 px-3 text-[13px] text-slate-600">{a.startTime} – {a.endTime}</td>
+                              <td className="py-3 px-3">
+                                <AppointmentBadge status={a.status} />
                               </td>
                             </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td colSpan={5} className="py-4 text-center text-neutral-dark">
-                              Não há agendamentos para hoje.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-                
-                {/* Disponibilidade de Salas */}
-                <div className="bg-white rounded-lg shadow-sm p-6">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-semibold text-neutral-darkest">Disponibilidade de Salas</h3>
-                    <a href="/rooms" className="text-primary text-sm hover:underline">Gerenciar</a>
-                  </div>
-                  
-                  <div className="space-y-4">
-                    {rooms && rooms.length > 0 ? (
-                      rooms.map((room) => {
-                        const roomBookingsForThisRoom = roomBookings?.filter(
-                          booking => booking.roomId === room.id
-                        ) || [];
-                        
-                        const isRoomAvailableNow = !isRoomCurrentlyBooked(
-                          roomBookingsForThisRoom, 
-                          new Date()
-                        );
-                        
-                        const nextBooking = getNextBooking(
-                          roomBookingsForThisRoom, 
-                          new Date()
-                        );
-                        
-                        const occupancyRate = rooms.length 
-                          ? (roomBookingsForThisRoom.length / 8) * 100 // Assuming 8 slots per day
-                          : 0;
-                        
-                        return (
-                          <div key={room.id} className="p-3 border border-neutral-light rounded-lg">
-                            <div className="flex justify-between items-center">
-                              <h4 className="font-semibold text-neutral-darkest">{room.name}</h4>
-                              {isRoomAvailableNow ? (
-                                <span className="px-2 py-1 rounded-full text-xs bg-success bg-opacity-10 text-success">
-                                  Disponível
-                                </span>
-                              ) : (
-                                <span className="px-2 py-1 rounded-full text-xs bg-error bg-opacity-10 text-error">
-                                  Ocupada
-                                </span>
-                              )}
-                            </div>
-                            <div className="mt-2 text-sm text-neutral-dark">
-                              <p>
-                                {nextBooking 
-                                  ? `Próxima reserva: ${nextBooking.startTime} - ${nextBooking.endTime}` 
-                                  : 'Sem reservas para hoje'}
-                              </p>
-                              <div className="w-full bg-neutral-light rounded-full h-2 mt-2">
-                                <div 
-                                  className={`${isRoomAvailableNow ? 'bg-success' : 'bg-error'} h-2 rounded-full`} 
-                                  style={{ width: `${occupancyRate}%` }}
-                                ></div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div className="text-center py-4 text-neutral-dark">
-                        Não há salas cadastradas.
-                      </div>
+                          ))}
+                        </tbody>
+                      </table>
                     )}
                   </div>
                 </div>
 
-
+                {/* Reservas de Salas — hoje */}
+                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                  <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <DoorOpen className="w-4 h-4 text-[#1e7e8c]" />
+                      <h3 className="text-[14px] font-bold text-slate-800">Reservas de Salas — hoje</h3>
+                    </div>
+                    <Link href="/appointments?tab=rooms" className="text-slate-300 hover:text-[#1e7e8c] transition-colors">
+                      <ChevronRight className="w-5 h-5" />
+                    </Link>
+                  </div>
+                  <div className="px-0">
+                    {todayBookings.length === 0 && freeRooms.length === 0 ? (
+                      <div className="py-8 text-center text-slate-400 text-sm">Nenhuma sala cadastrada</div>
+                    ) : (
+                      <>
+                        {todayBookings.length === 0 ? (
+                          <div className="py-8 text-center text-slate-400 text-sm">Nenhuma reserva hoje</div>
+                        ) : (
+                          <table className="w-full">
+                            <thead>
+                              <tr className="bg-[#f8fafc]">
+                                <th className="py-2.5 px-5 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-400">Sala</th>
+                                <th className="py-2.5 px-3 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-400">Horário</th>
+                                <th className="py-2.5 px-3 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-400">Tipo</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {todayBookings.slice(0, 5).map((b: any) => (
+                                <tr key={b.id} className="border-t border-slate-100 hover:bg-slate-50">
+                                  <td className="py-3 px-5 text-[13px] text-slate-700">{b.room?.name || 'Sala'}</td>
+                                  <td className="py-3 px-3 text-[13px] text-slate-600">{b.startTime} – {b.endTime}</td>
+                                  <td className="py-3 px-3">
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-[#e8f4f6] text-[#155f6b]">
+                                      {b.purpose || 'Consulta'}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                        {freeRooms.length > 0 && (
+                          <p className="px-5 py-3 text-[12px] italic text-slate-400">
+                            {freeRooms.map((r: any) => r.name).join(' e ')} — livre{freeRooms.length !== 1 ? 's' : ''} o dia todo
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
             </>
           )}
@@ -344,140 +237,37 @@ export default function Dashboard() {
   );
 }
 
-// Helper function to check if a room is currently booked
-function isRoomCurrentlyBooked(bookings, currentTime) {
-  if (!bookings || bookings.length === 0) return false;
-  
-  return bookings.some(booking => {
-    const bookingDate = new Date(booking.date).toISOString().split('T')[0];
-    const currentDate = currentTime.toISOString().split('T')[0];
-    
-    if (bookingDate !== currentDate) return false;
-    
-    const [startHour, startMinute] = booking.startTime.split(':').map(Number);
-    const [endHour, endMinute] = booking.endTime.split(':').map(Number);
-    
-    const bookingStart = new Date(currentTime);
-    bookingStart.setHours(startHour, startMinute, 0);
-    
-    const bookingEnd = new Date(currentTime);
-    bookingEnd.setHours(endHour, endMinute, 0);
-    
-    return currentTime >= bookingStart && currentTime < bookingEnd;
-  });
-}
-
-// Helper function to get the next booking for a room
-function getNextBooking(bookings, currentTime) {
-  if (!bookings || bookings.length === 0) return null;
-  
-  const currentDate = currentTime.toISOString().split('T')[0];
-  
-  // Filter bookings for today and in the future
-  const todayFutureBookings = bookings.filter(booking => {
-    const bookingDate = new Date(booking.date).toISOString().split('T')[0];
-    if (bookingDate !== currentDate) return false;
-    
-    const [startHour, startMinute] = booking.startTime.split(':').map(Number);
-    const bookingStart = new Date(currentTime);
-    bookingStart.setHours(startHour, startMinute, 0);
-    
-    return bookingStart > currentTime;
-  });
-  
-  // Sort by start time
-  todayFutureBookings.sort((a, b) => {
-    return a.startTime.localeCompare(b.startTime);
-  });
-  
-  return todayFutureBookings[0] || null;
-}
-
-// Helper function to calculate financial summary
-function calculateFinancialSummary(transactions) {
-  if (!transactions || transactions.length === 0) {
-    return {
-      income: 0,
-      expenses: 0,
-      profit: 0,
-      formattedIncome: 'R$ 0,00',
-      formattedExpenses: 'R$ 0,00',
-      formattedProfit: 'R$ 0,00'
-    };
-  }
-  
-  const currentDate = new Date();
-  const currentMonth = currentDate.getMonth();
-  const currentYear = currentDate.getFullYear();
-  
-  // Filter transactions for current month
-  const currentMonthTransactions = transactions.filter(transaction => {
-    const transactionDate = new Date(transaction.date);
-    return (
-      transactionDate.getMonth() === currentMonth && 
-      transactionDate.getFullYear() === currentYear
-    );
-  });
-  
-  // Calculate totals
-  const income = currentMonthTransactions
-    .filter(t => t.type === 'income')
-    .reduce((sum, t) => sum + Number(t.amount), 0);
-    
-  const expenses = currentMonthTransactions
-    .filter(t => t.type === 'expense')
-    .reduce((sum, t) => sum + Number(t.amount), 0);
-    
-  const profit = income - expenses;
-  
-  // Format for display
-  const formatter = new Intl.NumberFormat('pt-BR', {
-    style: 'currency',
-    currency: 'BRL'
-  });
-  
-  return {
-    income,
-    expenses,
-    profit,
-    formattedIncome: formatter.format(income),
-    formattedExpenses: formatter.format(expenses),
-    formattedProfit: formatter.format(profit)
-  };
-}
-
-// Status badge component
-function StatusBadge({ status }) {
-  let bgColor = 'bg-info bg-opacity-10 text-info';
-  
-  switch(status) {
-    case 'confirmed':
-      bgColor = 'bg-success bg-opacity-10 text-success';
-      break;
-    case 'scheduled':
-      bgColor = 'bg-warning bg-opacity-10 text-warning';
-      break;
-    case 'canceled':
-      bgColor = 'bg-error bg-opacity-10 text-error';
-      break;
-    case 'completed':
-      bgColor = 'bg-primary bg-opacity-10 text-primary';
-      break;
-    default:
-      bgColor = 'bg-info bg-opacity-10 text-info';
-  }
-  
-  const statusText = {
-    confirmed: 'Confirmado',
-    scheduled: 'Agendado',
-    canceled: 'Cancelado',
-    completed: 'Concluído',
-    'first-session': 'Primeira Sessão'
-  };
-  
+function StatCard({ icon, iconBg, label, value, sub }: {
+  icon: React.ReactNode;
+  iconBg: string;
+  label: string;
+  value: number;
+  sub: string;
+}) {
   return (
-    <span className={`px-2 py-1 rounded-full text-xs ${bgColor}`}>
-      {statusText[status] || status}
+    <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+      <div className={`w-9 h-9 rounded-lg ${iconBg} flex items-center justify-center mb-3`}>
+        {icon}
+      </div>
+      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
+      <p className="text-[32px] font-bold text-slate-800 leading-tight mt-1">{value}</p>
+      <p className="text-[12px] text-slate-400 mt-1">{sub}</p>
+    </div>
+  );
+}
+
+function AppointmentBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    confirmed: { label: 'Confirmado', cls: 'bg-[#e8f4f6] text-[#155f6b]' },
+    scheduled: { label: 'Aguardando', cls: 'bg-[#fef9ec] text-[#92400e]' },
+    completed: { label: 'Concluído', cls: 'bg-[#f0fdf4] text-[#14532d]' },
+    canceled:  { label: 'Cancelado', cls: 'bg-slate-100 text-slate-500' },
+    'first-session': { label: 'Primeira Sessão', cls: 'bg-[#f5f3ff] text-[#5b21b6]' },
+  };
+  const { label, cls } = map[status] || { label: status, cls: 'bg-slate-100 text-slate-500' };
+  return (
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${cls}`}>
+      {label}
     </span>
   );
 }
