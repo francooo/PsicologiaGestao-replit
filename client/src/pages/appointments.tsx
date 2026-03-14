@@ -388,13 +388,13 @@ export default function Appointments() {
     return format(selectedDate, "MMMM yyyy", { locale: ptBR }).replace(/^\w/, c => c.toUpperCase());
   })();
 
-  const dailyEvents = formattedAppointments.filter(a => a.date === formatDateForRequest(selectedDate));
-
   const filteredAppointments = formattedAppointments.filter(a => {
     if (filterPatient && a.patientName !== filterPatient) return false;
     if (filterStatus && a.status !== filterStatus) return false;
     return true;
   });
+
+  const dailyEvents = filteredAppointments.filter(a => a.date === formatDateForRequest(selectedDate));
 
   const filteredWeeklyByDate = filteredAppointments.reduce<Record<string, typeof filteredAppointments>>((acc, a) => {
     if (!acc[a.date]) acc[a.date] = [];
