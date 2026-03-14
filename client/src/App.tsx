@@ -20,16 +20,17 @@ import AdminInvoices from "@/pages/admin-invoices";
 import PatientsList from "@/pages/patients";
 import PatientRecord from "@/pages/patients/record";
 import { ProtectedRoute } from "./lib/protected-route";
-import { AuthProvider } from "./hooks/use-auth";
+import { AuthProvider, useAuth } from "./hooks/use-auth";
 
 function Router() {
+  const { user } = useAuth();
   return (
     <Switch>
       <ProtectedRoute path="/" component={Dashboard} />
       <ProtectedRoute path="/dashboard" component={Dashboard} />
       <ProtectedRoute path="/appointments" component={Appointments} />
       <ProtectedRoute path="/psychologists" component={Psychologists} />
-      <ProtectedRoute path="/rooms" component={Rooms} />
+      {user?.role === "admin" && <ProtectedRoute path="/rooms" component={Rooms} />}
       <ProtectedRoute path="/financial" component={Financial} />
       <ProtectedRoute path="/cash-flow" component={CashFlow} />
       <ProtectedRoute path="/invoices" component={Invoices} />
