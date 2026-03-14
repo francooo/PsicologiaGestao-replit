@@ -498,7 +498,7 @@ export default function Appointments() {
                     Novo Agendamento
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="max-w-2xl max-h-[90vh] p-0 overflow-hidden">
+                <DialogContent className="max-w-2xl max-h-[90vh] p-0 overflow-hidden flex flex-col">
                   <DialogHeader className="flex flex-row items-center justify-between px-6 py-4 border-b border-neutral-light">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
@@ -518,7 +518,7 @@ export default function Appointments() {
                   <Form {...appointmentForm}>
                     <form
                       onSubmit={appointmentForm.handleSubmit(onAppointmentSubmit)}
-                      className="flex flex-col max-h-[calc(90vh-4rem)]"
+                      className="flex flex-col flex-1 min-h-0 overflow-hidden"
                     >
                       {/* Corpo rolável do formulário */}
                       <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
@@ -836,7 +836,7 @@ export default function Appointments() {
                       </div>
 
                       {/* Rodapé fixo do modal */}
-                      <DialogFooter className="px-6 py-4 border-t border-neutral-light bg-neutral-light/60 flex flex-row items-center justify-end gap-3">
+                      <DialogFooter className="flex-shrink-0 px-6 py-4 border-t border-neutral-light bg-neutral-light/60 flex flex-row items-center justify-end gap-3">
                         <Button
                           type="button"
                           variant="outline"
