@@ -43,5 +43,3 @@ waitForPort = 5000
 [agent]
 integrations = ["styling_shadcn:1.0.0", "javascript_database:1.0.0"]
 expertMode = true
-
-[userenv.shared]
