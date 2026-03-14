@@ -368,30 +368,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       let appointments;
 
-      const user = req.user as any;
-      let autoPsychologistId: number | null = null;
+      const user = req.user as { id: number; role: string } | undefined;
+      let psychologistFilter: number | null = null;
+
       if (user?.role === 'psychologist') {
         const psychProfile = await storage.getPsychologistByUserId(user.id);
-        if (psychProfile) autoPsychologistId = psychProfile.id;
+        if (!psychProfile) {
+          return res.json([]);
+        }
+        psychologistFilter = psychProfile.id;
+      } else if (req.query.psychologistId) {
+        psychologistFilter = parseInt(req.query.psychologistId as string);
       }
 
-      const explicitPsychId = req.query.psychologistId
-        ? parseInt(req.query.psychologistId as string)
-        : autoPsychologistId;
-
-      if (explicitPsychId && req.query.startDate && req.query.endDate) {
+      if (psychologistFilter && req.query.startDate && req.query.endDate) {
         appointments = await storage.getAppointmentsByPsychologistIdAndDateRange(
-          explicitPsychId,
+          psychologistFilter,
           new Date(req.query.startDate as string),
           new Date(req.query.endDate as string)
         );
-      } else if (explicitPsychId && req.query.date) {
+      } else if (psychologistFilter && req.query.date) {
         const dateAppts = await storage.getAppointmentsByDate(
           new Date(req.query.date as string)
         );
-        appointments = dateAppts.filter(a => a.psychologistId === explicitPsychId);
-      } else if (explicitPsychId) {
-        appointments = await storage.getAppointmentsByPsychologistId(explicitPsychId);
+        appointments = dateAppts.filter(a => a.psychologistId === psychologistFilter);
+      } else if (psychologistFilter) {
+        appointments = await storage.getAppointmentsByPsychologistId(psychologistFilter);
       } else if (req.query.date) {
         appointments = await storage.getAppointmentsByDate(
           new Date(req.query.date as string)
