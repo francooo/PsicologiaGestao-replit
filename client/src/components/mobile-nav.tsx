@@ -23,7 +23,8 @@ export default function MobileNav() {
   };
 
   const isActive = (path: string) => {
-    return location === path;
+    const pathOnly = path.split('?')[0];
+    return location === pathOnly;
   };
 
   const navigationItems = [
@@ -52,9 +53,9 @@ export default function MobileNav() {
       allowedRoles: ["admin", "receptionist"]
     },
     {
-      name: "Salas",
+      name: "Reservas",
       icon: <DoorOpen className="w-5 h-5" />,
-      href: "/rooms",
+      href: "/appointments?tab=rooms",
       allowedRoles: ["admin", "psychologist", "receptionist"]
     },
     {
@@ -224,11 +225,11 @@ export default function MobileNav() {
           </li>
           <li>
             <Link
-              href="/rooms"
-              className={`flex flex-col items-center ${isActive("/rooms") ? "text-primary" : "text-neutral-dark"}`}
+              href="/appointments?tab=rooms"
+              className={`flex flex-col items-center ${isActive("/appointments") ? "text-primary" : "text-neutral-dark"}`}
             >
               <DoorOpen className="h-5 w-5" />
-              <span className="text-xs mt-1">Salas</span>
+              <span className="text-xs mt-1">Reservas</span>
             </Link>
           </li>
           <li>
