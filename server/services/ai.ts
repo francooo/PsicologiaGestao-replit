@@ -1,7 +1,13 @@
 import Groq from "groq-sdk";
 import { createRequire } from "module";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import { writeFileSync, readFileSync, existsSync, unlinkSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 const require = createRequire(import.meta.url);
 const pdfParse = require("pdf-parse");
+const execFileAsync = promisify(execFile);
 
 if (!process.env.GROQ_API_KEY) {
   console.warn("GROQ_API_KEY not set. AI summarization and invoice NFS-e image analysis will not work.");
@@ -176,6 +182,30 @@ emitente_divergencias (string ou null: descreva divergências entre dados do emi
 
 Regras: Valores monetários como número decimal (ex: 1200.50). Datas YYYY-MM-DD. CPF/CNPJ/CEP formatados. Campo vazio ou não encontrado: valor null.`;
 
+async function pdfBufferToImageBase64(pdfBuffer: Buffer): Promise<string> {
+  const id = `pdf-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const inputPath = join(tmpdir(), `${id}.pdf`);
+  const outputPrefix = join(tmpdir(), id);
+  const cleanUp = () => {
+    for (const f of [inputPath, `${outputPrefix}-1.png`, `${outputPrefix}-01.png`, `${outputPrefix}-001.png`]) {
+      try { if (existsSync(f)) unlinkSync(f); } catch { /* ignore */ }
+    }
+  };
+  try {
+    writeFileSync(inputPath, pdfBuffer);
+    await execFileAsync("pdftoppm", ["-png", "-r", "200", "-f", "1", "-l", "1", inputPath, outputPrefix]);
+    const candidates = [`${outputPrefix}-1.png`, `${outputPrefix}-01.png`, `${outputPrefix}-001.png`];
+    const pngPath = candidates.find(existsSync);
+    if (!pngPath) {
+      throw new UnsupportedFormatError("Não foi possível converter o PDF para imagem. O arquivo pode estar corrompido.");
+    }
+    const pngBuffer = readFileSync(pngPath);
+    return pngBuffer.toString("base64");
+  } finally {
+    cleanUp();
+  }
+}
+
 export async function analyzeInvoicePdf(
   pdfBase64: string,
   psychologistProfile?: PsychologistProfileForInvoice
@@ -186,18 +216,22 @@ export async function analyzeInvoicePdf(
 
   const pdfBuffer = Buffer.from(pdfBase64, "base64");
 
-  let textContent: string;
+  let textContent: string | null = null;
   try {
     const parsed = await pdfParse(pdfBuffer);
-    textContent = parsed.text ?? "";
-    if (!textContent || textContent.trim().length < 20) {
-      throw new UnsupportedFormatError(
-        "Não foi possível extrair texto deste PDF. O arquivo pode ser digitalizado como imagem ou estar protegido. Tente enviar como JPEG ou PNG."
-      );
+    const extracted = parsed.text ?? "";
+    if (extracted.trim().length >= 20) {
+      textContent = extracted;
     }
-  } catch (error) {
-    if (error instanceof UnsupportedFormatError) throw error;
-    throw new UnsupportedFormatError("Erro ao processar o PDF. Verifique se o arquivo não está corrompido.");
+  } catch {
+    // pdf-parse failed — will fall back to vision
+  }
+
+  // PDF escaneado (sem texto) → converte primeira página em imagem e usa visão
+  if (!textContent) {
+    console.log("[analyzeInvoicePdf] Sem texto extraível — usando fallback de visão via pdftoppm");
+    const imageBase64 = await pdfBufferToImageBase64(pdfBuffer);
+    return analyzeInvoiceImage(imageBase64, "image/png", psychologistProfile);
   }
 
   const maxChars = 12000;
