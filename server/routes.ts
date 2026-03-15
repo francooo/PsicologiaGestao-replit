@@ -471,7 +471,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/appointments", async (req, res) => {
     try {
-      const data = insertAppointmentSchema.parse(req.body);
+      const user = req.user as { id: number; role: string } | undefined;
+
+      // For psychologist role, always enforce their own psychologistId server-side
+      let body = { ...req.body };
+      if (user?.role === 'psychologist') {
+        const psychProfile = await storage.getPsychologistByUserId(user.id);
+        if (!psychProfile) {
+          return res.status(400).json({ message: "Perfil de psicóloga não encontrado. Peça ao administrador para criar seu perfil." });
+        }
+        body.psychologistId = psychProfile.id;
+      }
+
+      const data = insertAppointmentSchema.parse(body);
 
       // Check if room is available for the specified time
       const isRoomAvailable = await storage.checkRoomAvailability(

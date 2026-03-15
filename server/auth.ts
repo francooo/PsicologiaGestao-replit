@@ -244,8 +244,28 @@ export function setupAuth(app: Express) {
         return res.status(401).json({ message: info?.message || "Authentication failed" });
       }
 
-      req.login(user, (loginErr) => {
+      req.login(user, async (loginErr) => {
         if (loginErr) return next(loginErr);
+
+        // Auto-create psychologist profile if user has psychologist role but no profile yet
+        if (user.role === 'psychologist') {
+          const existingProfile = await storage.getPsychologistByUserId(user.id);
+          if (!existingProfile) {
+            const newProfile = await storage.createPsychologist({
+              userId: user.id,
+              specialization: null,
+              bio: null,
+              hourlyRate: 0,
+            });
+            // Fix any existing appointments/bookings that were saved with psychologistId=0
+            // (caused by missing profile at creation time)
+            const allAppointments = await storage.getAllAppointments();
+            const orphaned = allAppointments.filter(a => a.psychologistId === 0);
+            for (const appt of orphaned) {
+              await storage.updateAppointment(appt.id, { psychologistId: newProfile.id });
+            }
+          }
+        }
 
         // Clean up sensitive info before returning
         const { password, ...userResponse } = user;
