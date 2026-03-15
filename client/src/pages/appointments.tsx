@@ -304,12 +304,16 @@ export default function Appointments() {
     onError: (e: any) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
   });
 
+  const loggedPsychologist = user?.role === "psychologist"
+    ? (psychologists as any[]).find((p: any) => p.userId === user.id)
+    : null;
+
   // ── Forms ──
   const appointmentForm = useForm<AppointmentFormValues>({
     resolver: zodResolver(appointmentFormSchema),
     defaultValues: {
       patientName: "",
-      psychologistId: 0,
+      psychologistId: loggedPsychologist?.id || 0,
       roomId: 0,
       date: formatDateForRequest(selectedDate),
       startTime: "09:00",
@@ -319,6 +323,12 @@ export default function Appointments() {
       duration: "50",
     }
   });
+
+  useEffect(() => {
+    if (loggedPsychologist) {
+      appointmentForm.setValue("psychologistId", loggedPsychologist.id);
+    }
+  }, [loggedPsychologist?.id]);
 
   const shareForm = useForm<WhatsAppShareFormValues>({
     resolver: zodResolver(whatsAppShareSchema),
@@ -496,6 +506,7 @@ export default function Appointments() {
                     onClose={() => setIsNewAppointmentDialogOpen(false)}
                     onSubmit={(data: AppointmentFormValues) => createAppointmentMutation.mutate(data)}
                     calculateEndTime={calculateEndTime}
+                    loggedPsychologist={loggedPsychologist}
                   />
                 </Dialog>
               </>
@@ -991,6 +1002,7 @@ function AppointmentDialog({
   onClose,
   onSubmit,
   calculateEndTime,
+  loggedPsychologist,
 }: any) {
   return (
     <DialogContent className="max-w-2xl max-h-[90vh] p-0 overflow-hidden flex flex-col">
@@ -1043,14 +1055,20 @@ function AppointmentDialog({
               <FormField control={form.control} name="psychologistId" render={({ field }: any) => (
                 <FormItem>
                   <FormLabel>Psicóloga</FormLabel>
-                  <Select onValueChange={v => field.onChange(parseInt(v))} defaultValue={field.value.toString()}>
-                    <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
-                    <SelectContent>
-                      {psychologists.map((p: any) => (
-                        <SelectItem key={p.id} value={p.id.toString()}>{p.user.fullName}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {loggedPsychologist ? (
+                    <div className="flex h-10 items-center rounded-md border border-input bg-muted px-3 text-sm">
+                      {loggedPsychologist.user.fullName}
+                    </div>
+                  ) : (
+                    <Select onValueChange={v => field.onChange(parseInt(v))} defaultValue={field.value?.toString()}>
+                      <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
+                      <SelectContent>
+                        {psychologists.map((p: any) => (
+                          <SelectItem key={p.id} value={p.id.toString()}>{p.user.fullName}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                   <FormMessage />
                 </FormItem>
               )} />
