@@ -353,12 +353,18 @@ export default function Appointments() {
   const shareForm = useForm<WhatsAppShareFormValues>({
     resolver: zodResolver(whatsAppShareSchema),
     defaultValues: {
-      psychologistId: "",
+      psychologistId: loggedPsychologist?.id?.toString() || "",
       startDate: formatDateForRequest(new Date()),
       endDate: formatDateForRequest(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
       message: "Olá! Seguem os horários disponíveis para agendamento.",
     }
   });
+
+  useEffect(() => {
+    if (loggedPsychologist) {
+      shareForm.setValue("psychologistId", loggedPsychologist.id.toString());
+    }
+  }, [loggedPsychologist?.id]);
 
   const bookingForm = useForm<BookingFormValues>({
     resolver: zodResolver(bookingFormSchema),
@@ -475,14 +481,20 @@ export default function Appointments() {
                         <FormField control={shareForm.control} name="psychologistId" render={({ field }) => (
                           <FormItem>
                             <FormLabel>Psicóloga</FormLabel>
-                            <Select onValueChange={field.onChange} defaultValue={field.value}>
-                              <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
-                              <SelectContent>
-                                {(psychologists as any[]).map(p => (
-                                  <SelectItem key={p.id} value={p.id.toString()}>{p.user.fullName}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            {user?.role === "psychologist" ? (
+                              <div className="flex h-10 items-center rounded-md border border-input bg-muted px-3 text-sm">
+                                {user.fullName}
+                              </div>
+                            ) : (
+                              <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
+                                <SelectContent>
+                                  {(psychologists as any[]).map(p => (
+                                    <SelectItem key={p.id} value={p.id.toString()}>{p.user.fullName}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
                             <FormMessage />
                           </FormItem>
                         )} />
