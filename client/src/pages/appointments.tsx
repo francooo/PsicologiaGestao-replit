@@ -204,6 +204,10 @@ export default function Appointments() {
     }
   });
 
+  const loggedPsychologist = user?.role === "psychologist"
+    ? (psychologists as any[]).find((p: any) => p.userId === user.id)
+    : null;
+
   // ── Psychologist color map ──
   const psychColorMap: Record<number, typeof PSYCH_COLORS[0]> = {};
   (psychologists as any[]).forEach((p, i) => { psychColorMap[p.id] = getPsychColor(i); });
@@ -250,7 +254,17 @@ export default function Appointments() {
       queryClient.invalidateQueries({ queryKey: ['/api/appointments'] });
       toast({ title: "Agendamento criado", description: "O agendamento foi criado com sucesso." });
       setIsNewAppointmentDialogOpen(false);
-      appointmentForm.reset();
+      appointmentForm.reset({
+        patientName: "",
+        psychologistId: loggedPsychologist?.id || 0,
+        roomId: 0,
+        date: formatDateForRequest(selectedDate),
+        startTime: "09:00",
+        endTime: "10:00",
+        status: "scheduled",
+        notes: "",
+        duration: "50",
+      });
     },
     onError: (e: any) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
   });
@@ -303,10 +317,6 @@ export default function Appointments() {
     },
     onError: (e: any) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
   });
-
-  const loggedPsychologist = user?.role === "psychologist"
-    ? (psychologists as any[]).find((p: any) => p.userId === user.id)
-    : null;
 
   // ── Forms ──
   const appointmentForm = useForm<AppointmentFormValues>({
