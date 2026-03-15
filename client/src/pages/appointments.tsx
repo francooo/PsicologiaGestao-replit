@@ -517,6 +517,7 @@ export default function Appointments() {
                     onSubmit={(data: AppointmentFormValues) => createAppointmentMutation.mutate(data)}
                     calculateEndTime={calculateEndTime}
                     loggedPsychologist={loggedPsychologist}
+                    user={user}
                   />
                 </Dialog>
               </>
@@ -1013,7 +1014,9 @@ function AppointmentDialog({
   onSubmit,
   calculateEndTime,
   loggedPsychologist,
+  user,
 }: any) {
+  const isPsychologist = user?.role === "psychologist";
   return (
     <DialogContent className="max-w-2xl max-h-[90vh] p-0 overflow-hidden flex flex-col">
       <DialogHeader className="flex flex-row items-center gap-3 px-6 py-4 border-b border-neutral-light">
@@ -1065,9 +1068,9 @@ function AppointmentDialog({
               <FormField control={form.control} name="psychologistId" render={({ field }: any) => (
                 <FormItem>
                   <FormLabel>Psicóloga</FormLabel>
-                  {loggedPsychologist ? (
+                  {isPsychologist ? (
                     <div className="flex h-10 items-center rounded-md border border-input bg-muted px-3 text-sm">
-                      {loggedPsychologist.user.fullName}
+                      {user.fullName}
                     </div>
                   ) : (
                     <Select onValueChange={v => field.onChange(parseInt(v))} defaultValue={field.value?.toString()}>
