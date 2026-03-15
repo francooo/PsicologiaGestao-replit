@@ -193,6 +193,16 @@ export default function Appointments() {
 
   const { data: patients } = useQuery<Patient[]>({ queryKey: ['/api/patients'] });
 
+  // All appointments (no date range) — used only to populate the patient dropdown
+  const { data: allAppointments = [] } = useQuery({
+    queryKey: ['/api/appointments', 'all-patients'],
+    queryFn: async () => {
+      const res = await fetch('/api/appointments');
+      if (!res.ok) throw new Error('Failed');
+      return res.json();
+    }
+  });
+
   // ── Queries: room bookings ──
   const roomDateStr = formatDateForRequest(roomDate);
   const { data: roomBookings = [], isLoading: loadingRoomBookings } = useQuery({
@@ -229,7 +239,7 @@ export default function Appointments() {
   }));
 
   const patientOptions = Array.from(
-    new Set(formattedAppointments.map(a => a.patientName))
+    new Set((allAppointments as any[]).map((a: any) => a.patientName))
   ).sort();
 
   // ── Week appointments by date ──
