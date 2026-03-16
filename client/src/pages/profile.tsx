@@ -17,7 +17,8 @@ import {
   CheckCircle,
   Link as LinkIcon,
   Unlink,
-  CalendarClock
+  CalendarClock,
+  Pencil
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -40,6 +41,11 @@ function DateMaskedInput({ value, onChange }: { value?: Date; onChange: (date: D
   };
 
   const [text, setText] = useState(() => toText(value));
+
+  // Sync when external value changes (e.g. on form reset after data loads)
+  useEffect(() => {
+    setText(toText(value));
+  }, [value]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value.replace(/\D/g, '').slice(0, 8);
@@ -78,11 +84,21 @@ const ProfileSchema = z.object({
   profileImage: z.string().optional(),
 });
 
+function parseBirthDate(value: string | null | undefined): Date | undefined {
+  if (!value) return undefined;
+  const str = typeof value === 'string' ? value.split('T')[0] : '';
+  if (!str) return undefined;
+  const [year, month, day] = str.split('-').map(Number);
+  if (!year || !month || !day) return undefined;
+  return new Date(year, month - 1, day);
+}
+
 export default function ProfilePage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
 
   // Dados das estatísticas
   const { data: appointments } = useQuery({
@@ -107,14 +123,14 @@ export default function ProfilePage() {
         fullName: user.fullName || "",
         email: user.email || "",
         phoneNumber: "",
-        birthDate: undefined,
+        birthDate: parseBirthDate((user as any).birthDate),
         profileImage: user.profileImage || "",
       });
       if (user.profileImage) {
         setImagePreview(user.profileImage);
       }
     }
-  }, [user, form]);
+  }, [user]);
 
   const updateProfileMutation = useMutation({
     mutationFn: async (values: z.infer<typeof ProfileSchema>) => {
@@ -149,6 +165,7 @@ export default function ProfilePage() {
         description: "Suas informações foram atualizadas com sucesso.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/user"] });
+      setIsEditing(false);
     },
     onError: (error) => {
       toast({
@@ -341,17 +358,31 @@ export default function ProfilePage() {
 
             <TabsContent value="personal">
               <Card>
-                <CardHeader>
-                  <CardTitle>Informações Pessoais</CardTitle>
-                  <CardDescription>
-                    Atualize suas informações pessoais e de contato
-                  </CardDescription>
+                <CardHeader className="flex flex-row items-start justify-between">
+                  <div>
+                    <CardTitle>Informações Pessoais</CardTitle>
+                    <CardDescription>
+                      {isEditing ? "Edite suas informações e clique em salvar" : "Suas informações pessoais e de contato"}
+                    </CardDescription>
+                  </div>
+                  {!isEditing && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsEditing(true)}
+                      data-testid="button-edit-profile"
+                    >
+                      <Pencil className="w-4 h-4 mr-2" />
+                      Editar
+                    </Button>
+                  )}
                 </CardHeader>
                 <CardContent>
-                  <Form {...form}>
-                    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                      <div className="flex flex-col items-center mb-6">
-                        <Avatar className="w-24 h-24 mb-4">
+                  {!isEditing ? (
+                    /* VIEW MODE */
+                    <div className="space-y-6">
+                      <div className="flex flex-col items-center">
+                        <Avatar className="w-24 h-24 mb-3">
                           <AvatarImage src={imagePreview || undefined} />
                           <AvatarFallback
                             showPsychologySymbol={user?.role === "psychologist"}
@@ -360,88 +391,154 @@ export default function ProfilePage() {
                             {user?.fullName?.charAt(0) || "U"}
                           </AvatarFallback>
                         </Avatar>
-                        <div className="text-center">
-                          <Label htmlFor="picture" className="cursor-pointer text-primary font-medium">
-                            Alterar imagem de perfil (60x60px)
-                          </Label>
-                          <Input
-                            id="picture"
-                            type="file"
-                            accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
-                            className="hidden"
-                            onChange={handleImageChange}
-                          />
+                        <p className="text-lg font-semibold" data-testid="text-fullname">{user?.fullName}</p>
+                        <p className="text-sm text-muted-foreground" data-testid="text-role">
+                          {user?.role === "admin" ? "Administrador" : user?.role === "psychologist" ? "Psicólogo(a)" : "Recepcionista"}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Email</p>
+                          <p className="text-sm" data-testid="text-email">{user?.email || "—"}</p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Número de telefone</p>
+                          <p className="text-sm" data-testid="text-phone">
+                            {form.getValues("phoneNumber") || <span className="text-muted-foreground italic">Não informado</span>}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Data de nascimento</p>
+                          <p className="text-sm" data-testid="text-birthdate">
+                            {form.getValues("birthDate")
+                              ? (() => {
+                                  const d = form.getValues("birthDate")!;
+                                  return `${d.getDate().toString().padStart(2,'0')}/${(d.getMonth()+1).toString().padStart(2,'0')}/${d.getFullYear()}`;
+                                })()
+                              : <span className="text-muted-foreground italic">Não informada</span>
+                            }
+                          </p>
                         </div>
                       </div>
+                    </div>
+                  ) : (
+                    /* EDIT MODE */
+                    <Form {...form}>
+                      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                        <div className="flex flex-col items-center mb-6">
+                          <Avatar className="w-24 h-24 mb-4">
+                            <AvatarImage src={imagePreview || undefined} />
+                            <AvatarFallback
+                              showPsychologySymbol={user?.role === "psychologist"}
+                              className={`text-2xl font-semibold ${user?.role === "psychologist" ? "bg-primary/10" : ""}`}
+                            >
+                              {user?.fullName?.charAt(0) || "U"}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="text-center">
+                            <Label htmlFor="picture" className="cursor-pointer text-primary font-medium">
+                              Alterar imagem de perfil (60x60px)
+                            </Label>
+                            <Input
+                              id="picture"
+                              type="file"
+                              accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
+                              className="hidden"
+                              onChange={handleImageChange}
+                            />
+                          </div>
+                        </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <FormField
-                          control={form.control}
-                          name="fullName"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Nome completo</FormLabel>
-                              <FormControl>
-                                <Input placeholder="Seu nome completo" {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <FormField
+                            control={form.control}
+                            name="fullName"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Nome completo</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="Seu nome completo" data-testid="input-fullname" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
 
-                        <FormField
-                          control={form.control}
-                          name="email"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Email</FormLabel>
-                              <FormControl>
-                                <Input placeholder="seu.email@exemplo.com" {...field} disabled />
-                              </FormControl>
-                              <FormDescription>Email não pode ser alterado</FormDescription>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
+                          <FormField
+                            control={form.control}
+                            name="email"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Email</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="seu.email@exemplo.com" data-testid="input-email" {...field} disabled />
+                                </FormControl>
+                                <FormDescription>Email não pode ser alterado</FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
 
-                        <FormField
-                          control={form.control}
-                          name="phoneNumber"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Número de telefone</FormLabel>
-                              <FormControl>
-                                <Input placeholder="(11) 99999-9999" {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
+                          <FormField
+                            control={form.control}
+                            name="phoneNumber"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Número de telefone</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="(11) 99999-9999" data-testid="input-phone" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
 
-                        <FormField
-                          control={form.control}
-                          name="birthDate"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Data de nascimento</FormLabel>
-                              <FormControl>
-                                <DateMaskedInput value={field.value} onChange={field.onChange} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
+                          <FormField
+                            control={form.control}
+                            name="birthDate"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Data de nascimento</FormLabel>
+                                <FormControl>
+                                  <DateMaskedInput value={field.value} onChange={field.onChange} />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
 
-                      <Button
-                        type="submit"
-                        className="w-full"
-                        disabled={updateProfileMutation.isPending || !form.formState.isDirty}
-                      >
-                        {updateProfileMutation.isPending ? "Salvando..." : "Salvar alterações"}
-                      </Button>
-                    </form>
-                  </Form>
+                        <div className="flex gap-3">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="flex-1"
+                            onClick={() => {
+                              setIsEditing(false);
+                              form.reset({
+                                fullName: user?.fullName || "",
+                                email: user?.email || "",
+                                phoneNumber: "",
+                                birthDate: parseBirthDate((user as any)?.birthDate),
+                                profileImage: user?.profileImage || "",
+                              });
+                            }}
+                            data-testid="button-cancel-edit"
+                          >
+                            Cancelar
+                          </Button>
+                          <Button
+                            type="submit"
+                            className="flex-1"
+                            disabled={updateProfileMutation.isPending}
+                            data-testid="button-save-profile"
+                          >
+                            {updateProfileMutation.isPending ? "Salvando..." : "Salvar alterações"}
+                          </Button>
+                        </div>
+                      </form>
+                    </Form>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>

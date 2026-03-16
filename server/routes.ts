@@ -1409,12 +1409,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('Existing user found:', existingUser.id, existingUser.fullName);
 
       // Process new data
-      const { fullName, email } = req.body;
+      const { fullName, email, birthDate } = req.body;
       const updateData: any = {};
 
       // Only update fields provided
       if (fullName) updateData.fullName = fullName;
       if (email) updateData.email = email;
+      if (birthDate !== undefined) updateData.birthDate = birthDate || null;
 
       // Process profile image if uploaded
       if (req.file) {

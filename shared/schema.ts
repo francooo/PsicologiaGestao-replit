@@ -16,6 +16,7 @@ export const users = pgTable("users", {
   profileImage: text("profile_image"),
   googleId: text("google_id").unique(),
   avatarUrl: text("avatar_url"),
+  birthDate: date("birth_date"),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({
