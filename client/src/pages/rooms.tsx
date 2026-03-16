@@ -334,7 +334,7 @@ export default function Rooms() {
   // Generate time slots for the table
   const generateTimeSlots = () => {
     const slots = [];
-    for (let hour = 8; hour < 18; hour++) {
+    for (let hour = 7; hour < 24; hour++) {
       slots.push(`${hour.toString().padStart(2, '0')}:00`);
     }
     return slots;
