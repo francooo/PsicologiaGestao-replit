@@ -46,7 +46,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Plus, Wifi, AirVent, Users, SquareUser } from "lucide-react";
+import { Loader2, Plus, Wifi, AirVent, Users, SquareUser, Pencil } from "lucide-react";
 
 // Room form schema
 const roomFormSchema = insertRoomSchema.extend({
@@ -78,6 +78,8 @@ export default function Rooms() {
   const { toast } = useToast();
   const [isNewRoomDialogOpen, setIsNewRoomDialogOpen] = useState(false);
   const [isBookingDialogOpen, setIsBookingDialogOpen] = useState(false);
+  const [isEditRoomDialogOpen, setIsEditRoomDialogOpen] = useState(false);
+  const [editingRoom, setEditingRoom] = useState<any>(null);
   const [selectedRoom, setSelectedRoom] = useState<number | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(
     new Date().toISOString().split('T')[0]
@@ -115,6 +117,19 @@ export default function Rooms() {
 
   // Room form
   const roomForm = useForm<RoomFormValues>({
+    resolver: zodResolver(roomFormSchema),
+    defaultValues: {
+      name: "",
+      capacity: "4",
+      hasWifi: true,
+      hasAirConditioning: true,
+      squareMeters: "15",
+      imageUrl: "",
+    }
+  });
+
+  // Edit room form
+  const editRoomForm = useForm<RoomFormValues>({
     resolver: zodResolver(roomFormSchema),
     defaultValues: {
       name: "",
@@ -170,6 +185,44 @@ export default function Rooms() {
       });
     }
   });
+
+  // Update room mutation
+  const updateRoomMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: number; data: RoomFormValues }) => {
+      const response = await apiRequest("PUT", `/api/rooms/${id}`, {
+        name: data.name,
+        capacity: parseInt(data.capacity),
+        hasWifi: data.hasWifi,
+        hasAirConditioning: data.hasAirConditioning,
+        squareMeters: parseInt(data.squareMeters),
+        imageUrl: data.imageUrl || undefined,
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/rooms'] });
+      toast({ title: "Sala atualizada", description: "As informações foram salvas com sucesso." });
+      setIsEditRoomDialogOpen(false);
+      setEditingRoom(null);
+    },
+    onError: (error) => {
+      toast({ title: "Erro", description: `Falha ao atualizar sala: ${error.message}`, variant: "destructive" });
+    }
+  });
+
+  // Open edit dialog and pre-fill form
+  const openEditDialog = (room: any) => {
+    setEditingRoom(room);
+    editRoomForm.reset({
+      name: room.name,
+      capacity: String(room.capacity),
+      hasWifi: room.hasWifi ?? false,
+      hasAirConditioning: room.hasAirConditioning ?? false,
+      squareMeters: String(room.squareMeters ?? ""),
+      imageUrl: room.imageUrl ?? "",
+    });
+    setIsEditRoomDialogOpen(true);
+  };
 
   // Create room booking mutation
   const createBookingMutation = useMutation({
@@ -665,6 +718,86 @@ export default function Rooms() {
             </div>
           </div>
 
+          {/* Edit Room Dialog */}
+          <Dialog open={isEditRoomDialogOpen} onOpenChange={setIsEditRoomDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Editar Sala</DialogTitle>
+                <DialogDescription>Atualize as informações da sala.</DialogDescription>
+              </DialogHeader>
+              <Form {...editRoomForm}>
+                <form
+                  onSubmit={editRoomForm.handleSubmit((data) =>
+                    updateRoomMutation.mutate({ id: editingRoom?.id, data })
+                  )}
+                  className="space-y-4 mt-4"
+                >
+                  <FormField control={editRoomForm.control} name="name" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Nome da Sala</FormLabel>
+                      <FormControl><Input placeholder="Ex: Sala 01" {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField control={editRoomForm.control} name="capacity" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Capacidade</FormLabel>
+                        <FormControl><Input type="number" placeholder="Ex: 4" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={editRoomForm.control} name="squareMeters" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Área (m²)</FormLabel>
+                        <FormControl><Input type="number" placeholder="Ex: 15" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <FormField control={editRoomForm.control} name="hasWifi" render={({ field }) => (
+                      <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
+                        <FormControl>
+                          <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                        </FormControl>
+                        <div className="space-y-1 leading-none"><FormLabel>Wi-Fi</FormLabel></div>
+                      </FormItem>
+                    )} />
+                    <FormField control={editRoomForm.control} name="hasAirConditioning" render={({ field }) => (
+                      <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
+                        <FormControl>
+                          <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                        </FormControl>
+                        <div className="space-y-1 leading-none"><FormLabel>Ar-Condicionado</FormLabel></div>
+                      </FormItem>
+                    )} />
+                  </div>
+
+                  <FormField control={editRoomForm.control} name="imageUrl" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>URL da Imagem</FormLabel>
+                      <FormControl><Input placeholder="https://exemplo.com/imagem.jpg" {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <DialogFooter>
+                    <Button type="submit" disabled={updateRoomMutation.isPending}>
+                      {updateRoomMutation.isPending ? (
+                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Salvando...</>
+                      ) : (
+                        "Salvar Alterações"
+                      )}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </Form>
+            </DialogContent>
+          </Dialog>
+
           {isLoading ? (
             <div className="flex justify-center items-center h-64">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -773,16 +906,27 @@ export default function Rooms() {
                               ></div>
                             </div>
                           </div>
-                          <button 
-                            className="bg-primary hover:bg-primary-dark text-white px-4 py-2 rounded-md text-sm w-full mt-4"
-                            onClick={() => {
-                              setSelectedRoom(room.id);
-                              bookingForm.setValue('roomId', room.id.toString());
-                              setIsBookingDialogOpen(true);
-                            }}
-                          >
-                            Reservar
-                          </button>
+                          <div className="flex gap-2 mt-4">
+                            <button
+                              data-testid={`button-reserve-room-${room.id}`}
+                              className="bg-primary hover:bg-primary-dark text-white px-4 py-2 rounded-md text-sm flex-1"
+                              onClick={() => {
+                                setSelectedRoom(room.id);
+                                bookingForm.setValue('roomId', room.id.toString());
+                                setIsBookingDialogOpen(true);
+                              }}
+                            >
+                              Reservar
+                            </button>
+                            <button
+                              data-testid={`button-edit-room-${room.id}`}
+                              className="border border-neutral-300 hover:bg-neutral-100 text-neutral-dark px-3 py-2 rounded-md text-sm flex items-center gap-1"
+                              onClick={() => openEditDialog(room)}
+                            >
+                              <Pencil className="h-4 w-4" />
+                              Editar
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
