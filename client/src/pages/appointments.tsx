@@ -378,6 +378,13 @@ export default function Appointments() {
     }
   });
 
+  // Auto-set psychologistId for non-admin users when dialog opens
+  useEffect(() => {
+    if (isNewBookingDialogOpen && user?.role !== 'admin' && loggedPsychologist) {
+      bookingForm.setValue("psychologistId", loggedPsychologist.id);
+    }
+  }, [isNewBookingDialogOpen, loggedPsychologist?.id]);
+
   // ── Handlers ──
   const calculateEndTime = (start: string, durMin: string) => {
     const [h, m] = start.split(':').map(Number);
@@ -558,6 +565,8 @@ export default function Appointments() {
                   isPending={createBookingMutation.isPending}
                   onClose={() => setIsNewBookingDialogOpen(false)}
                   onSubmit={d => createBookingMutation.mutate(d)}
+                  user={user}
+                  loggedPsychologist={loggedPsychologist}
                 />
               </Dialog>
             )}
@@ -1200,7 +1209,7 @@ function AppointmentDialog({
 
 // ─── BookingDialog ────────────────────────────────────────────────────────────
 
-function BookingDialog({ form, psychologists, rooms, isPending, onClose, onSubmit }: any) {
+function BookingDialog({ form, psychologists, rooms, isPending, onClose, onSubmit, user, loggedPsychologist }: any) {
   return (
     <DialogContent className="max-w-lg">
       <DialogHeader>
@@ -1212,14 +1221,26 @@ function BookingDialog({ form, psychologists, rooms, isPending, onClose, onSubmi
           <FormField control={form.control} name="psychologistId" render={({ field }: any) => (
             <FormItem>
               <FormLabel>Psicóloga</FormLabel>
-              <Select onValueChange={v => field.onChange(parseInt(v))} defaultValue={field.value?.toString()}>
-                <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
-                <SelectContent>
-                  {psychologists.map((p: any) => (
-                    <SelectItem key={p.id} value={p.id.toString()}>{p.user.fullName}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {user?.role === 'admin' ? (
+                /* Admin: dropdown para escolher qualquer psicóloga */
+                <Select onValueChange={v => field.onChange(parseInt(v))} value={field.value?.toString() || ""}>
+                  <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
+                  <SelectContent>
+                    {psychologists.map((p: any) => (
+                      <SelectItem key={p.id} value={p.id.toString()}>{p.user.fullName}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : loggedPsychologist ? (
+                /* Não-admin: campo fixo com a psicóloga logada */
+                <div className="flex items-center border rounded-md px-3 bg-muted/50 h-10">
+                  <span className="text-sm">{loggedPsychologist.user?.fullName || user?.fullName}</span>
+                </div>
+              ) : (
+                <div className="text-amber-600 border border-amber-300 rounded-md p-3 bg-amber-50 text-sm">
+                  Seu registro de psicóloga não foi encontrado. Entre em contato com o administrador.
+                </div>
+              )}
               <FormMessage />
             </FormItem>
           )} />
