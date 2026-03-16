@@ -805,7 +805,7 @@ export default function Appointments() {
 
 // ─── WeekGrid (calendário semanal tipo grade de horas) ────────────────────────
 
-const HOURS = Array.from({ length: 14 }, (_, i) => i + 7); // 07 → 20
+const HOURS = Array.from({ length: 17 }, (_, i) => i + 7); // 07 → 23
 const HOUR_H = 64; // pixels per hour
 
 function WeekGrid({
