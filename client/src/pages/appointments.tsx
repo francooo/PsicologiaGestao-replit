@@ -65,6 +65,8 @@ import {
   ChevronRight,
   Info,
   Trash2,
+  MapPin,
+  Monitor,
 } from "lucide-react";
 import { format, addDays, startOfWeek, endOfWeek } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -1048,6 +1050,14 @@ function AppointmentDialog({
   user,
 }: any) {
   const isPsychologist = user?.role === "psychologist";
+  const [modality, setModality] = useState<'presential' | 'online'>('presential');
+
+  const handleModalityChange = (value: 'presential' | 'online') => {
+    setModality(value);
+    if (value === 'online') {
+      form.setValue('roomId', 0);
+    }
+  };
   return (
     <DialogContent className="max-w-2xl max-h-[90vh] p-0 overflow-hidden flex flex-col">
       <DialogHeader className="flex flex-row items-center gap-3 px-6 py-4 border-b border-neutral-light">
@@ -1118,12 +1128,55 @@ function AppointmentDialog({
               )} />
             </div>
 
+            {/* Modalidade: Online / Presencial */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium leading-none">Modalidade</p>
+              <div className="flex rounded-lg border border-input overflow-hidden w-fit">
+                <button
+                  type="button"
+                  onClick={() => handleModalityChange('presential')}
+                  className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
+                    modality === 'presential'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-background text-muted-foreground hover:bg-muted'
+                  }`}
+                  data-testid="button-modality-presential"
+                >
+                  <MapPin className="h-3.5 w-3.5" />
+                  Presencial
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleModalityChange('online')}
+                  className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors border-l border-input ${
+                    modality === 'online'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-background text-muted-foreground hover:bg-muted'
+                  }`}
+                  data-testid="button-modality-online"
+                >
+                  <Monitor className="h-3.5 w-3.5" />
+                  Online
+                </button>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <FormField control={form.control} name="roomId" render={({ field }: any) => (
                 <FormItem>
-                  <FormLabel>Sala</FormLabel>
-                  <Select onValueChange={v => field.onChange(parseInt(v))} defaultValue={field.value.toString()}>
-                    <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
+                  <FormLabel className={modality === 'online' ? 'text-muted-foreground' : ''}>
+                    Sala {modality === 'online' && <span className="text-xs font-normal">(não aplicável para online)</span>}
+                  </FormLabel>
+                  <Select
+                    onValueChange={v => field.onChange(parseInt(v))}
+                    defaultValue={field.value.toString()}
+                    disabled={modality === 'online'}
+                  >
+                    <FormControl>
+                      <SelectTrigger className={modality === 'online' ? 'opacity-50 cursor-not-allowed' : ''}>
+                        <SelectValue placeholder={modality === 'online' ? '—' : 'Selecione'} />
+                      </SelectTrigger>
+                    </FormControl>
                     <SelectContent>
                       {rooms.map((r: any) => (
                         <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>
