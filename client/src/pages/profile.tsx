@@ -5,11 +5,8 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { format, differenceInYears } from "date-fns";
+import { differenceInYears } from "date-fns";
 import {
-  CalendarIcon,
   UserCircle,
   Phone,
   Calendar as CalendarIcon2,
@@ -32,6 +29,46 @@ import * as z from "zod";
 import { useAuth } from "@/hooks/use-auth";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+function DateMaskedInput({ value, onChange }: { value?: Date; onChange: (date: Date | undefined) => void }) {
+  const toText = (date?: Date) => {
+    if (!date) return "";
+    const d = date.getDate().toString().padStart(2, '0');
+    const m = (date.getMonth() + 1).toString().padStart(2, '0');
+    const y = date.getFullYear().toString();
+    return `${d}/${m}/${y}`;
+  };
+
+  const [text, setText] = useState(() => toText(value));
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value.replace(/\D/g, '').slice(0, 8);
+    let masked = raw;
+    if (raw.length >= 3) masked = raw.slice(0, 2) + '/' + raw.slice(2);
+    if (raw.length >= 5) masked = raw.slice(0, 2) + '/' + raw.slice(2, 4) + '/' + raw.slice(4);
+    setText(masked);
+    if (raw.length === 8) {
+      const day = parseInt(raw.slice(0, 2));
+      const month = parseInt(raw.slice(2, 4)) - 1;
+      const year = parseInt(raw.slice(4, 8));
+      const parsed = new Date(year, month, day);
+      if (!isNaN(parsed.getTime()) && parsed.getDate() === day) {
+        onChange(parsed);
+      }
+    } else {
+      onChange(undefined);
+    }
+  };
+
+  return (
+    <Input
+      placeholder="DD/MM/AAAA"
+      value={text}
+      onChange={handleChange}
+      maxLength={10}
+    />
+  );
+}
 
 const ProfileSchema = z.object({
   fullName: z.string().min(2, "Nome deve ter pelo menos 2 caracteres"),
@@ -385,36 +422,11 @@ export default function ProfilePage() {
                           control={form.control}
                           name="birthDate"
                           render={({ field }) => (
-                            <FormItem className="flex flex-col">
+                            <FormItem>
                               <FormLabel>Data de nascimento</FormLabel>
-                              <Popover>
-                                <PopoverTrigger asChild>
-                                  <FormControl>
-                                    <Button
-                                      variant={"outline"}
-                                      className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`}
-                                    >
-                                      {field.value ? (
-                                        format(field.value, "dd/MM/yyyy")
-                                      ) : (
-                                        <span>Selecione uma data</span>
-                                      )}
-                                      <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                                    </Button>
-                                  </FormControl>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-auto p-0" align="start">
-                                  <Calendar
-                                    mode="single"
-                                    selected={field.value}
-                                    onSelect={field.onChange}
-                                    disabled={(date) =>
-                                      date > new Date() || date < new Date("1900-01-01")
-                                    }
-                                    initialFocus
-                                  />
-                                </PopoverContent>
-                              </Popover>
+                              <FormControl>
+                                <DateMaskedInput value={field.value} onChange={field.onChange} />
+                              </FormControl>
                               <FormMessage />
                             </FormItem>
                           )}
