@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -105,6 +105,11 @@ export default function Rooms() {
     }
   });
 
+  // Logged-in psychologist record (only for psychologist role)
+  const loggedPsychologist = psychologists?.find(
+    (p: any) => p.user?.username === user?.username
+  );
+
   // Fetch room bookings for today
   const { data: roomBookings, isLoading: isLoadingRoomBookings } = useQuery({
     queryKey: ['/api/room-bookings', { date: selectedDate }],
@@ -153,6 +158,13 @@ export default function Rooms() {
       purpose: "",
     }
   });
+
+  // When booking dialog opens, auto-set psychologistId for non-admin users
+  useEffect(() => {
+    if (isBookingDialogOpen && user?.role !== 'admin' && loggedPsychologist) {
+      bookingForm.setValue('psychologistId', loggedPsychologist.id.toString());
+    }
+  }, [isBookingDialogOpen, loggedPsychologist]);
 
   // Create room mutation
   const createRoomMutation = useMutation({
@@ -544,84 +556,22 @@ export default function Rooms() {
                       <FormField
                         control={bookingForm.control}
                         name="psychologistId"
-                        render={({ field }) => {
-                          // Encontrar o psicólogo correspondente ao usuário logado
-                          const loggedPsychologist = psychologists?.find(
-                            p => p.user?.username === user?.username
-                          );
-
-                          // Se o psicólogo logado foi encontrado e não há valor definido, define o valor do campo
-                          if (loggedPsychologist && !field.value) {
-                            setTimeout(() => {
-                              field.onChange(loggedPsychologist.id.toString());
-                            }, 0);
-                          }
-                          
-                          // Se não há psicólogos no sistema mas o usuário é um psicólogo,
-                          // vamos mostrar uma mensagem informativa
-                          if ((!psychologists || psychologists.length === 0) && user?.role === 'psychologist') {
-                            console.log("Nenhum registro de psicólogo encontrado para o usuário atual.");
-                          }
-
-                          // Se o usuário for um psicólogo
-                          if (user?.role === 'psychologist') {
-                            if (loggedPsychologist) {
-                              // Se tiver um registro de psicólogo, mostramos o nome dele
-                              return (
-                                <FormItem>
-                                  <FormLabel>Psicóloga</FormLabel>
-                                  <div className="flex items-center border rounded-md p-2 bg-neutral-50">
-                                    <SquareUser className="mr-2 h-4 w-4 text-neutral-500" />
-                                    <span>{loggedPsychologist.user?.fullName || user.fullName}</span>
-                                    <input 
-                                      type="hidden" 
-                                      name="psychologistId" 
-                                      value={loggedPsychologist.id.toString()} 
-                                    />
-                                  </div>
-                                  <FormMessage />
-                                </FormItem>
-                              );
-                            } else {
-                              // Se for psicólogo mas não tiver registro ainda, mostramos uma mensagem
-                              return (
-                                <FormItem>
-                                  <FormLabel>Psicóloga</FormLabel>
-                                  <div className="text-amber-600 border border-amber-300 rounded-md p-3 bg-amber-50">
-                                    <p>Para fazer reservas, seu registro de psicólogo precisa ser configurado.</p>
-                                    <p className="text-sm mt-1">Entre em contato com o administrador do sistema.</p>
-                                  </div>
-                                  <FormMessage />
-                                </FormItem>
-                              );
-                            }
-                          }
-
-                          // Filtramos os psicólogos para não mostrar o usuário logado se for admin reservando para outros
-                          const filteredPsychologists = psychologists?.filter(p => {
-                            if (user?.role === 'admin') {
-                              // Administradores podem ver todos os psicólogos
-                              return true;
-                            } else {
-                              // Outros usuários não devem ver o psicólogo atualmente logado
-                              return p.user?.username !== user?.username;
-                            }
-                          });
-
-                          return (
-                            <FormItem>
-                              <FormLabel>Psicóloga</FormLabel>
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Psicóloga</FormLabel>
+                            {user?.role === 'admin' ? (
+                              /* Admin: dropdown para escolher qualquer psicóloga */
                               <Select
                                 onValueChange={field.onChange}
-                                value={field.value || (loggedPsychologist?.id.toString() ?? '')}
+                                value={field.value}
                               >
                                 <FormControl>
-                                  <SelectTrigger>
+                                  <SelectTrigger data-testid="select-psychologist">
                                     <SelectValue placeholder="Selecione uma psicóloga" />
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent>
-                                  {filteredPsychologists?.map((psychologist) => (
+                                  {psychologists?.map((psychologist: any) => (
                                     <SelectItem
                                       key={psychologist.id}
                                       value={psychologist.id.toString()}
@@ -631,10 +581,25 @@ export default function Rooms() {
                                   ))}
                                 </SelectContent>
                               </Select>
-                              <FormMessage />
-                            </FormItem>
-                          );
-                        }}
+                            ) : loggedPsychologist ? (
+                              /* Não-admin: campo fixo com a psicóloga logada */
+                              <FormControl>
+                                <div className="flex items-center border rounded-md p-2 bg-muted/50 h-10">
+                                  <SquareUser className="mr-2 h-4 w-4 text-muted-foreground shrink-0" />
+                                  <span className="text-sm" data-testid="text-locked-psychologist">
+                                    {loggedPsychologist.user?.fullName || user?.fullName}
+                                  </span>
+                                </div>
+                              </FormControl>
+                            ) : (
+                              /* Psicóloga sem registro no sistema */
+                              <div className="text-amber-600 border border-amber-300 rounded-md p-3 bg-amber-50 text-sm">
+                                Seu registro de psicóloga não foi encontrado. Entre em contato com o administrador.
+                              </div>
+                            )}
+                            <FormMessage />
+                          </FormItem>
+                        )}
                       />
 
                       <div className="grid grid-cols-3 gap-4">
