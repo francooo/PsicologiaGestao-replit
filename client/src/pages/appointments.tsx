@@ -635,7 +635,7 @@ export default function Appointments() {
             </div>
 
             {/* Calendar area */}
-            <div className="flex-1 overflow-hidden px-7 py-4">
+            <div className="flex-1 flex flex-col overflow-hidden px-7 py-4">
               {isLoading || loadingPsychs || loadingRooms ? (
                 <div className="flex justify-center items-center h-full">
                   <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -834,7 +834,7 @@ function WeekGrid({
   };
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col" style={{ height: `${HOUR_H * HOURS.length + 48}px` }}>
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-full">
       {/* Day headers */}
       <div className="grid border-b border-slate-200 flex-shrink-0" style={{ gridTemplateColumns: `54px repeat(7, 1fr)` }}>
         <div className="p-2" />
