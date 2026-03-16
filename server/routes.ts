@@ -407,6 +407,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         appointments = await storage.getAllAppointments();
       }
 
+      // Auto-complete confirmed appointments whose endTime has already passed
+      const now = new Date();
+      await Promise.all(
+        appointments
+          .filter(a => a.status === 'confirmed')
+          .map(async (a) => {
+            // Parse date safely as local (avoid UTC midnight shifting the day)
+            const dateStr = typeof a.date === 'string'
+              ? a.date.split('T')[0]
+              : (a.date as Date).toISOString().split('T')[0];
+            const [year, month, day] = dateStr.split('-').map(Number);
+            const [endHour, endMin] = (a.endTime as string).split(':').map(Number);
+            const endDatetime = new Date(year, month - 1, day, endHour, endMin, 0);
+            if (endDatetime < now) {
+              await storage.updateAppointment(a.id, { status: 'completed' });
+              a.status = 'completed';
+            }
+          })
+      );
+
       // Get associated psychologist and room details
       const result = await Promise.all(
         appointments.map(async (appointment) => {
