@@ -465,27 +465,33 @@ export default function Financial() {
                           render={({ field }) => (
                             <FormItem>
                               <FormLabel>Responsável</FormLabel>
-                              <Select 
-                                onValueChange={(value) => field.onChange(parseInt(value))} 
-                                defaultValue={user?.id?.toString() || ""}
-                              >
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Selecione um responsável" />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  {users?.map((u) => (
-                                    <SelectItem key={u.id} value={u.id.toString()}>
-                                      {u.fullName}
-                                    </SelectItem>
-                                  )) || (
-                                    <SelectItem value={user?.id?.toString() || ""}>
-                                      {user?.fullName || "Usuário atual"}
-                                    </SelectItem>
-                                  )}
-                                </SelectContent>
-                              </Select>
+                              {user?.role === 'psychologist' ? (
+                                <div className="flex items-center border rounded-md px-3 bg-muted/50 h-10">
+                                  <span className="text-sm">{user.fullName}</span>
+                                </div>
+                              ) : (
+                                <Select
+                                  onValueChange={(value) => field.onChange(parseInt(value))}
+                                  defaultValue={user?.id?.toString() || ""}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Selecione um responsável" />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent>
+                                    {users?.map((u) => (
+                                      <SelectItem key={u.id} value={u.id.toString()}>
+                                        {u.fullName}
+                                      </SelectItem>
+                                    )) || (
+                                      <SelectItem value={user?.id?.toString() || ""}>
+                                        {user?.fullName || "Usuário atual"}
+                                      </SelectItem>
+                                    )}
+                                  </SelectContent>
+                                </Select>
+                              )}
                               <FormMessage />
                             </FormItem>
                           )}
@@ -611,27 +617,33 @@ export default function Financial() {
                           render={({ field }) => (
                             <FormItem>
                               <FormLabel>Responsável</FormLabel>
-                              <Select 
-                                onValueChange={(value) => field.onChange(parseInt(value))} 
-                                defaultValue={user?.id?.toString() || ""}
-                              >
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Selecione um responsável" />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  {users?.map((u) => (
-                                    <SelectItem key={u.id} value={u.id.toString()}>
-                                      {u.fullName}
-                                    </SelectItem>
-                                  )) || (
-                                    <SelectItem value={user?.id?.toString() || ""}>
-                                      {user?.fullName || "Usuário atual"}
-                                    </SelectItem>
-                                  )}
-                                </SelectContent>
-                              </Select>
+                              {user?.role === 'psychologist' ? (
+                                <div className="flex items-center border rounded-md px-3 bg-muted/50 h-10">
+                                  <span className="text-sm">{user.fullName}</span>
+                                </div>
+                              ) : (
+                                <Select
+                                  onValueChange={(value) => field.onChange(parseInt(value))}
+                                  defaultValue={user?.id?.toString() || ""}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Selecione um responsável" />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent>
+                                    {users?.map((u) => (
+                                      <SelectItem key={u.id} value={u.id.toString()}>
+                                        {u.fullName}
+                                      </SelectItem>
+                                    )) || (
+                                      <SelectItem value={user?.id?.toString() || ""}>
+                                        {user?.fullName || "Usuário atual"}
+                                      </SelectItem>
+                                    )}
+                                  </SelectContent>
+                                </Select>
+                              )}
                               <FormMessage />
                             </FormItem>
                           )}
