@@ -60,7 +60,9 @@ import {
   CreditCard, 
   User, 
   DollarSign,
-  BarChart3
+  BarChart3,
+  Check,
+  X,
 } from "lucide-react";
 import { format, subMonths, startOfMonth, endOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -76,6 +78,100 @@ const transactionFormSchema = insertTransactionSchema.extend({
 });
 
 type TransactionFormValues = z.infer<typeof transactionFormSchema>;
+
+// ─── CategorySelectWithAdd ─────────────────────────────────────────────────────
+function CategorySelectWithAdd({
+  baseCategories,
+  value,
+  onChange,
+}: {
+  baseCategories: string[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [extraCategories, setExtraCategories] = useState<string[]>([]);
+  const [isAdding, setIsAdding] = useState(false);
+  const [newCat, setNewCat] = useState('');
+
+  const allCategories = [...baseCategories, ...extraCategories];
+
+  const handleValueChange = (v: string) => {
+    if (v === '__new__') {
+      setIsAdding(true);
+    } else {
+      onChange(v);
+    }
+  };
+
+  const handleConfirm = () => {
+    const trimmed = newCat.trim();
+    if (trimmed) {
+      if (!allCategories.includes(trimmed)) {
+        setExtraCategories(prev => [...prev, trimmed]);
+      }
+      onChange(trimmed);
+    }
+    setNewCat('');
+    setIsAdding(false);
+  };
+
+  return (
+    <div className="space-y-2">
+      <Select onValueChange={handleValueChange} value={isAdding ? '' : (value || '')}>
+        <FormControl>
+          <SelectTrigger>
+            <SelectValue placeholder="Selecione uma categoria" />
+          </SelectTrigger>
+        </FormControl>
+        <SelectContent>
+          {allCategories.map((cat) => (
+            <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+          ))}
+          <SelectItem value="__new__">
+            <span className="flex items-center gap-1.5 text-primary font-medium">
+              <Plus className="h-3.5 w-3.5" />
+              Nova categoria...
+            </span>
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      {isAdding && (
+        <div className="flex items-center gap-2">
+          <Input
+            autoFocus
+            placeholder="Nome da nova categoria"
+            value={newCat}
+            onChange={e => setNewCat(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); handleConfirm(); }
+              if (e.key === 'Escape') { setIsAdding(false); setNewCat(''); }
+            }}
+            className="h-8 text-sm"
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={handleConfirm}
+            className="h-8 w-8 p-0 shrink-0"
+            data-testid="button-confirm-new-category"
+          >
+            <Check className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => { setIsAdding(false); setNewCat(''); }}
+            className="h-8 w-8 p-0 shrink-0"
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Financial() {
   const { user } = useAuth();
@@ -440,20 +536,11 @@ export default function Financial() {
                           render={({ field }) => (
                             <FormItem>
                               <FormLabel>Categoria</FormLabel>
-                              <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Selecione uma categoria" />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  {incomeCategories.map((category) => (
-                                    <SelectItem key={category} value={category}>
-                                      {category}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              <CategorySelectWithAdd
+                                baseCategories={incomeCategories}
+                                value={field.value}
+                                onChange={field.onChange}
+                              />
                               <FormMessage />
                             </FormItem>
                           )}
@@ -592,20 +679,11 @@ export default function Financial() {
                           render={({ field }) => (
                             <FormItem>
                               <FormLabel>Categoria</FormLabel>
-                              <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                <FormControl>
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Selecione uma categoria" />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  {expenseCategories.map((category) => (
-                                    <SelectItem key={category} value={category}>
-                                      {category}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              <CategorySelectWithAdd
+                                baseCategories={expenseCategories}
+                                value={field.value}
+                                onChange={field.onChange}
+                              />
                               <FormMessage />
                             </FormItem>
                           )}
