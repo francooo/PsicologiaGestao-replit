@@ -10,11 +10,20 @@ const SCOPES = [
   'https://www.googleapis.com/auth/gmail.send',
 ];
 
-// Credenciais OAuth2 — usa GOOGLE_CALLBACK_URL como fallback para GOOGLE_REDIRECT_URI
-const REDIRECT_URI =
-  process.env.GOOGLE_REDIRECT_URI ||
-  process.env.GOOGLE_CALLBACK_URL ||
-  undefined;
+// Redirect URI para o callback do Google Calendar OAuth
+// Usa GOOGLE_REDIRECT_URI se definido, caso contrário constrói a partir do domínio do Replit
+function buildCalendarRedirectUri(): string | undefined {
+  if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
+  // GOOGLE_CALLBACK_URL aponta para o callback do Passport (/auth/google/callback),
+  // NÃO deve ser usado aqui. Construímos o URI correto a partir do domínio de produção.
+  const replitDomain = process.env.REPLIT_DEV_DOMAIN;
+  if (replitDomain) {
+    return `https://${replitDomain}/api/google-calendar/auth/callback`;
+  }
+  return undefined;
+}
+
+const REDIRECT_URI = buildCalendarRedirectUri();
 
 const oauth2Client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
