@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import Sidebar from "@/components/sidebar";
 import MobileNav from "@/components/mobile-nav";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, User, Activity, FileText, FolderOpen, ClipboardList, Lock, ArrowLeft, ShieldX } from "lucide-react";
+import { Loader2, User, Activity, FileText, FolderOpen, ClipboardList, Lock, ArrowLeft, ShieldX, Heart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -41,6 +41,7 @@ import AnamnesisTab from "@/components/patient-record/AnamnesisTab";
 import EvolutionsTab from "@/components/patient-record/EvolutionsTab";
 import DocumentsTab from "@/components/patient-record/DocumentsTab";
 import AssessmentsTab from "@/components/patient-record/AssessmentsTab";
+import CuidadosTab from "@/components/patient-record/CuidadosTab";
 
 const TAB_KEY = "prontuario_active_tab";
 
@@ -50,6 +51,7 @@ const TABS = [
     { value: "sessions", label: "Evoluções", icon: FileText, countKey: "sessions" },
     { value: "documents", label: "Documentos", icon: FolderOpen, countKey: "documents" },
     { value: "assessments", label: "Avaliações", icon: ClipboardList, countKey: "assessments" },
+    { value: "cuidados", label: "Cuidados ♥", icon: Heart, countKey: null },
 ] as const;
 
 type TabValue = (typeof TABS)[number]["value"];
@@ -299,6 +301,10 @@ export default function PatientRecord() {
                                     patientId={id}
                                     onNewAssessment={() => { }}
                                 />
+                            </TabsContent>
+
+                            <TabsContent value="cuidados" className="mt-0">
+                                {patient && <CuidadosTab patient={patient} />}
                             </TabsContent>
                         </div>
                     </Tabs>

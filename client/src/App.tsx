@@ -22,6 +22,7 @@ import PatientRecord from "@/pages/patients/record";
 import Meetings from "@/pages/meetings";
 import Perfil from "@/pages/perfil";
 import AdminPsicologas from "@/pages/admin/psicologas";
+import ResponderPage from "@/pages/responder";
 import { ProtectedRoute } from "./lib/protected-route";
 import { AuthProvider, useAuth } from "./hooks/use-auth";
 
@@ -51,6 +52,7 @@ function Router() {
       <Route path="/password-recovery" component={PasswordRecovery} />
       <Route path="/reset-password" component={ResetPassword} />
       <Route path="/quick-booking" component={QuickBooking} />
+      <Route path="/responder/:token" component={ResponderPage} />
       <Route component={NotFound} />
     </Switch>
   );
