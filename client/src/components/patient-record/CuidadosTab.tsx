@@ -289,7 +289,7 @@ function SortableQuestionRow({
 interface TemplateModalProps {
   open: boolean;
   onClose: () => void;
-  onSaved: (t: CareTemplate) => void;
+  onSaved: (t: CareTemplate & { questions?: CareTemplateQuestion[] }) => void;
   existing?: CareTemplate & { questions?: CareTemplateQuestion[] };
 }
 
@@ -374,10 +374,10 @@ function TemplateModal({ open, onClose, onSaved, existing }: TemplateModalProps)
           orderIndex: i,
         })),
       });
-      const data = await res.json() as CareTemplate & { template?: CareTemplate };
+      const data = await res.json() as CareTemplate & { template?: CareTemplate & { questions?: CareTemplateQuestion[] }; questions?: CareTemplateQuestion[] };
       return data.template ?? data;
     },
-    onSuccess: (data: CareTemplate) => {
+    onSuccess: (data: CareTemplate & { questions?: CareTemplateQuestion[] }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/care/templates"] });
       onSaved(data);
       toast({ title: isEditing ? "Template atualizado" : "Template criado com sucesso" });
@@ -957,7 +957,7 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
                     Ver Respostas
                   </Button>
                 )}
-                {(d.status === "expired" || d.status === "opened" || d.status === "sent") && (
+                {(d.status === "expired" || d.status === "opened") && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -999,6 +999,19 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
         onSaved={(t) => {
           setSelectedTemplateId(String(t.id));
           setSubject(`${t.title} — ${firstName}`);
+          if (t.questions?.length) {
+            setPendingQuestions(
+              [...t.questions]
+                .sort((a, b) => a.orderIndex - b.orderIndex)
+                .map((q) => ({
+                  _id: crypto.randomUUID(),
+                  questionText: substituteVars(q.questionText, patient),
+                  questionType: q.questionType,
+                  options: Array.isArray(q.options) ? (q.options as string[]) : [],
+                  isRequired: q.isRequired,
+                }))
+            );
+          }
         }}
         existing={editingTemplate}
       />
