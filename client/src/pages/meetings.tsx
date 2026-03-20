@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { queryClient } from "@/lib/queryClient";
@@ -449,6 +450,16 @@ export default function Meetings() {
 
   const { data: patients = [] } = useQuery<Patient[]>({ queryKey: ["/api/patients"] });
 
+  const { data: googleCalStatus } = useQuery<{ authenticated: boolean }>({
+    queryKey: ["/api/google-calendar/status"],
+    queryFn: async () => {
+      const res = await fetch("/api/google-calendar/status", { credentials: "include" });
+      if (!res.ok) return { authenticated: false };
+      return res.json();
+    },
+  });
+  const googleConnected = !!googleCalStatus?.authenticated;
+
   // ── Active meeting (from list) ──
   const activeMeeting = meetingsList.find((m) => m.status === "active") ?? null;
 
@@ -522,11 +533,20 @@ export default function Meetings() {
   };
 
   const startMutation = useMutation({
-    mutationFn: (id: number) =>
-      meetingFetch("POST", `/api/meetings/${id}/start`),
-    onSuccess: () => {
+    mutationFn: (meeting: Meeting) =>
+      meetingFetch("POST", `/api/meetings/${meeting.id}/start`),
+    onSuccess: (data, meeting) => {
       queryClient.invalidateQueries({ queryKey: ["/api/meetings"] });
-      toast({ title: "Sessão iniciada" });
+      const link = (data.meetLink as string | null) || meeting.meetLink;
+      if (link) {
+        window.open(link, "_blank", "noopener,noreferrer");
+        toast({ title: "Sessão iniciada", description: "O Google Meet foi aberto em uma nova aba." });
+      } else {
+        toast({
+          title: "Sessão iniciada",
+          description: "Conecte o Google Calendar no seu perfil para gerar o link do Meet.",
+        });
+      }
     },
     onError: onMutationError,
   });
@@ -711,6 +731,25 @@ export default function Meetings() {
             </div>
           </div>
 
+          {/* Google Calendar not connected warning */}
+          {googleCalStatus !== undefined && !googleConnected && (
+            <div className="mb-4 flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <AlertCircle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-amber-800">Google Calendar não conectado</p>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  Sem a integração com o Google Calendar, não é possível gerar links do Google Meet nem enviar e-mails de convite para as pacientes.
+                </p>
+                <Link
+                  href="/profile"
+                  className="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-amber-800 underline underline-offset-2 hover:text-amber-900"
+                >
+                  Conectar Google Calendar no Meu Perfil →
+                </Link>
+              </div>
+            </div>
+          )}
+
           {/* Filters */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
             <div className="flex flex-wrap gap-1.5">
@@ -756,7 +795,7 @@ export default function Meetings() {
                 <MeetingCard
                   key={meeting.id}
                   meeting={meeting}
-                  onStart={(m) => startMutation.mutate(m.id)}
+                  onStart={(m) => startMutation.mutate(m)}
                   onEnd={(m) => { setEndingMeeting(m); setEndNotes(m.notes || ""); }}
                   onSendLink={(m) => sendLinkMutation.mutate(m.id)}
                   onViewNotes={(m) => { setViewNotesMeeting(m); setNotesText(m.notes || ""); setEditingNotes(false); }}
@@ -894,44 +933,79 @@ export default function Meetings() {
             </div>
 
             {/* Send link toggle */}
-            <div className="rounded-lg border border-slate-200 p-3 space-y-1.5">
+            <div className={cn(
+              "rounded-lg border p-3 space-y-1.5",
+              !googleConnected ? "border-amber-200 bg-amber-50" : "border-slate-200"
+            )}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Send className="h-4 w-4 text-teal-500" />
+                  <Send className={cn("h-4 w-4", !googleConnected ? "text-amber-500" : "text-teal-500")} />
                   <span className="text-sm font-medium text-slate-700">Enviar link para a paciente agora</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setCreateForm((f) => ({ ...f, sendLinkNow: !f.sendLinkNow }))}
-                  disabled={!selectedPatient?.email}
+                  disabled={!selectedPatient?.email || !googleConnected}
                   className={cn(
                     "relative inline-flex h-5 w-10 shrink-0 rounded-full border-2 border-transparent transition-colors",
-                    createForm.sendLinkNow && selectedPatient?.email ? "bg-teal-600" : "bg-slate-200",
-                    (!selectedPatient?.email) && "opacity-40 cursor-not-allowed"
+                    createForm.sendLinkNow && selectedPatient?.email && googleConnected
+                      ? "bg-teal-600"
+                      : "bg-slate-200",
+                    (!selectedPatient?.email || !googleConnected) && "opacity-40 cursor-not-allowed"
                   )}
                   data-testid="toggle-send-link"
                 >
                   <span
                     className={cn(
                       "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform",
-                      createForm.sendLinkNow && selectedPatient?.email ? "translate-x-5" : "translate-x-0"
+                      createForm.sendLinkNow && selectedPatient?.email && googleConnected
+                        ? "translate-x-5"
+                        : "translate-x-0"
                     )}
                   />
                 </button>
               </div>
-              {selectedPatient?.email && (
-                <p className="text-xs text-slate-400 ml-6">e-mail: {selectedPatient.email}</p>
-              )}
+              {!googleConnected ? (
+                <p className="text-xs text-amber-700 ml-6 flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3 shrink-0" />
+                  Conecte o Google Calendar para enviar o link por e-mail automaticamente.
+                </p>
+              ) : selectedPatient?.email ? (
+                <p className="text-xs text-slate-400 ml-6">
+                  e-mail: {selectedPatient.email} (qualquer e-mail funciona, não precisa ser Gmail)
+                </p>
+              ) : selectedPatient ? (
+                <p className="text-xs text-amber-600 ml-6 flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3 shrink-0" />
+                  Esta paciente não tem e-mail cadastrado. Cadastre o e-mail no perfil da paciente para enviar o link.
+                </p>
+              ) : null}
             </div>
 
             {/* Google Calendar notice */}
-            <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-lg p-3">
-              <Video className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
-              <p className="text-xs text-blue-700">
-                Um evento será criado no seu Google Calendar e um link do Google Meet será gerado automaticamente
-                (requer Google Calendar conectado).
-              </p>
-            </div>
+            {googleConnected ? (
+              <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-lg p-3">
+                <CheckCircle2 className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
+                <p className="text-xs text-blue-700">
+                  Um evento será criado no seu Google Calendar e um link do Google Meet será gerado automaticamente.
+                  O link abrirá no Google Meet quando a sessão for iniciada.
+                </p>
+              </div>
+            ) : (
+              <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-xs text-amber-800 font-medium">Google Calendar não conectado</p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    A reunião será criada sem link do Meet. Para gerar links e enviar convites automaticamente,
+                    conecte sua conta em{" "}
+                    <Link href="/profile" className="underline font-semibold" onClick={() => setIsCreateOpen(false)}>
+                      Meu Perfil
+                    </Link>.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           <DialogFooter className="gap-2">

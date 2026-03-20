@@ -10,11 +10,16 @@ const SCOPES = [
   'https://www.googleapis.com/auth/gmail.send',
 ];
 
-// Credenciais OAuth2
+// Credenciais OAuth2 — usa GOOGLE_CALLBACK_URL como fallback para GOOGLE_REDIRECT_URI
+const REDIRECT_URI =
+  process.env.GOOGLE_REDIRECT_URI ||
+  process.env.GOOGLE_CALLBACK_URL ||
+  undefined;
+
 const oauth2Client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI
+  REDIRECT_URI
 );
 
 // Cache temporário para tokens (opcional, para reduzir consultas ao banco)
@@ -379,7 +384,7 @@ export async function getUserOAuthClient(userId: number): Promise<OAuth2Client |
   const client = new OAuth2Client(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
-    process.env.GOOGLE_REDIRECT_URI
+    REDIRECT_URI
   );
   client.setCredentials(tokens);
   return client;
