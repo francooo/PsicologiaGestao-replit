@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { cn } from "@/lib/utils";
 import Sidebar from "@/components/sidebar";
 import SpecializationChipSelector from "@/components/specialization-chip-selector";
 
@@ -482,15 +483,23 @@ export default function PerfilPage() {
                     )}
                   </p>
                 ) : (
-                  <Textarea
-                    value={draftBio}
-                    onChange={(e) => setDraftBio(e.target.value)}
-                    placeholder="Fale sobre sua trajetória, abordagem terapêutica e o que motiva seu trabalho..."
-                    rows={5}
-                    className="resize-none text-sm"
-                    data-testid="textarea-bio"
-                    autoFocus
-                  />
+                  <div className="space-y-1">
+                    <Textarea
+                      value={draftBio}
+                      onChange={(e) => setDraftBio(e.target.value.slice(0, 500))}
+                      placeholder="Fale sobre sua trajetória, abordagem terapêutica e o que motiva seu trabalho..."
+                      rows={5}
+                      className="resize-none text-sm"
+                      data-testid="textarea-bio"
+                      autoFocus
+                    />
+                    <p className={cn(
+                      "text-right text-xs",
+                      draftBio.length >= 480 ? "text-amber-600" : "text-neutral-dark"
+                    )}>
+                      {draftBio.length}/500 caracteres
+                    </p>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -542,24 +551,11 @@ export default function PerfilPage() {
               </CardHeader>
               <CardContent>
                 {!editingSpecs ? (
-                  <div>
-                    {profile && profile.specializations.length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {profile.specializations.map((s) => (
-                          <span
-                            key={s.id}
-                            className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary border border-primary/20"
-                          >
-                            {s.name}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-neutral-dark italic">
-                        Nenhuma área de atuação cadastrada. Clique em Editar para adicionar.
-                      </p>
-                    )}
-                  </div>
+                  <SpecializationChipSelector
+                    selectedIds={profile?.specializations.map((s) => s.id) ?? []}
+                    onChange={() => {}}
+                    readonly
+                  />
                 ) : (
                   <SpecializationChipSelector
                     selectedIds={draftSpecIds}

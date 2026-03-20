@@ -128,14 +128,24 @@ function PsychCard({ p, onClick }: { p: Psychologist; onClick: () => void }) {
           {p.crpNumber && (
             <p className="text-xs text-neutral-dark mt-0.5">CRP {p.crpNumber}</p>
           )}
-          <p className="text-xs text-neutral-dark truncate">{p.user.email}</p>
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+            {p.age && (
+              <span className="text-xs text-neutral-dark">{p.age} anos</span>
+            )}
+            {p.phone && (
+              <span className="text-xs text-neutral-dark truncate">{p.phone}</span>
+            )}
+            {p.startedAtClinic && (
+              <span className="text-xs text-neutral-dark">desde {formatDate(p.startedAtClinic)}</span>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Specialization chips */}
+      {/* Specialization chips - up to 3 + counter */}
       {p.specializations.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {p.specializations.slice(0, 4).map((s) => (
+          {p.specializations.slice(0, 3).map((s) => (
             <span
               key={s.id}
               className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary border border-primary/20"
@@ -143,9 +153,9 @@ function PsychCard({ p, onClick }: { p: Psychologist; onClick: () => void }) {
               {s.name}
             </span>
           ))}
-          {p.specializations.length > 4 && (
+          {p.specializations.length > 3 && (
             <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-neutral-lightest text-neutral-dark border border-neutral-light">
-              +{p.specializations.length - 4}
+              +{p.specializations.length - 3} mais
             </span>
           )}
         </div>

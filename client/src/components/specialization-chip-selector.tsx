@@ -2,7 +2,6 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Plus, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
@@ -53,6 +52,27 @@ export default function SpecializationChipSelector({
 
   const allAreas: AreaItem[] = useMemo(() => Object.values(grouped).flat(), [grouped]);
 
+  const selectedAreas: (AreaItem & { category: string })[] = useMemo(() => {
+    const result: (AreaItem & { category: string })[] = [];
+    for (const [cat, items] of Object.entries(grouped)) {
+      for (const item of items) {
+        if (selectedIds.includes(item.id)) {
+          result.push({ ...item, category: cat });
+        }
+      }
+    }
+    return result;
+  }, [grouped, selectedIds]);
+
+  const selectedByCategory = useMemo(() => {
+    const groups: Record<string, (AreaItem & { category: string })[]> = {};
+    for (const area of selectedAreas) {
+      if (!groups[area.category]) groups[area.category] = [];
+      groups[area.category].push(area);
+    }
+    return groups;
+  }, [selectedAreas]);
+
   const filtered = useMemo(() => {
     if (!search.trim()) return grouped;
     const q = search.toLowerCase();
@@ -79,8 +99,34 @@ export default function SpecializationChipSelector({
     addCustomMutation.mutate(trimmed);
   };
 
-  const selectedAreas = allAreas.filter((a) => selectedIds.includes(a.id));
+  // ── Readonly view: grouped by category ──────────────────────────────────
+  if (readonly) {
+    if (selectedAreas.length === 0) {
+      return <p className="text-sm text-neutral-dark italic">Nenhuma área de atuação cadastrada.</p>;
+    }
+    return (
+      <div className="space-y-2">
+        {Object.entries(selectedByCategory).map(([cat, items]) => (
+          <div key={cat}>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark mb-1">{cat}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {items.map((a) => (
+                <span
+                  key={a.id}
+                  data-testid={`chip-readonly-${a.id}`}
+                  className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary border border-primary/20"
+                >
+                  {a.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
+  // ── Edit view ────────────────────────────────────────────────────────────
   return (
     <div className="space-y-3">
       {/* Selected chips summary */}
@@ -90,118 +136,107 @@ export default function SpecializationChipSelector({
             <span
               key={a.id}
               data-testid={`chip-selected-${a.id}`}
-              className={cn(
-                "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary border border-primary/30",
-                !readonly && "cursor-pointer hover:bg-primary/20"
-              )}
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary border border-primary/30 cursor-pointer hover:bg-primary/20"
               onClick={() => toggle(a.id)}
             >
               {a.name}
-              {!readonly && <X className="w-3 h-3" />}
+              <X className="w-3 h-3" />
             </span>
           ))}
         </div>
       )}
 
-      {!readonly && (
-        <>
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-dark" />
-            <Input
-              placeholder="Buscar área de atuação..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-8 h-8 text-sm"
-              data-testid="input-specialization-search"
-            />
-          </div>
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-dark" />
+        <Input
+          placeholder="Buscar área de atuação..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-8 h-8 text-sm"
+          data-testid="input-specialization-search"
+        />
+      </div>
 
-          {/* Grouped chips */}
-          <div className="max-h-48 overflow-y-auto pr-1 space-y-3">
-            {Object.entries(filtered).map(([cat, items]) => (
-              <div key={cat}>
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark mb-1.5">{cat}</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {items.map((area) => {
-                    const isSelected = selectedIds.includes(area.id);
-                    return (
-                      <button
-                        key={area.id}
-                        type="button"
-                        data-testid={`chip-area-${area.id}`}
-                        onClick={() => toggle(area.id)}
-                        className={cn(
-                          "px-2.5 py-0.5 rounded-full text-xs font-medium border transition-colors",
-                          isSelected
-                            ? "bg-primary text-white border-primary"
-                            : "bg-white text-neutral-darkest border-neutral-light hover:border-primary/50 hover:text-primary"
-                        )}
-                      >
-                        {area.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-
-            {Object.keys(filtered).length === 0 && (
-              <p className="text-sm text-neutral-dark py-2">Nenhuma área encontrada.</p>
-            )}
-          </div>
-
-          {/* Add custom */}
-          {!addingCustom ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="text-xs text-primary hover:text-primary/80 hover:bg-primary/5 px-2 h-7"
-              onClick={() => setAddingCustom(true)}
-              data-testid="button-add-custom-area"
-            >
-              <Plus className="w-3.5 h-3.5 mr-1" />
-              Adicionar personalizada
-            </Button>
-          ) : (
-            <div className="flex items-center gap-2">
-              <Input
-                placeholder="Nome da especialização..."
-                value={customName}
-                onChange={(e) => setCustomName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddCustom()}
-                className="h-8 text-sm flex-1"
-                data-testid="input-custom-area-name"
-                autoFocus
-              />
-              <Button
-                type="button"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={handleAddCustom}
-                disabled={!customName.trim() || addCustomMutation.isPending}
-                data-testid="button-confirm-custom-area"
-              >
-                Adicionar
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={() => { setAddingCustom(false); setCustomName(""); }}
-                data-testid="button-cancel-custom-area"
-              >
-                <X className="w-4 h-4" />
-              </Button>
+      {/* Grouped chips */}
+      <div className="max-h-48 overflow-y-auto pr-1 space-y-3">
+        {Object.entries(filtered).map(([cat, items]) => (
+          <div key={cat}>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark mb-1.5">{cat}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {items.map((area) => {
+                const isSelected = selectedIds.includes(area.id);
+                return (
+                  <button
+                    key={area.id}
+                    type="button"
+                    data-testid={`chip-area-${area.id}`}
+                    onClick={() => toggle(area.id)}
+                    className={cn(
+                      "px-2.5 py-0.5 rounded-full text-xs font-medium border transition-colors",
+                      isSelected
+                        ? "bg-primary text-white border-primary"
+                        : "bg-white text-neutral-darkest border-neutral-light hover:border-primary/50 hover:text-primary"
+                    )}
+                  >
+                    {area.name}
+                  </button>
+                );
+              })}
             </div>
-          )}
-        </>
-      )}
+          </div>
+        ))}
 
-      {readonly && selectedAreas.length === 0 && (
-        <p className="text-sm text-neutral-dark">Nenhuma área de atuação cadastrada.</p>
+        {Object.keys(filtered).length === 0 && (
+          <p className="text-sm text-neutral-dark py-2">Nenhuma área encontrada.</p>
+        )}
+      </div>
+
+      {/* Add custom */}
+      {!addingCustom ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="text-xs text-primary hover:text-primary/80 hover:bg-primary/5 px-2 h-7"
+          onClick={() => setAddingCustom(true)}
+          data-testid="button-add-custom-area"
+        >
+          <Plus className="w-3.5 h-3.5 mr-1" />
+          Adicionar personalizada
+        </Button>
+      ) : (
+        <div className="flex items-center gap-2">
+          <Input
+            placeholder="Nome da especialização..."
+            value={customName}
+            onChange={(e) => setCustomName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleAddCustom()}
+            className="h-8 text-sm flex-1"
+            data-testid="input-custom-area-name"
+            autoFocus
+          />
+          <Button
+            type="button"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={handleAddCustom}
+            disabled={!customName.trim() || addCustomMutation.isPending}
+            data-testid="button-confirm-custom-area"
+          >
+            Adicionar
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={() => { setAddingCustom(false); setCustomName(""); }}
+            data-testid="button-cancel-custom-area"
+          >
+            <X className="w-4 h-4" />
+          </Button>
+        </div>
       )}
     </div>
   );
