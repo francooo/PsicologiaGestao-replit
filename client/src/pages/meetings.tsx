@@ -474,22 +474,52 @@ export default function Meetings() {
   const doneCount = meetingsList.filter((m) => m.status === "ended").length;
 
   // ── Mutations ──
+  // Helper: show Google token-expiry as a specific actionable toast
+  const handleApiResponse = async (res: Response) => {
+    const data = await res.json();
+    if (!res.ok) {
+      if (data.error === "GOOGLE_TOKEN_EXPIRED") {
+        toast({
+          title: "Conexão com o Google expirada",
+          description: data.message || "Acesse Configurações → Google Calendar e faça novo login.",
+          variant: "destructive",
+          duration: 8000,
+        });
+        throw new Error("GOOGLE_TOKEN_EXPIRED");
+      }
+      throw new Error(data.error || "Erro desconhecido");
+    }
+    // Surface non-blocking Google token warning on creation
+    if (data.warning === "GOOGLE_TOKEN_EXPIRED_EMAIL") {
+      toast({
+        title: "Reunião criada",
+        description: data.warningMessage,
+        variant: "destructive",
+        duration: 8000,
+      });
+    }
+    return data;
+  };
+
   const startMutation = useMutation({
     mutationFn: async (id: number) => {
       const res = await apiRequest("POST", `/api/meetings/${id}/start`);
-      return res.json();
+      return handleApiResponse(res);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/meetings"] });
       toast({ title: "Sessão iniciada" });
     },
-    onError: (e: any) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
+    onError: (e: any) => {
+      if (e.message !== "GOOGLE_TOKEN_EXPIRED")
+        toast({ title: "Erro", description: e.message, variant: "destructive" });
+    },
   });
 
   const endMutation = useMutation({
     mutationFn: async ({ id, notes }: { id: number; notes: string }) => {
       const res = await apiRequest("POST", `/api/meetings/${id}/end`, { notes });
-      return res.json();
+      return handleApiResponse(res);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/meetings"] });
@@ -497,39 +527,48 @@ export default function Meetings() {
       setEndingMeeting(null);
       setEndNotes("");
     },
-    onError: (e: any) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
+    onError: (e: any) => {
+      if (e.message !== "GOOGLE_TOKEN_EXPIRED")
+        toast({ title: "Erro", description: e.message, variant: "destructive" });
+    },
   });
 
   const sendLinkMutation = useMutation({
     mutationFn: async (id: number) => {
       const res = await apiRequest("POST", `/api/meetings/${id}/send-link`);
-      return res.json();
+      return handleApiResponse(res);
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/meetings"] });
       if (data.sent) toast({ title: "Link enviado", description: "E-mail enviado com sucesso." });
       else toast({ title: "Não foi possível enviar", description: "Verifique a conexão com o Google.", variant: "destructive" });
     },
-    onError: (e: any) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
+    onError: (e: any) => {
+      if (e.message !== "GOOGLE_TOKEN_EXPIRED")
+        toast({ title: "Erro", description: e.message, variant: "destructive" });
+    },
   });
 
   const cancelMutation = useMutation({
     mutationFn: async (id: number) => {
       const res = await apiRequest("DELETE", `/api/meetings/${id}`);
-      return res.json();
+      return handleApiResponse(res);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/meetings"] });
       toast({ title: "Reunião cancelada" });
       setCancelMeetingId(null);
     },
-    onError: (e: any) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
+    onError: (e: any) => {
+      if (e.message !== "GOOGLE_TOKEN_EXPIRED")
+        toast({ title: "Erro", description: e.message, variant: "destructive" });
+    },
   });
 
   const saveNotesMutation = useMutation({
     mutationFn: async ({ id, notes }: { id: number; notes: string }) => {
       const res = await apiRequest("PATCH", `/api/meetings/${id}/notes`, { notes });
-      return res.json();
+      return handleApiResponse(res);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/meetings"] });
@@ -539,7 +578,10 @@ export default function Meetings() {
         setViewNotesMeeting({ ...viewNotesMeeting, notes: notesText });
       }
     },
-    onError: (e: any) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
+    onError: (e: any) => {
+      if (e.message !== "GOOGLE_TOKEN_EXPIRED")
+        toast({ title: "Erro", description: e.message, variant: "destructive" });
+    },
   });
 
   // ── Create meeting ──
@@ -559,7 +601,7 @@ export default function Meetings() {
         sendLinkNow: createForm.sendLinkNow,
       };
       const res = await apiRequest("POST", "/api/meetings", payload);
-      const data = await res.json();
+      const data = await handleApiResponse(res);
       queryClient.invalidateQueries({ queryKey: ["/api/meetings"] });
 
       if (!data.hasGoogleCalendar) {

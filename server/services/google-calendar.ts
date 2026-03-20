@@ -450,6 +450,32 @@ export async function createMeetingEvent(
 }
 
 /**
+ * Retorna um cliente Gmail configurado com os tokens do usuário.
+ * Lança GoogleTokenExpiredError se o token estiver expirado.
+ */
+export async function getGmailClient(userId: number) {
+  const oauthClient = await getUserOAuthClient(userId);
+  if (!oauthClient) return null;
+  return google.gmail({ version: 'v1', auth: oauthClient });
+}
+
+/**
+ * Detecta se um erro da Google API é causado por token expirado/revogado.
+ */
+export function isGoogleTokenExpired(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const e = error as Record<string, unknown>;
+  if (e.code === 401) return true;
+  const message = String(e.message || '');
+  return (
+    message.includes('invalid_grant') ||
+    message.includes('Token has been expired') ||
+    message.includes('token expired') ||
+    message.includes('Invalid Credentials')
+  );
+}
+
+/**
  * Envia o link do Google Meet para a paciente via Gmail API
  */
 export async function sendMeetLinkEmail(params: {
@@ -463,10 +489,8 @@ export async function sendMeetLinkEmail(params: {
   durationMinutes: number;
 }): Promise<boolean> {
   try {
-    const oauthClient = await getUserOAuthClient(params.userId);
-    if (!oauthClient) return false;
-
-    const gmail = google.gmail({ version: 'v1', auth: oauthClient });
+    const gmail = await getGmailClient(params.userId);
+    if (!gmail) return false;
 
     const dataHora = params.scheduledAt.toLocaleString('pt-BR', {
       timeZone: 'America/Sao_Paulo',
