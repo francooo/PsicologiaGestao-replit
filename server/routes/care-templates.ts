@@ -179,8 +179,6 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// ── PUT /api/care/templates/:id/questions — replace all questions atomically ─
-// Used by the "Edit Template" modal to save full question list at once
 router.put("/:id/questions", async (req, res) => {
   try {
     const userId = (req.user as any).id;

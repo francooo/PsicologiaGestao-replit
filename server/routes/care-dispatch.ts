@@ -67,8 +67,6 @@ router.post("/patients/:patientId/dispatch", async (req, res) => {
   try {
     const user = req.user as any;
     const patientId = parseInt(req.params.patientId);
-    // override_questions: optional array sent by frontend when psychologist edited
-    // questions inline before dispatch; if provided, these replace the template snapshot
     const { template_id, subject, custom_message, override_questions } = req.body;
 
     if (!template_id) return res.status(400).json({ message: "template_id é obrigatório" });

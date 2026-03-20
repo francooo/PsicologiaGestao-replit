@@ -50,8 +50,8 @@ const TABS = [
     { value: "anamnesis", label: "Anamnese", icon: Activity, countKey: null },
     { value: "sessions", label: "Evoluções", icon: FileText, countKey: "sessions" },
     { value: "documents", label: "Documentos", icon: FolderOpen, countKey: "documents" },
-    { value: "assessments", label: "Avaliações", icon: ClipboardList, countKey: "assessments" },
     { value: "cuidados", label: "Cuidados ♥", icon: Heart, countKey: null },
+    { value: "assessments", label: "Avaliações", icon: ClipboardList, countKey: "assessments" },
 ] as const;
 
 type TabValue = (typeof TABS)[number]["value"];

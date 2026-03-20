@@ -6,8 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 interface PublicQuestion {
   id: number;
   questionText: string;
@@ -37,8 +35,6 @@ interface ApiError extends Error {
   code?: string;
 }
 
-// ─── Public page (no auth, no sidebar) ────────────────────────────────────────
-
 export default function ResponderPage() {
   const [, params] = useRoute("/responder/:token");
   const token = params?.token ?? "";
@@ -47,7 +43,6 @@ export default function ResponderPage() {
   const [submitted, setSubmitted] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<number, string>>({});
 
-  // Inject noindex/nofollow into the document <head> — must be done via DOM not JSX
   useEffect(() => {
     const meta = document.createElement("meta");
     meta.name = "robots";
@@ -58,7 +53,6 @@ export default function ResponderPage() {
     };
   }, []);
 
-  // Fetch form
   const { data, isLoading, error } = useQuery<PublicFormData, ApiError>({
     queryKey: ["/api/care/respond", token],
     queryFn: async () => {
@@ -158,7 +152,6 @@ export default function ResponderPage() {
     submitMutation.mutate(payload);
   }
 
-  // ─── Determine error state ────────────────────────────────────────────────
   const apiError = error as ApiError | null;
   const status = apiError?.status;
   const code = apiError?.code;
@@ -231,7 +224,6 @@ export default function ResponderPage() {
     );
   }
 
-  // ─── Available form ───────────────────────────────────────────────────────
   const sortedQuestions = [...data.questions].sort((a, b) => a.orderIndex - b.orderIndex);
 
   return (
@@ -287,8 +279,6 @@ export default function ResponderPage() {
   );
 }
 
-// ─── Shell layout ─────────────────────────────────────────────────────────────
-
 function PublicShell({
   children,
   clinicName = "ConsultaPsi",
@@ -324,8 +314,6 @@ function PublicShell({
     </div>
   );
 }
-
-// ─── Question field renderer ──────────────────────────────────────────────────
 
 interface QuestionFieldProps {
   index: number;

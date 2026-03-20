@@ -62,8 +62,6 @@ import {
 } from "lucide-react";
 import { type Patient } from "@shared/patient-schema";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 interface CareTemplate {
   id: number;
   psychologistId: number | null;
@@ -118,7 +116,6 @@ interface DispatchResponse {
   }>;
 }
 
-// Editable question used in both the template editor and the inline dispatch preview
 export interface EditableQuestion {
   _id: string;
   questionText: string;
@@ -126,8 +123,6 @@ export interface EditableQuestion {
   options: string[];
   isRequired: boolean;
 }
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254;
@@ -150,8 +145,6 @@ function newQuestion(): EditableQuestion {
   };
 }
 
-// ─── Status chip ──────────────────────────────────────────────────────────────
-
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   sent:     { label: "Enviado",    color: "bg-blue-100 text-blue-700" },
   opened:   { label: "Aberto",     color: "bg-yellow-100 text-yellow-700" },
@@ -170,9 +163,6 @@ function StatusChip({ status }: { status: string }) {
     </span>
   );
 }
-
-// ─── Shared QuestionEditor ─────────────────────────────────────────────────────
-// Used by BOTH SortableQuestionRow (template modal) and the inline dispatch preview
 
 interface QuestionEditorProps {
   question: EditableQuestion;
@@ -267,8 +257,6 @@ export function QuestionEditor({
   );
 }
 
-// ─── Sortable row wrapper (template modal only) ───────────────────────────────
-
 function SortableQuestionRow({
   id,
   question,
@@ -298,8 +286,6 @@ function SortableQuestionRow({
   );
 }
 
-// ─── Template modal (create + edit) ──────────────────────────────────────────
-
 interface TemplateModalProps {
   open: boolean;
   onClose: () => void;
@@ -328,7 +314,6 @@ function TemplateModal({ open, onClose, onSaved, existing }: TemplateModalProps)
     return [newQuestion()];
   });
 
-  // Reset state when modal reopened with new data
   useEffect(() => {
     if (open) {
       setTitle(existing?.title ?? "");
@@ -360,14 +345,11 @@ function TemplateModal({ open, onClose, onSaved, existing }: TemplateModalProps)
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (isEditing) {
-        // 1. Update title + description
         const metaRes = await apiRequest("PATCH", `/api/care/templates/${existing!.id}`, {
           title,
           description,
         });
         const updatedTemplate = await metaRes.json() as CareTemplate;
-
-        // 2. Atomically replace all questions via PUT endpoint
         await apiRequest(
           "PUT",
           `/api/care/templates/${existing!.id}/questions`,
@@ -381,7 +363,6 @@ function TemplateModal({ open, onClose, onSaved, existing }: TemplateModalProps)
         );
         return updatedTemplate;
       }
-      // Create template with questions in a single request
       const res = await apiRequest("POST", "/api/care/templates", {
         title,
         description,
@@ -524,8 +505,6 @@ function TemplateModal({ open, onClose, onSaved, existing }: TemplateModalProps)
   );
 }
 
-// ─── Responses modal ──────────────────────────────────────────────────────────
-
 function ResponsesModal({
   dispatchId,
   open,
@@ -626,8 +605,6 @@ function ResponsesModal({
   );
 }
 
-// ─── Main CuidadosTab ─────────────────────────────────────────────────────────
-
 interface CuidadosTabProps {
   patient: Patient;
 }
@@ -642,7 +619,6 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [subject, setSubject] = useState("");
   const [customMessage, setCustomMessage] = useState("");
-  // Questions that the psychologist can edit inline before dispatch
   const [pendingQuestions, setPendingQuestions] = useState<EditableQuestion[]>([]);
 
   const [showTemplateModal, setShowTemplateModal] = useState(false);
@@ -650,8 +626,6 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
     (CareTemplate & { questions?: CareTemplateQuestion[] }) | undefined
   >(undefined);
   const [responsesDispatchId, setResponsesDispatchId] = useState<number | null>(null);
-
-  // ── Queries ────────────────────────────────────────────────────────────────
 
   const { data: templates = [], isLoading: loadingTemplates } = useQuery<
     Array<CareTemplate & { questions: CareTemplateQuestion[] }>
@@ -670,8 +644,6 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
     },
   });
 
-  // ── Template selection ────────────────────────────────────────────────────
-
   const handleTemplateChange = (val: string) => {
     if (val === "__new__") {
       setEditingTemplate(undefined);
@@ -682,7 +654,6 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
     const tpl = templates.find((t) => t.id === parseInt(val));
     if (tpl) {
       setSubject(`${tpl.title} — ${firstName}`);
-      // Populate editable inline questions with variable substitution
       setPendingQuestions(
         [...(tpl.questions ?? [])]
           .sort((a, b) => a.orderIndex - b.orderIndex)
@@ -709,17 +680,12 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
     setPendingQuestions((qs) => [...qs, newQuestion()]);
   }
 
-  // ── Dispatch mutation ─────────────────────────────────────────────────────
-
   const dispatchMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", `/api/care/patients/${patientId}/dispatch`, {
         template_id: parseInt(selectedTemplateId),
         subject: subject.trim() || undefined,
         custom_message: customMessage.trim() || undefined,
-        // Include the inline-edited questions so backend can use the overridden text
-        // (backend currently takes the snapshot from template; for pontual edits we
-        //  send the preview questions as override_questions)
         override_questions: pendingQuestions.map((q, i) => ({
           questionText: q.questionText,
           questionType: q.questionType,
@@ -752,8 +718,6 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
     dispatchMutation.mutate();
   };
 
-  // ── Copy link ─────────────────────────────────────────────────────────────
-
   const copyLink = useCallback(
     (token: string) => {
       const url = `${window.location.origin}/responder/${token}`;
@@ -764,11 +728,8 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
     [toast]
   );
 
-  // ─────────────────────────────────────────────────────────────────────────
-
   return (
     <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
-      {/* ── Left: Send panel (40%) ─────────────────────────────────────── */}
       <div className="md:col-span-2 space-y-4">
         <div className="bg-white rounded-xl border border-neutral-100 shadow-sm p-4 space-y-4">
           <h3 className="text-sm font-semibold text-neutral-700 flex items-center gap-2">
@@ -832,7 +793,6 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
                   </SelectItem>
                 </SelectContent>
               </Select>
-              {/* Edit template button — only for owned (non-system) templates */}
               {selectedTemplateId && (() => {
                 const tpl = templates.find((t) => t.id === parseInt(selectedTemplateId));
                 return tpl && tpl.psychologistId !== null ? (
@@ -855,7 +815,6 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
             </div>
           </div>
 
-          {/* Inline editable question preview */}
           {pendingQuestions.length > 0 && (
             <div className="space-y-2">
               <p className="text-xs font-medium text-neutral-500">
@@ -941,7 +900,6 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
         </div>
       </div>
 
-      {/* ── Right: History (60%) ─────────────────────────────────────────── */}
       <div className="md:col-span-3 space-y-3">
         <h3 className="text-sm font-semibold text-neutral-700 flex items-center gap-2">
           <Clock className="h-4 w-4 text-neutral-400" />
@@ -1005,7 +963,9 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
                     size="sm"
                     className="h-7 text-xs"
                     onClick={() => {
-                      if (d.templateId) setSelectedTemplateId(String(d.templateId));
+                      if (d.templateId) {
+                        handleTemplateChange(String(d.templateId));
+                      }
                       setSubject(d.subject);
                     }}
                     data-testid={`btn-reenviar-${d.id}`}
@@ -1029,8 +989,6 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
           ))}
         </div>
       </div>
-
-      {/* ── Modals ─────────────────────────────────────────────────────────── */}
 
       <TemplateModal
         open={showTemplateModal}
