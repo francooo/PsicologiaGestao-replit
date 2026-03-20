@@ -2,6 +2,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import { Link, useLocation, useSearch } from "wouter";
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard,
   CalendarDays,
@@ -19,6 +20,7 @@ import {
   ChevronDown,
   CalendarCheck2,
   BookOpen,
+  Video,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
@@ -27,6 +29,18 @@ export default function Sidebar() {
   const [location] = useLocation();
   const searchString = useSearch();
   const [agendamentosOpen, setAgendamentosOpen] = useState(false);
+
+  const { data: meetings = [] } = useQuery<Array<{ status: string }>>({
+    queryKey: ["/api/meetings"],
+    queryFn: async () => {
+      const res = await fetch("/api/meetings");
+      if (!res.ok) return [];
+      return res.json();
+    },
+    refetchInterval: 30000,
+    enabled: !!(user),
+  });
+  const hasActiveMeeting = meetings.some((m) => m.status === "active");
 
   const isAppointmentsPath = location === '/appointments' || location.startsWith('/appointments');
 
@@ -216,6 +230,26 @@ export default function Sidebar() {
                 </li>
               </ul>
             )}
+          </li>
+
+          {/* Reuniões */}
+          <li>
+            <Link
+              href="/reunioes"
+              className={cn(navLinkClass(isActive('/reunioes')), "justify-between")}
+              data-testid="nav-reunioes"
+            >
+              <span className="flex items-center">
+                <Video className="w-5 h-5 mr-3 text-primary flex-shrink-0" />
+                Reuniões
+              </span>
+              {hasActiveMeeting && (
+                <span className="flex items-center gap-1 bg-green-500 text-white text-[10px] font-semibold px-1.5 py-0.5 rounded-full">
+                  <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+                  Ativa
+                </span>
+              )}
+            </Link>
           </li>
 
           {visibleMain.map(item => (

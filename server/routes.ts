@@ -14,6 +14,7 @@ import * as WhatsAppService from "./services/whatsapp";
 import googleCalendarRoutes from "./routes/google-calendar";
 import * as GoogleCalendarService from "./services/google-calendar";
 import patientRecordsRouter from "./routes/patient-records";
+import meetingsRouter from "./routes/meetings";
 import { analyzeInvoiceImage, analyzeInvoicePdf, type PsychologistProfileForInvoice, AIServiceError, AIQuotaError, UnsupportedFormatError } from "./services/ai";
 
 // Configure multer for image upload
@@ -1743,6 +1744,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Google Calendar routes
   // Google Calendar routes
   app.use("/api/google-calendar", googleCalendarRoutes);
+
+  // Meetings routes (Google Meet)
+  app.use("/api/meetings", meetingsRouter);
 
   // Patient Record System Routes
   console.log("Registering /api/patients routes...");

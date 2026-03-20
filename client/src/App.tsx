@@ -19,6 +19,7 @@ import Invoices from "@/pages/invoices";
 import AdminInvoices from "@/pages/admin-invoices";
 import PatientsList from "@/pages/patients";
 import PatientRecord from "@/pages/patients/record";
+import Meetings from "@/pages/meetings";
 import { ProtectedRoute } from "./lib/protected-route";
 import { AuthProvider, useAuth } from "./hooks/use-auth";
 
@@ -40,6 +41,7 @@ function Router() {
       <ProtectedRoute path="/profile" component={Profile} />
       <ProtectedRoute path="/patients" component={PatientsList} />
       <ProtectedRoute path="/patients/:id/record" component={PatientRecord} />
+      <ProtectedRoute path="/reunioes" component={Meetings} />
       <Route path="/auth" component={AuthPage} />
       <Route path="/auth-page" component={AuthPage} />
       <Route path="/password-recovery" component={PasswordRecovery} />

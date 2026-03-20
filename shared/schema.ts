@@ -462,6 +462,54 @@ export const invoicesRelations = relations(invoices, ({ one }) => ({
 export type Invoice = typeof invoices.$inferSelect;
 export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
 
+// ─── Meetings (Reuniões via Google Meet) ─────────────────────────────────────
+export const meetings = pgTable("meetings", {
+  id: serial("id").primaryKey(),
+  psychologistId: integer("psychologist_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  patientId: integer("patient_id").notNull(), // references patients.id (defined in patient-schema.ts)
+  appointmentId: integer("appointment_id"), // optional link to appointments
+  title: text("title").notNull(),
+  description: text("description"),
+  googleEventId: text("google_event_id").unique(),
+  googleCalendarId: text("google_calendar_id").default("primary"),
+  meetLink: text("meet_link"),
+  status: text("status").notNull().default("scheduled"), // scheduled | active | ended | cancelled
+  scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+  durationMinutes: integer("duration_minutes").notNull().default(50),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+  actualDuration: integer("actual_duration"),
+  patientEmail: text("patient_email"),
+  patientName: text("patient_name"),
+  linkSentAt: timestamp("link_sent_at", { withTimezone: true }),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const insertMeetingSchema = createInsertSchema(meetings).pick({
+  psychologistId: true,
+  patientId: true,
+  appointmentId: true,
+  title: true,
+  description: true,
+  scheduledAt: true,
+  durationMinutes: true,
+  patientEmail: true,
+  patientName: true,
+  notes: true,
+});
+
+export const meetingsRelations = relations(meetings, ({ one }) => ({
+  psychologist: one(users, {
+    fields: [meetings.psychologistId],
+    references: [users.id],
+  }),
+}));
+
+export type Meeting = typeof meetings.$inferSelect;
+export type InsertMeeting = z.infer<typeof insertMeetingSchema>;
+
 // Export all patient record schemas
 export * from "./patient-schema";
 

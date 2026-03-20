@@ -2,6 +2,15 @@
 
 This is a psychology practice management system built with a modern full-stack architecture. The application serves as a comprehensive platform for managing appointments, psychologists, rooms, financial transactions, and patient interactions. It features role-based access control, real-time scheduling, and integrates with external services like WhatsApp and Google Calendar for enhanced communication and scheduling capabilities.
 
+## Recent Updates (March 2026)
+- ✅ Added Meetings module (Módulo de Reuniões) with Google Meet integration
+- ✅ Created `meetings` table in PostgreSQL schema
+- ✅ Extended Google Calendar service with Gmail scope, `createMeetingEvent()` (conferenceData v1), and `sendMeetLinkEmail()` (Gmail API, HTML template)
+- ✅ Built full meetings backend (`server/routes/meetings.ts`): list, get, create, update, start, end, notes, send-link, cancel/delete
+- ✅ Created `client/src/pages/meetings.tsx` with summary cards, filter tabs, meeting cards, active session banner with live timer, create/end/notes modals
+- ✅ Added "Reuniões" sidebar item with animated green "Ativa" badge for active sessions
+- ✅ Registered `/reunioes` protected route in App.tsx
+
 ## Recent Updates (December 2025)
 - ✅ Implemented invoice (nota fiscal) management system
 - ✅ Created invoice upload with PDF/JPG/PNG support (5MB max)
