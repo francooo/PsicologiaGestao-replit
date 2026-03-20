@@ -18,7 +18,7 @@ const checkAuth = (req: any, res: any, next: any) => {
 };
 router.use(checkAuth);
 
-// ── GET /api/care/templates — list own + system default templates ──────────
+// ── GET /api/care/templates — list own + system default templates (with full questions) ──
 router.get("/", async (req, res) => {
   try {
     const userId = (req.user as any).id;
@@ -28,14 +28,15 @@ router.get("/", async (req, res) => {
       .from(careTemplates)
       .where(or(eq(careTemplates.psychologistId, userId), isNull(careTemplates.psychologistId)));
 
-    // Attach question count
+    // Attach full questions (not just count) so frontend can render preview + inline edit
     const result = await Promise.all(
       templates.map(async (t) => {
-        const [{ value }] = await db
-          .select({ value: count() })
+        const questions = await db
+          .select()
           .from(careTemplateQuestions)
-          .where(eq(careTemplateQuestions.templateId, t.id));
-        return { ...t, questionCount: Number(value) };
+          .where(eq(careTemplateQuestions.templateId, t.id))
+          .orderBy(careTemplateQuestions.orderIndex);
+        return { ...t, questions, questionCount: questions.length };
       })
     );
 
@@ -175,6 +176,54 @@ router.delete("/:id", async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: "Erro ao excluir template" });
+  }
+});
+
+// ── PUT /api/care/templates/:id/questions — replace all questions atomically ─
+// Used by the "Edit Template" modal to save full question list at once
+router.put("/:id/questions", async (req, res) => {
+  try {
+    const userId = (req.user as any).id;
+    const templateId = parseInt(req.params.id);
+
+    // Only own templates can be mutated
+    const [template] = await db
+      .select()
+      .from(careTemplates)
+      .where(and(eq(careTemplates.id, templateId), eq(careTemplates.psychologistId, userId)));
+    if (!template) return res.status(404).json({ message: "Template não encontrado" });
+
+    const questionsSchema = z.array(
+      insertCareTemplateQuestionSchema
+        .omit({ templateId: true })
+        .extend({ orderIndex: z.number().int() })
+    );
+    const questions = questionsSchema.parse(req.body);
+
+    // Delete all existing questions and insert the new set
+    await db.delete(careTemplateQuestions).where(eq(careTemplateQuestions.templateId, templateId));
+
+    if (questions.length > 0) {
+      await db.insert(careTemplateQuestions).values(
+        questions.map((q, i) => ({
+          ...q,
+          templateId,
+          orderIndex: q.orderIndex ?? i,
+        }))
+      );
+    }
+
+    const saved = await db
+      .select()
+      .from(careTemplateQuestions)
+      .where(eq(careTemplateQuestions.templateId, templateId))
+      .orderBy(careTemplateQuestions.orderIndex);
+
+    res.json(saved);
+  } catch (e) {
+    if (e instanceof z.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    console.error(e);
+    res.status(500).json({ message: "Erro ao salvar perguntas do template" });
   }
 });
 

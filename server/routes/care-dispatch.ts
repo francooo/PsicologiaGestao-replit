@@ -13,6 +13,7 @@ import { eq, desc, count, and, or, isNull } from "drizzle-orm";
 import { isValidEmail } from "../lib/validate-email";
 import { generateResponseToken } from "../lib/care-token";
 import { sendCareFormEmail } from "../lib/send-care-email";
+import { z } from "zod";
 
 const router = Router();
 
@@ -66,7 +67,9 @@ router.post("/patients/:patientId/dispatch", async (req, res) => {
   try {
     const user = req.user as any;
     const patientId = parseInt(req.params.patientId);
-    const { template_id, subject, custom_message } = req.body;
+    // override_questions: optional array sent by frontend when psychologist edited
+    // questions inline before dispatch; if provided, these replace the template snapshot
+    const { template_id, subject, custom_message, override_questions } = req.body;
 
     if (!template_id) return res.status(400).json({ message: "template_id é obrigatório" });
 
@@ -113,12 +116,43 @@ router.post("/patients/:patientId/dispatch", async (req, res) => {
       .where(eq(careTemplateQuestions.templateId, template.id))
       .orderBy(careTemplateQuestions.orderIndex);
 
-    // 6. Substitute variables in question texts
+    // 6. Build final question list: use override_questions if provided (inline edits),
+    //    otherwise fall back to template questions with variable substitution
     const psychName = psychUser.fullName || psychUser.username;
-    const renderedQuestions = templateQuestions.map((q) => ({
-      ...q,
-      questionText: substituteVariables(q.questionText, patient.fullName, psychName),
-    }));
+
+    const overrideSchema = z.array(
+      z.object({
+        questionText: z.string().min(1),
+        questionType: z.string(),
+        options: z.array(z.string()).nullable().optional(),
+        isRequired: z.boolean(),
+        orderIndex: z.number().int(),
+      })
+    );
+
+    let renderedQuestions: Array<{
+      questionText: string;
+      questionType: string;
+      options: unknown;
+      isRequired: boolean;
+      orderIndex: number;
+    }>;
+
+    if (Array.isArray(override_questions) && override_questions.length > 0) {
+      // Use psychologist's inline edits; variables already substituted on frontend,
+      // but run substitution again server-side to be safe
+      const parsed = overrideSchema.parse(override_questions);
+      renderedQuestions = parsed.map((q) => ({
+        ...q,
+        questionText: substituteVariables(q.questionText, patient.fullName, psychName),
+        options: q.options ?? null,
+      }));
+    } else {
+      renderedQuestions = templateQuestions.map((q) => ({
+        ...q,
+        questionText: substituteVariables(q.questionText, patient.fullName, psychName),
+      }));
+    }
 
     // 7. Generate secure response token
     const responseToken = generateResponseToken();

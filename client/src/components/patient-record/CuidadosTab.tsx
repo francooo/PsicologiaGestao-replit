@@ -58,6 +58,7 @@ import {
   Loader2,
   Send,
   Heart,
+  Pencil,
 } from "lucide-react";
 import { type Patient } from "@shared/patient-schema";
 
@@ -359,14 +360,28 @@ function TemplateModal({ open, onClose, onSaved, existing }: TemplateModalProps)
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (isEditing) {
-        // Update title + description
-        const res = await apiRequest("PATCH", `/api/care/templates/${existing!.id}`, {
+        // 1. Update title + description
+        const metaRes = await apiRequest("PATCH", `/api/care/templates/${existing!.id}`, {
           title,
           description,
         });
-        return res.json();
+        const updatedTemplate = await metaRes.json() as CareTemplate;
+
+        // 2. Atomically replace all questions via PUT endpoint
+        await apiRequest(
+          "PUT",
+          `/api/care/templates/${existing!.id}/questions`,
+          questions.map((q, i) => ({
+            questionText: q.questionText,
+            questionType: q.questionType,
+            options: q.questionType === "multiple_choice" ? q.options.filter(Boolean) : null,
+            isRequired: q.isRequired,
+            orderIndex: i,
+          }))
+        );
+        return updatedTemplate;
       }
-      // Create template with questions
+      // Create template with questions in a single request
       const res = await apiRequest("POST", "/api/care/templates", {
         title,
         description,
@@ -378,11 +393,12 @@ function TemplateModal({ open, onClose, onSaved, existing }: TemplateModalProps)
           orderIndex: i,
         })),
       });
-      return res.json();
+      const data = await res.json() as CareTemplate & { template?: CareTemplate };
+      return data.template ?? data;
     },
-    onSuccess: (data: CareTemplate & { template?: CareTemplate }) => {
+    onSuccess: (data: CareTemplate) => {
       queryClient.invalidateQueries({ queryKey: ["/api/care/templates"] });
-      onSaved(data.template ?? data);
+      onSaved(data);
       toast({ title: isEditing ? "Template atualizado" : "Template criado com sucesso" });
       onClose();
     },
@@ -796,25 +812,47 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
           {/* Template selector */}
           <div className="space-y-1">
             <label className="text-xs font-medium text-neutral-600">Template *</label>
-            <Select value={selectedTemplateId} onValueChange={handleTemplateChange}>
-              <SelectTrigger data-testid="select-template" disabled={loadingTemplates}>
-                <SelectValue placeholder={loadingTemplates ? "Carregando…" : "Selecione um template"} />
-              </SelectTrigger>
-              <SelectContent>
-                {templates.map((t) => (
-                  <SelectItem key={t.id} value={String(t.id)}>
-                    {t.title}
-                    {t.isDefault && (
-                      <span className="ml-1 text-xs text-muted-foreground">(padrão)</span>
-                    )}
+            <div className="flex gap-2">
+              <Select value={selectedTemplateId} onValueChange={handleTemplateChange}>
+                <SelectTrigger data-testid="select-template" disabled={loadingTemplates} className="flex-1">
+                  <SelectValue placeholder={loadingTemplates ? "Carregando…" : "Selecione um template"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {templates.map((t) => (
+                    <SelectItem key={t.id} value={String(t.id)}>
+                      {t.title}
+                      {t.isDefault && (
+                        <span className="ml-1 text-xs text-muted-foreground">(padrão)</span>
+                      )}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="__new__" className="text-teal-600 font-medium">
+                    <Plus className="h-3 w-3 inline mr-1" />
+                    Criar novo template…
                   </SelectItem>
-                ))}
-                <SelectItem value="__new__" className="text-teal-600 font-medium">
-                  <Plus className="h-3 w-3 inline mr-1" />
-                  Criar novo template…
-                </SelectItem>
-              </SelectContent>
-            </Select>
+                </SelectContent>
+              </Select>
+              {/* Edit template button — only for owned (non-system) templates */}
+              {selectedTemplateId && (() => {
+                const tpl = templates.find((t) => t.id === parseInt(selectedTemplateId));
+                return tpl && tpl.psychologistId !== null ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="flex-shrink-0"
+                    onClick={() => {
+                      setEditingTemplate(tpl);
+                      setShowTemplateModal(true);
+                    }}
+                    data-testid="btn-edit-template"
+                    title="Editar template"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                ) : null;
+              })()}
+            </div>
           </div>
 
           {/* Inline editable question preview */}
