@@ -18,6 +18,9 @@ import meetingsRouter from "./routes/meetings";
 import profileRouter from "./routes/profile";
 import specializationAreasRouter from "./routes/specialization-areas";
 import adminPsychologistsRouter from "./routes/admin-psychologists";
+import careTemplatesRouter from "./routes/care-templates";
+import careDispatchRouter from "./routes/care-dispatch";
+import carePublicRouter from "./routes/care-public";
 import { analyzeInvoiceImage, analyzeInvoicePdf, type PsychologistProfileForInvoice, AIServiceError, AIQuotaError, UnsupportedFormatError } from "./services/ai";
 
 // Configure multer for image upload
@@ -1763,6 +1766,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Admin psychologists management
   app.use("/api/admin/psychologists", adminPsychologistsRouter);
+
+  // Care module — templates (authenticated)
+  app.use("/api/care/templates", careTemplatesRouter);
+
+  // Care module — dispatch + history + responses (authenticated)
+  app.use("/api/care", careDispatchRouter);
+
+  // Care module — public response routes (no auth required)
+  app.use("/api/care", carePublicRouter);
 
   // ========== INVOICE ROUTES (NFS-e com IA) ==========
 

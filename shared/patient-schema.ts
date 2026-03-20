@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, date, time, decimal, timestamp, primaryKey, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, date, time, decimal, timestamp, primaryKey, jsonb, varchar } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -304,6 +304,179 @@ export type InsertPsychologicalAssessment = z.infer<typeof insertPsychologicalAs
 
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type SessionHistory = typeof sessionHistory.$inferSelect;
+
+// ========== PATIENT CARE MODULE ==========
+
+// Care Templates (Formulários de Cuidado)
+export const careTemplates = pgTable("care_templates", {
+    id: serial("id").primaryKey(),
+    psychologistId: integer("psychologist_id").references(() => users.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 255 }).notNull(),
+    description: text("description"),
+    isDefault: boolean("is_default").default(false),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertCareTemplateSchema = createInsertSchema(careTemplates).pick({
+    psychologistId: true,
+    title: true,
+    description: true,
+    isDefault: true,
+});
+export type CareTemplate = typeof careTemplates.$inferSelect;
+export type InsertCareTemplate = z.infer<typeof insertCareTemplateSchema>;
+
+// Care Template Questions (Perguntas de Formulário)
+export const careTemplateQuestions = pgTable("care_template_questions", {
+    id: serial("id").primaryKey(),
+    templateId: integer("template_id").notNull().references(() => careTemplates.id, { onDelete: "cascade" }),
+    questionText: text("question_text").notNull(),
+    questionType: varchar("question_type", { length: 50 }).notNull().default("text"), // text | textarea | scale | multiple_choice
+    options: jsonb("options"), // for multiple_choice: string[]
+    isRequired: boolean("is_required").notNull().default(true),
+    orderIndex: integer("order_index").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertCareTemplateQuestionSchema = createInsertSchema(careTemplateQuestions).pick({
+    templateId: true,
+    questionText: true,
+    questionType: true,
+    options: true,
+    isRequired: true,
+    orderIndex: true,
+});
+export type CareTemplateQuestion = typeof careTemplateQuestions.$inferSelect;
+export type InsertCareTemplateQuestion = z.infer<typeof insertCareTemplateQuestionSchema>;
+
+// Care Dispatches (Envios de Formulário)
+export const careDispatches = pgTable("care_dispatches", {
+    id: serial("id").primaryKey(),
+    psychologistId: integer("psychologist_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    patientId: integer("patient_id").notNull().references(() => patients.id, { onDelete: "cascade" }),
+    templateId: integer("template_id").references(() => careTemplates.id, { onDelete: "set null" }),
+    subject: varchar("subject", { length: 255 }).notNull(),
+    customMessage: text("custom_message"),
+    responseToken: varchar("response_token", { length: 255 }).notNull().unique(),
+    tokenExpiresAt: timestamp("token_expires_at").notNull(),
+    status: varchar("status", { length: 50 }).notNull().default("sent"), // sent | opened | answered | expired
+    sentToEmail: varchar("sent_to_email", { length: 255 }).notNull(),
+    sentAt: timestamp("sent_at").notNull().defaultNow(),
+    openedAt: timestamp("opened_at"),
+    answeredAt: timestamp("answered_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertCareDispatchSchema = createInsertSchema(careDispatches).pick({
+    psychologistId: true,
+    patientId: true,
+    templateId: true,
+    subject: true,
+    customMessage: true,
+    responseToken: true,
+    tokenExpiresAt: true,
+    status: true,
+    sentToEmail: true,
+});
+export type CareDispatch = typeof careDispatches.$inferSelect;
+export type InsertCareDispatch = z.infer<typeof insertCareDispatchSchema>;
+
+// Care Dispatch Questions (Snapshot das Perguntas no Momento do Envio)
+export const careDispatchQuestions = pgTable("care_dispatch_questions", {
+    id: serial("id").primaryKey(),
+    dispatchId: integer("dispatch_id").notNull().references(() => careDispatches.id, { onDelete: "cascade" }),
+    questionText: text("question_text").notNull(),
+    questionType: varchar("question_type", { length: 50 }).notNull().default("text"),
+    options: jsonb("options"),
+    isRequired: boolean("is_required").notNull().default(true),
+    orderIndex: integer("order_index").notNull().default(0),
+});
+
+export const insertCareDispatchQuestionSchema = createInsertSchema(careDispatchQuestions).pick({
+    dispatchId: true,
+    questionText: true,
+    questionType: true,
+    options: true,
+    isRequired: true,
+    orderIndex: true,
+});
+export type CareDispatchQuestion = typeof careDispatchQuestions.$inferSelect;
+export type InsertCareDispatchQuestion = z.infer<typeof insertCareDispatchQuestionSchema>;
+
+// Care Responses (Respostas do Paciente)
+export const careResponses = pgTable("care_responses", {
+    id: serial("id").primaryKey(),
+    dispatchId: integer("dispatch_id").notNull().references(() => careDispatches.id, { onDelete: "cascade" }),
+    dispatchQuestionId: integer("dispatch_question_id").notNull().references(() => careDispatchQuestions.id, { onDelete: "cascade" }),
+    answerText: text("answer_text"),
+    answerChoice: varchar("answer_choice", { length: 255 }),
+    answerScale: integer("answer_scale"),
+    submittedAt: timestamp("submitted_at").notNull().defaultNow(),
+});
+
+export const insertCareResponseSchema = createInsertSchema(careResponses).pick({
+    dispatchId: true,
+    dispatchQuestionId: true,
+    answerText: true,
+    answerChoice: true,
+    answerScale: true,
+});
+export type CareResponse = typeof careResponses.$inferSelect;
+export type InsertCareResponse = z.infer<typeof insertCareResponseSchema>;
+
+// Care Relations
+export const careTemplatesRelations = relations(careTemplates, ({ one, many }) => ({
+    psychologist: one(users, {
+        fields: [careTemplates.psychologistId],
+        references: [users.id],
+    }),
+    questions: many(careTemplateQuestions),
+    dispatches: many(careDispatches),
+}));
+
+export const careTemplateQuestionsRelations = relations(careTemplateQuestions, ({ one }) => ({
+    template: one(careTemplates, {
+        fields: [careTemplateQuestions.templateId],
+        references: [careTemplates.id],
+    }),
+}));
+
+export const careDispatchesRelations = relations(careDispatches, ({ one, many }) => ({
+    psychologist: one(users, {
+        fields: [careDispatches.psychologistId],
+        references: [users.id],
+    }),
+    patient: one(patients, {
+        fields: [careDispatches.patientId],
+        references: [patients.id],
+    }),
+    template: one(careTemplates, {
+        fields: [careDispatches.templateId],
+        references: [careTemplates.id],
+    }),
+    questions: many(careDispatchQuestions),
+    responses: many(careResponses),
+}));
+
+export const careDispatchQuestionsRelations = relations(careDispatchQuestions, ({ one, many }) => ({
+    dispatch: one(careDispatches, {
+        fields: [careDispatchQuestions.dispatchId],
+        references: [careDispatches.id],
+    }),
+    responses: many(careResponses),
+}));
+
+export const careResponsesRelations = relations(careResponses, ({ one }) => ({
+    dispatch: one(careDispatches, {
+        fields: [careResponses.dispatchId],
+        references: [careDispatches.id],
+    }),
+    question: one(careDispatchQuestions, {
+        fields: [careResponses.dispatchQuestionId],
+        references: [careDispatchQuestions.id],
+    }),
+}));
 
 // ========== PATIENT TRANSFERS ==========
 // Histórico imutável de transferências de responsabilidade
