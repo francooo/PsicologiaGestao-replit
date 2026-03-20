@@ -23,14 +23,12 @@ function requireAuth(req: any, res: any, next: any) {
 
 /**
  * Returns true if the authenticated user may access this meeting.
- * - admin / receptionist → full access to all meetings
- * - psychologist         → only their own meetings (psychologistId === user.id)
+ * All roles: only own meetings are accessible (psychologistId === user.id).
  */
 function canAccessMeeting(
   user: { id: number; role: string },
   meeting: { psychologistId: number }
 ): boolean {
-  if (user.role === 'admin' || user.role === 'receptionist') return true;
   return meeting.psychologistId === user.id;
 }
 
@@ -56,10 +54,8 @@ router.get('/', requireAuth, async (req, res) => {
 
     const conditions: ReturnType<typeof eq>[] = [];
 
-    // Strict ownership for psychologist role
-    if (user.role === 'psychologist') {
-      conditions.push(eq(meetings.psychologistId, user.id));
-    }
+    // Strict ownership: all users see only their own meetings
+    conditions.push(eq(meetings.psychologistId, user.id));
 
     if (status && status !== 'all') {
       conditions.push(eq(meetings.status, status as string));
@@ -180,7 +176,6 @@ const createSchema = z.object({
   durationMinutes: z.number().int().positive().default(50),
   sendLinkNow: z.boolean().optional().default(false),
   appointmentId: z.number().int().positive().optional(),
-  psychologistId: z.number().int().positive().optional(), // admin can specify
 });
 
 router.post('/', requireAuth, async (req, res) => {
@@ -188,11 +183,8 @@ router.post('/', requireAuth, async (req, res) => {
     const user = req.user as { id: number; role: string; email: string; fullName: string };
     const body = createSchema.parse(req.body);
 
-    // Determine which psychologist owns this meeting
-    let psychologistId = user.id;
-    if (user.role === 'admin' && body.psychologistId) {
-      psychologistId = body.psychologistId;
-    }
+    // Strict ownership: the meeting always belongs to the authenticated user
+    const psychologistId = user.id;
 
     // Fetch patient
     const patientRows = await db

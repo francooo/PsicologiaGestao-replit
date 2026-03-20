@@ -444,6 +444,8 @@ export async function createMeetingEvent(
 
     return { googleEventId: response.data.id!, meetLink };
   } catch (error) {
+    // Re-throw token-expiry errors so the route layer can map them to 401
+    if (isGoogleTokenExpired(error)) throw error;
     console.error('Erro ao criar evento de reunião:', error);
     return null;
   }
@@ -561,6 +563,8 @@ export async function sendMeetLinkEmail(params: {
 
     return true;
   } catch (error) {
+    // Re-throw token-expiry errors so the route layer can map them to 401
+    if (isGoogleTokenExpired(error)) throw error;
     console.error('Erro ao enviar e-mail do Meet:', error);
     return false;
   }
