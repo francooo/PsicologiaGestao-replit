@@ -1767,14 +1767,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Admin psychologists management
   app.use("/api/admin/psychologists", adminPsychologistsRouter);
 
+  // Care module — public response routes (no auth required) — MUST be mounted FIRST
+  // so that /api/care/respond/:token is reachable before the authenticated dispatch
+  // router's global checkAuth middleware intercepts unauthenticated requests.
+  app.use("/api/care", carePublicRouter);
+
   // Care module — templates (authenticated)
   app.use("/api/care/templates", careTemplatesRouter);
 
   // Care module — dispatch + history + responses (authenticated)
   app.use("/api/care", careDispatchRouter);
-
-  // Care module — public response routes (no auth required)
-  app.use("/api/care", carePublicRouter);
 
   // ========== INVOICE ROUTES (NFS-e com IA) ==========
 
