@@ -125,7 +125,13 @@ router.patch("/:id", async (req, res) => {
 
     if (!template) return res.status(404).json({ message: "Template não encontrado" });
 
-    const updateData = insertCareTemplateSchema.partial().parse(req.body);
+    // Whitelist only editable metadata — prevent clients from mutating
+    // psychologistId, isDefault, or other ownership fields
+    const editableSchema = z.object({
+      title: z.string().min(1).max(100).optional(),
+      description: z.string().max(500).optional(),
+    });
+    const updateData = editableSchema.parse(req.body);
     const [updated] = await db
       .update(careTemplates)
       .set({ ...updateData, updatedAt: new Date() })
@@ -209,7 +215,12 @@ router.patch("/:id/questions/:qId", async (req, res) => {
       .where(and(eq(careTemplates.id, templateId), eq(careTemplates.psychologistId, userId)));
     if (!template) return res.status(404).json({ message: "Template não encontrado" });
 
-    const data = insertCareTemplateQuestionSchema.partial().parse(req.body);
+    // Whitelist editable question fields — disallow templateId to prevent
+    // moving a question to a different template via this endpoint
+    const editableQuestionSchema = insertCareTemplateQuestionSchema
+      .omit({ templateId: true })
+      .partial();
+    const data = editableQuestionSchema.parse(req.body);
     const [updated] = await db
       .update(careTemplateQuestions)
       .set(data)

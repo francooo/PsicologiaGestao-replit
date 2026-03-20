@@ -119,6 +119,13 @@ router.post("/respond/:token", async (req, res) => {
     }
 
     if (new Date() > dispatch.tokenExpiresAt) {
+      // Persist expired status for consistency with GET handler
+      if (dispatch.status !== "expired") {
+        await db
+          .update(careDispatches)
+          .set({ status: "expired" })
+          .where(eq(careDispatches.id, dispatch.id));
+      }
       return res.status(410).json({
         error: "expired",
         message: "Este link expirou.",
