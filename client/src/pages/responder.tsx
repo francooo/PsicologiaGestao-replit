@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Loader2, CheckCircle2, ClockAlert, Heart, Send } from "lucide-react";
@@ -26,44 +26,75 @@ interface PublicFormData {
   questions: PublicQuestion[];
 }
 
+interface AnswerValue {
+  text?: string;
+  choice?: string;
+  scale?: number;
+}
+
+interface ApiError extends Error {
+  status?: number;
+  code?: string;
+}
+
 // ─── Public page (no auth, no sidebar) ────────────────────────────────────────
 
 export default function ResponderPage() {
   const [, params] = useRoute("/responder/:token");
   const token = params?.token ?? "";
 
-  const [answers, setAnswers] = useState<Record<number, { text?: string; choice?: string; scale?: number }>>({});
+  const [answers, setAnswers] = useState<Record<number, AnswerValue>>({});
   const [submitted, setSubmitted] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<number, string>>({});
 
+  // Inject noindex/nofollow into the document <head> — must be done via DOM not JSX
+  useEffect(() => {
+    const meta = document.createElement("meta");
+    meta.name = "robots";
+    meta.content = "noindex, nofollow";
+    document.head.appendChild(meta);
+    return () => {
+      document.head.removeChild(meta);
+    };
+  }, []);
+
   // Fetch form
-  const { data, isLoading, error } = useQuery<PublicFormData>({
+  const { data, isLoading, error } = useQuery<PublicFormData, ApiError>({
     queryKey: ["/api/care/respond", token],
     queryFn: async () => {
       const res = await fetch(`/api/care/respond/${token}`);
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        const err: any = new Error(body.message ?? "Erro");
+        const body = await res.json().catch(() => ({})) as { message?: string; error?: string };
+        const err = new Error(body.message ?? "Erro") as ApiError;
         err.status = res.status;
         err.code = body.error;
         throw err;
       }
-      return res.json();
+      return res.json() as Promise<PublicFormData>;
     },
     retry: false,
     enabled: !!token,
   });
 
+  interface SubmitPayload {
+    answers: Array<{
+      dispatch_question_id: number;
+      answer_text: string | null;
+      answer_choice: string | null;
+      answer_scale: number | null;
+    }>;
+  }
+
   const submitMutation = useMutation({
-    mutationFn: async (payload: object) => {
+    mutationFn: async (payload: SubmitPayload) => {
       const res = await fetch(`/api/care/respond/${token}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        const err: any = new Error(body.message ?? "Erro ao enviar");
+        const body = await res.json().catch(() => ({})) as { message?: string; error?: string };
+        const err = new Error(body.message ?? "Erro ao enviar") as ApiError;
         err.status = res.status;
         err.code = body.error;
         throw err;
@@ -75,7 +106,6 @@ export default function ResponderPage() {
     },
   });
 
-  // Update an answer
   function setAnswer(qId: number, type: "text" | "choice" | "scale", value: string | number) {
     setAnswers((prev) => ({
       ...prev,
@@ -111,12 +141,15 @@ export default function ResponderPage() {
     if (!data) return;
     if (!validate(data.questions)) return;
 
-    const payload = {
+    const payload: SubmitPayload = {
       answers: data.questions.map((q) => {
         const ans = answers[q.id] ?? {};
         return {
           dispatch_question_id: q.id,
-          answer_text: q.questionType === "text" || q.questionType === "textarea" ? ans.text ?? null : null,
+          answer_text:
+            q.questionType === "text" || q.questionType === "textarea"
+              ? ans.text ?? null
+              : null,
           answer_choice: q.questionType === "multiple_choice" ? ans.choice ?? null : null,
           answer_scale: q.questionType === "scale" ? ans.scale ?? null : null,
         };
@@ -125,9 +158,10 @@ export default function ResponderPage() {
     submitMutation.mutate(payload);
   }
 
-  // ─── Error: status 410 (expired) ─────────────────────────────────────────
-  const status = (error as any)?.status;
-  const code = (error as any)?.code;
+  // ─── Determine error state ────────────────────────────────────────────────
+  const apiError = error as ApiError | null;
+  const status = apiError?.status;
+  const code = apiError?.code;
 
   if (!isLoading && (status === 410 || code === "expired")) {
     return (
@@ -136,14 +170,14 @@ export default function ResponderPage() {
           <ClockAlert className="h-12 w-12 mx-auto text-amber-400" />
           <h2 className="text-xl font-semibold text-neutral-700">Este link expirou</h2>
           <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-            O prazo para responder este formulário já passou. Se precisar, entre em contato com sua psicóloga.
+            O prazo para responder este formulário já passou. Se precisar, entre em contato com sua
+            psicóloga.
           </p>
         </div>
       </PublicShell>
     );
   }
 
-  // ─── Error: status 409 (already answered) ────────────────────────────────
   if (!isLoading && (status === 409 || code === "already_answered")) {
     return (
       <PublicShell clinicName="ConsultaPsi">
@@ -158,19 +192,19 @@ export default function ResponderPage() {
     );
   }
 
-  // ─── Error: not found / other ─────────────────────────────────────────────
   if (!isLoading && error && status !== 410 && status !== 409) {
     return (
       <PublicShell clinicName="ConsultaPsi">
         <div className="text-center py-12 space-y-3">
           <h2 className="text-xl font-semibold text-neutral-700">Formulário não encontrado</h2>
-          <p className="text-sm text-muted-foreground">O link pode ser inválido ou ter expirado.</p>
+          <p className="text-sm text-muted-foreground">
+            O link pode ser inválido ou ter expirado.
+          </p>
         </div>
       </PublicShell>
     );
   }
 
-  // ─── Loading ──────────────────────────────────────────────────────────────
   if (isLoading || !data) {
     return (
       <PublicShell clinicName="ConsultaPsi">
@@ -181,13 +215,14 @@ export default function ResponderPage() {
     );
   }
 
-  // ─── Success (after submission) ───────────────────────────────────────────
   if (submitted) {
     return (
       <PublicShell clinicName={data.clinicName} psychologistName={data.psychologistName}>
         <div className="text-center py-12 space-y-3">
           <CheckCircle2 className="h-14 w-14 mx-auto text-teal-500" />
-          <h2 className="text-2xl font-semibold text-neutral-700">Obrigada, {data.patientFirstName}!</h2>
+          <h2 className="text-2xl font-semibold text-neutral-700">
+            Obrigada, {data.patientFirstName}!
+          </h2>
           <p className="text-sm text-muted-foreground max-w-xs mx-auto">
             Suas respostas foram registradas com sucesso. Sua psicóloga irá analisá-las.
           </p>
@@ -205,7 +240,8 @@ export default function ResponderPage() {
         <div>
           <h2 className="text-xl font-semibold text-neutral-800">{data.subject}</h2>
           <p className="text-sm text-neutral-500 mt-1">
-            Olá, <strong>{data.patientFirstName}</strong>! {data.psychologistName} enviou este formulário para você.
+            Olá, <strong>{data.patientFirstName}</strong>!{" "}
+            {data.psychologistName} enviou este formulário para você.
           </p>
           {data.customMessage && (
             <div className="mt-3 bg-teal-50 border border-teal-200 rounded-lg px-4 py-3 text-sm text-teal-800">
@@ -229,7 +265,7 @@ export default function ResponderPage() {
 
         {submitMutation.isError && (
           <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
-            {(submitMutation.error as any)?.message ?? "Erro ao enviar. Tente novamente."}
+            {(submitMutation.error as ApiError)?.message ?? "Erro ao enviar. Tente novamente."}
           </div>
         )}
 
@@ -263,35 +299,29 @@ function PublicShell({
   psychologistName?: string;
 }) {
   return (
-    <>
-      <meta name="robots" content="noindex, nofollow" />
-      <div className="min-h-screen bg-neutral-50 flex flex-col">
-        {/* Header */}
-        <header className="bg-teal-600 text-white px-4 py-4 shadow-md">
-          <div className="max-w-xl mx-auto flex items-center gap-3">
-            <Heart className="h-5 w-5 flex-shrink-0" />
-            <div>
-              <p className="font-semibold text-base leading-tight">{clinicName}</p>
-              {psychologistName && (
-                <p className="text-xs text-teal-100">Psicóloga: {psychologistName}</p>
-              )}
-            </div>
+    <div className="min-h-screen bg-neutral-50 flex flex-col">
+      <header className="bg-teal-600 text-white px-4 py-4 shadow-md">
+        <div className="max-w-xl mx-auto flex items-center gap-3">
+          <Heart className="h-5 w-5 flex-shrink-0" />
+          <div>
+            <p className="font-semibold text-base leading-tight">{clinicName}</p>
+            {psychologistName && (
+              <p className="text-xs text-teal-100">Psicóloga: {psychologistName}</p>
+            )}
           </div>
-        </header>
+        </div>
+      </header>
 
-        {/* Content */}
-        <main className="flex-1 py-8 px-4">
-          <div className="max-w-xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-100 p-6 md:p-8">
-            {children}
-          </div>
-        </main>
+      <main className="flex-1 py-8 px-4">
+        <div className="max-w-xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-100 p-6 md:p-8">
+          {children}
+        </div>
+      </main>
 
-        {/* Footer */}
-        <footer className="py-4 px-4 text-center text-xs text-muted-foreground">
-          🔒 Suas informações são confidenciais e usadas apenas para acompanhamento clínico.
-        </footer>
-      </div>
-    </>
+      <footer className="py-4 px-4 text-center text-xs text-muted-foreground">
+        🔒 Suas informações são confidenciais e usadas apenas para acompanhamento clínico.
+      </footer>
+    </div>
   );
 }
 
@@ -300,7 +330,7 @@ function PublicShell({
 interface QuestionFieldProps {
   index: number;
   question: PublicQuestion;
-  value?: { text?: string; choice?: string; scale?: number };
+  value?: AnswerValue;
   onChange: (type: "text" | "choice" | "scale", value: string | number) => void;
   error?: string;
 }
@@ -353,8 +383,10 @@ function QuestionField({ index, question, value, onChange, error }: QuestionFiel
               </button>
             ))}
           </div>
-          {value?.scale && (
-            <p className="text-xs text-teal-600 font-medium">Você selecionou: {value.scale}</p>
+          {value?.scale !== undefined && (
+            <p className="text-xs text-teal-600 font-medium">
+              Você selecionou: {value.scale}
+            </p>
           )}
         </div>
       )}

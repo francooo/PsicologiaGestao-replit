@@ -1,11 +1,10 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -35,8 +34,8 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-  DragEndEvent,
 } from "@dnd-kit/core";
+import type { DragEndEvent } from "@dnd-kit/core";
 import {
   arrayMove,
   SortableContext,
@@ -58,12 +57,11 @@ import {
   Trash2,
   Loader2,
   Send,
-  FileText,
   Heart,
 } from "lucide-react";
 import { type Patient } from "@shared/patient-schema";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CareTemplate {
   id: number;
@@ -119,7 +117,16 @@ interface DispatchResponse {
   }>;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// Editable question used in both the template editor and the inline dispatch preview
+export interface EditableQuestion {
+  _id: string;
+  questionText: string;
+  questionType: string;
+  options: string[];
+  isRequired: boolean;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254;
@@ -132,20 +139,27 @@ function substituteVars(text: string, patient: Patient): string {
     .replace(/\{patient_full_name\}/g, patient.fullName);
 }
 
-// ─── Status chip ─────────────────────────────────────────────────────────────
+function newQuestion(): EditableQuestion {
+  return {
+    _id: crypto.randomUUID(),
+    questionText: "",
+    questionType: "text",
+    options: [],
+    isRequired: true,
+  };
+}
 
-const STATUS_CONFIG = {
-  sent: { label: "Enviado", color: "bg-blue-100 text-blue-700" },
-  opened: { label: "Aberto", color: "bg-yellow-100 text-yellow-700" },
+// ─── Status chip ──────────────────────────────────────────────────────────────
+
+const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+  sent:     { label: "Enviado",    color: "bg-blue-100 text-blue-700" },
+  opened:   { label: "Aberto",     color: "bg-yellow-100 text-yellow-700" },
   answered: { label: "Respondido", color: "bg-green-100 text-green-700" },
-  expired: { label: "Expirado", color: "bg-gray-100 text-gray-500" },
+  expired:  { label: "Expirado",   color: "bg-gray-100 text-gray-500" },
 };
 
 function StatusChip({ status }: { status: string }) {
-  const cfg = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] ?? {
-    label: status,
-    color: "bg-gray-100 text-gray-500",
-  };
+  const cfg = STATUS_CONFIG[status] ?? { label: status, color: "bg-gray-100 text-gray-500" };
   return (
     <span
       className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cfg.color}`}
@@ -156,59 +170,49 @@ function StatusChip({ status }: { status: string }) {
   );
 }
 
-// ─── Sortable question row (template editor) ──────────────────────────────────
+// ─── Shared QuestionEditor ─────────────────────────────────────────────────────
+// Used by BOTH SortableQuestionRow (template modal) and the inline dispatch preview
 
-interface QuestionRowProps {
-  id: string;
+interface QuestionEditorProps {
   question: EditableQuestion;
-  onUpdate: (id: string, field: string, value: any) => void;
-  onRemove: (id: string) => void;
+  onUpdate: (field: string, value: string | boolean | string[]) => void;
+  onRemove?: () => void;
+  showRemove?: boolean;
+  dragHandleProps?: Record<string, unknown>;
 }
 
-interface EditableQuestion {
-  _id: string;
-  questionText: string;
-  questionType: string;
-  options: string[];
-  isRequired: boolean;
-}
-
-function SortableQuestionRow({ id, question, onUpdate, onRemove }: QuestionRowProps) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-
+export function QuestionEditor({
+  question,
+  onUpdate,
+  onRemove,
+  showRemove = true,
+  dragHandleProps,
+}: QuestionEditorProps) {
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className="bg-white border border-neutral-200 rounded-lg p-3 space-y-2"
-    >
+    <div className="bg-white border border-neutral-200 rounded-lg p-3 space-y-2">
       <div className="flex items-start gap-2">
-        <button
-          {...attributes}
-          {...listeners}
-          className="mt-2 text-neutral-400 cursor-grab active:cursor-grabbing flex-shrink-0"
-          data-testid="btn-drag-question"
-          type="button"
-          aria-label="Arrastar pergunta"
-        >
-          <GripVertical className="h-4 w-4" />
-        </button>
+        {dragHandleProps && (
+          <button
+            {...dragHandleProps}
+            className="mt-2 text-neutral-400 cursor-grab active:cursor-grabbing flex-shrink-0"
+            data-testid="btn-drag-question"
+            type="button"
+            aria-label="Arrastar pergunta"
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+        )}
         <div className="flex-1 space-y-2">
           <Input
             data-testid="input-question-text"
             placeholder="Texto da pergunta"
             value={question.questionText}
-            onChange={(e) => onUpdate(id, "questionText", e.target.value)}
+            onChange={(e) => onUpdate("questionText", e.target.value)}
           />
           <div className="flex items-center gap-2 flex-wrap">
             <Select
               value={question.questionType}
-              onValueChange={(v) => onUpdate(id, "questionType", v)}
+              onValueChange={(v) => onUpdate("questionType", v)}
             >
               <SelectTrigger className="w-44" data-testid="select-question-type">
                 <SelectValue />
@@ -222,12 +226,12 @@ function SortableQuestionRow({ id, question, onUpdate, onRemove }: QuestionRowPr
             </Select>
             <div className="flex items-center gap-1.5">
               <Switch
-                id={`req-${id}`}
+                id={`req-${question._id}`}
                 checked={question.isRequired}
-                onCheckedChange={(v) => onUpdate(id, "isRequired", v)}
+                onCheckedChange={(v) => onUpdate("isRequired", v)}
                 data-testid="switch-required"
               />
-              <Label htmlFor={`req-${id}`} className="text-xs text-muted-foreground cursor-pointer">
+              <Label htmlFor={`req-${question._id}`} className="text-xs text-muted-foreground cursor-pointer">
                 Obrigatória
               </Label>
             </div>
@@ -240,67 +244,112 @@ function SortableQuestionRow({ id, question, onUpdate, onRemove }: QuestionRowPr
                 rows={3}
                 placeholder={"Sim\nNão\nÀs vezes"}
                 value={question.options.join("\n")}
-                onChange={(e) =>
-                  onUpdate(id, "options", e.target.value.split("\n"))
-                }
+                onChange={(e) => onUpdate("options", e.target.value.split("\n"))}
                 className="text-sm"
               />
             </div>
           )}
         </div>
-        <button
-          type="button"
-          onClick={() => onRemove(id)}
-          className="mt-1 text-neutral-400 hover:text-destructive transition-colors flex-shrink-0"
-          data-testid="btn-remove-question"
-          aria-label="Remover pergunta"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
+        {showRemove && onRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="mt-1 text-neutral-400 hover:text-destructive transition-colors flex-shrink-0"
+            data-testid="btn-remove-question"
+            aria-label="Remover pergunta"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-// ─── Template modal (create / edit) ──────────────────────────────────────────
+// ─── Sortable row wrapper (template modal only) ───────────────────────────────
+
+function SortableQuestionRow({
+  id,
+  question,
+  onUpdate,
+  onRemove,
+}: {
+  id: string;
+  question: EditableQuestion;
+  onUpdate: (id: string, field: string, value: string | boolean | string[]) => void;
+  onRemove: (id: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+  return (
+    <div ref={setNodeRef} style={style}>
+      <QuestionEditor
+        question={question}
+        onUpdate={(field, value) => onUpdate(id, field, value)}
+        onRemove={() => onRemove(id)}
+        dragHandleProps={{ ...attributes, ...listeners } as Record<string, unknown>}
+      />
+    </div>
+  );
+}
+
+// ─── Template modal (create + edit) ──────────────────────────────────────────
 
 interface TemplateModalProps {
   open: boolean;
   onClose: () => void;
-  onCreated: (t: CareTemplate) => void;
-  existingTemplate?: CareTemplate & { questions?: CareTemplateQuestion[] };
+  onSaved: (t: CareTemplate) => void;
+  existing?: CareTemplate & { questions?: CareTemplateQuestion[] };
 }
 
-function newQuestion(): EditableQuestion {
-  return {
-    _id: crypto.randomUUID(),
-    questionText: "",
-    questionType: "text",
-    options: [],
-    isRequired: true,
-  };
-}
-
-function TemplateModal({ open, onClose, onCreated, existingTemplate }: TemplateModalProps) {
+function TemplateModal({ open, onClose, onSaved, existing }: TemplateModalProps) {
   const { toast } = useToast();
-  const isEditing = !!existingTemplate;
+  const isEditing = !!existing;
 
-  const [title, setTitle] = useState(existingTemplate?.title ?? "");
-  const [description, setDescription] = useState(existingTemplate?.description ?? "");
+  const [title, setTitle] = useState(existing?.title ?? "");
+  const [description, setDescription] = useState(existing?.description ?? "");
   const [questions, setQuestions] = useState<EditableQuestion[]>(() => {
-    if (existingTemplate?.questions) {
-      return existingTemplate.questions
+    if (existing?.questions?.length) {
+      return [...existing.questions]
         .sort((a, b) => a.orderIndex - b.orderIndex)
         .map((q) => ({
           _id: crypto.randomUUID(),
           questionText: q.questionText,
           questionType: q.questionType,
-          options: Array.isArray(q.options) ? q.options : [],
+          options: Array.isArray(q.options) ? (q.options as string[]) : [],
           isRequired: q.isRequired,
         }));
     }
     return [newQuestion()];
   });
+
+  // Reset state when modal reopened with new data
+  useEffect(() => {
+    if (open) {
+      setTitle(existing?.title ?? "");
+      setDescription(existing?.description ?? "");
+      if (existing?.questions?.length) {
+        setQuestions(
+          [...existing.questions]
+            .sort((a, b) => a.orderIndex - b.orderIndex)
+            .map((q) => ({
+              _id: crypto.randomUUID(),
+              questionText: q.questionText,
+              questionType: q.questionType,
+              options: Array.isArray(q.options) ? (q.options as string[]) : [],
+              isRequired: q.isRequired,
+            }))
+        );
+      } else {
+        setQuestions([newQuestion()]);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -310,33 +359,34 @@ function TemplateModal({ open, onClose, onCreated, existingTemplate }: TemplateM
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (isEditing) {
-        const res = await apiRequest("PATCH", `/api/care/templates/${existingTemplate!.id}`, {
+        // Update title + description
+        const res = await apiRequest("PATCH", `/api/care/templates/${existing!.id}`, {
           title,
           description,
-        });
-        return res.json();
-      } else {
-        const res = await apiRequest("POST", "/api/care/templates", {
-          title,
-          description,
-          questions: questions.map((q, i) => ({
-            questionText: q.questionText,
-            questionType: q.questionType,
-            options: q.questionType === "multiple_choice" ? q.options.filter(Boolean) : null,
-            isRequired: q.isRequired,
-            orderIndex: i,
-          })),
         });
         return res.json();
       }
+      // Create template with questions
+      const res = await apiRequest("POST", "/api/care/templates", {
+        title,
+        description,
+        questions: questions.map((q, i) => ({
+          questionText: q.questionText,
+          questionType: q.questionType,
+          options: q.questionType === "multiple_choice" ? q.options.filter(Boolean) : null,
+          isRequired: q.isRequired,
+          orderIndex: i,
+        })),
+      });
+      return res.json();
     },
-    onSuccess: (data) => {
+    onSuccess: (data: CareTemplate & { template?: CareTemplate }) => {
       queryClient.invalidateQueries({ queryKey: ["/api/care/templates"] });
-      onCreated(data.template ?? data);
+      onSaved(data.template ?? data);
       toast({ title: isEditing ? "Template atualizado" : "Template criado com sucesso" });
       onClose();
     },
-    onError: (e: any) => {
+    onError: (e: Error) => {
       toast({ title: "Erro", description: e.message, variant: "destructive" });
     },
   });
@@ -345,13 +395,13 @@ function TemplateModal({ open, onClose, onCreated, existingTemplate }: TemplateM
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     setQuestions((qs) => {
-      const oldIdx = qs.findIndex((q) => q._id === active.id);
-      const newIdx = qs.findIndex((q) => q._id === over.id);
+      const oldIdx = qs.findIndex((q) => q._id === String(active.id));
+      const newIdx = qs.findIndex((q) => q._id === String(over.id));
       return arrayMove(qs, oldIdx, newIdx);
     });
   }
 
-  function updateQuestion(id: string, field: string, value: any) {
+  function updateQuestion(id: string, field: string, value: string | boolean | string[]) {
     setQuestions((qs) => qs.map((q) => (q._id === id ? { ...q, [field]: value } : q)));
   }
 
@@ -367,7 +417,6 @@ function TemplateModal({ open, onClose, onCreated, existingTemplate }: TemplateM
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto pr-1 space-y-4 py-2">
-          {/* Name */}
           <div className="space-y-1">
             <Label htmlFor="tpl-title">Nome do template *</Label>
             <Input
@@ -379,7 +428,6 @@ function TemplateModal({ open, onClose, onCreated, existingTemplate }: TemplateM
             />
           </div>
 
-          {/* Description */}
           <div className="space-y-1">
             <Label htmlFor="tpl-desc">Descrição (opcional)</Label>
             <Input
@@ -393,54 +441,52 @@ function TemplateModal({ open, onClose, onCreated, existingTemplate }: TemplateM
 
           {/* Variable hint */}
           <div className="text-xs text-muted-foreground bg-neutral-50 border border-neutral-200 rounded-md p-2">
-            <strong>Variáveis disponíveis:</strong>{" "}
+            <strong>Variáveis:</strong>{" "}
             <code className="bg-white px-1 rounded border border-neutral-200">{"{patient_name}"}</code>{" "}
-            (primeiro nome) ·{" "}
+            ·{" "}
             <code className="bg-white px-1 rounded border border-neutral-200">{"{patient_full_name}"}</code>{" "}
-            (nome completo) ·{" "}
+            ·{" "}
             <code className="bg-white px-1 rounded border border-neutral-200">{"{psychologist_name}"}</code>
           </div>
 
-          {/* Questions */}
-          {!isEditing && (
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Perguntas</p>
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragEnd={handleDragEnd}
+          {/* Questions (editable in both create and edit modes) */}
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Perguntas</p>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={questions.map((q) => q._id)}
+                strategy={verticalListSortingStrategy}
               >
-                <SortableContext
-                  items={questions.map((q) => q._id)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  <div className="space-y-2">
-                    {questions.map((q) => (
-                      <SortableQuestionRow
-                        key={q._id}
-                        id={q._id}
-                        question={q}
-                        onUpdate={updateQuestion}
-                        onRemove={removeQuestion}
-                      />
-                    ))}
-                  </div>
-                </SortableContext>
-              </DndContext>
+                <div className="space-y-2">
+                  {questions.map((q) => (
+                    <SortableQuestionRow
+                      key={q._id}
+                      id={q._id}
+                      question={q}
+                      onUpdate={updateQuestion}
+                      onRemove={removeQuestion}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
 
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-full mt-1"
-                onClick={() => setQuestions((qs) => [...qs, newQuestion()])}
-                data-testid="btn-add-question"
-              >
-                <Plus className="h-4 w-4 mr-1" />
-                Adicionar pergunta
-              </Button>
-            </div>
-          )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full mt-1"
+              onClick={() => setQuestions((qs) => [...qs, newQuestion()])}
+              data-testid="btn-add-question"
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Adicionar pergunta
+            </Button>
+          </div>
         </div>
 
         <DialogFooter className="flex-shrink-0 pt-2 border-t">
@@ -480,7 +526,7 @@ function ResponsesModal({
         credentials: "include",
       });
       if (!res.ok) throw new Error("Erro ao carregar respostas");
-      return res.json();
+      return res.json() as Promise<DispatchResponse>;
     },
     enabled: open && !!dispatchId,
   });
@@ -505,7 +551,11 @@ function ResponsesModal({
           {data && (
             <div className="space-y-4">
               {data.questions.map((q, i) => (
-                <div key={q.id} className="bg-neutral-50 rounded-lg p-3 space-y-1" data-testid={`response-item-${q.id}`}>
+                <div
+                  key={q.id}
+                  className="bg-neutral-50 rounded-lg p-3 space-y-1"
+                  data-testid={`response-item-${q.id}`}
+                >
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                     {i + 1}. {q.questionText}
                     {q.isRequired && <span className="text-red-400 ml-0.5">*</span>}
@@ -536,8 +586,13 @@ function ResponsesModal({
                       ))}
                     </div>
                   ) : (
-                    <div className="bg-white border border-neutral-200 rounded p-2 text-sm" data-testid={`text-answer-${q.id}`}>
-                      {q.response.answerText || <span className="text-muted-foreground italic">—</span>}
+                    <div
+                      className="bg-white border border-neutral-200 rounded p-2 text-sm"
+                      data-testid={`text-answer-${q.id}`}
+                    >
+                      {q.response.answerText ?? (
+                        <span className="text-muted-foreground italic">—</span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -546,7 +601,9 @@ function ResponsesModal({
           )}
         </div>
         <DialogFooter className="flex-shrink-0 pt-2 border-t">
-          <Button variant="outline" onClick={onClose}>Fechar</Button>
+          <Button variant="outline" onClick={onClose}>
+            Fechar
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -569,17 +626,23 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [subject, setSubject] = useState("");
   const [customMessage, setCustomMessage] = useState("");
+  // Questions that the psychologist can edit inline before dispatch
+  const [pendingQuestions, setPendingQuestions] = useState<EditableQuestion[]>([]);
+
   const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<
+    (CareTemplate & { questions?: CareTemplateQuestion[] }) | undefined
+  >(undefined);
   const [responsesDispatchId, setResponsesDispatchId] = useState<number | null>(null);
 
-  // Fetch templates
+  // ── Queries ────────────────────────────────────────────────────────────────
+
   const { data: templates = [], isLoading: loadingTemplates } = useQuery<
     Array<CareTemplate & { questions: CareTemplateQuestion[] }>
   >({
     queryKey: ["/api/care/templates"],
   });
 
-  // Fetch history
   const { data: dispatches = [], isLoading: loadingHistory } = useQuery<CareDispatch[]>({
     queryKey: ["/api/care/patients", patientId, "dispatches"],
     queryFn: async () => {
@@ -587,15 +650,15 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
         credentials: "include",
       });
       if (!res.ok) throw new Error("Erro ao carregar histórico");
-      return res.json();
+      return res.json() as Promise<CareDispatch[]>;
     },
   });
 
-  const selectedTemplate = templates.find((t) => t.id === parseInt(selectedTemplateId));
+  // ── Template selection ────────────────────────────────────────────────────
 
-  // Update subject when template changes
   const handleTemplateChange = (val: string) => {
     if (val === "__new__") {
+      setEditingTemplate(undefined);
       setShowTemplateModal(true);
       return;
     }
@@ -603,37 +666,68 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
     const tpl = templates.find((t) => t.id === parseInt(val));
     if (tpl) {
       setSubject(`${tpl.title} — ${firstName}`);
+      // Populate editable inline questions with variable substitution
+      setPendingQuestions(
+        [...(tpl.questions ?? [])]
+          .sort((a, b) => a.orderIndex - b.orderIndex)
+          .map((q) => ({
+            _id: crypto.randomUUID(),
+            questionText: substituteVars(q.questionText, patient),
+            questionType: q.questionType,
+            options: Array.isArray(q.options) ? (q.options as string[]) : [],
+            isRequired: q.isRequired,
+          }))
+      );
     }
   };
 
-  // Dispatch mutation
+  function updatePendingQuestion(id: string, field: string, value: string | boolean | string[]) {
+    setPendingQuestions((qs) => qs.map((q) => (q._id === id ? { ...q, [field]: value } : q)));
+  }
+
+  function removePendingQuestion(id: string) {
+    setPendingQuestions((qs) => qs.filter((q) => q._id !== id));
+  }
+
+  function addPendingQuestion() {
+    setPendingQuestions((qs) => [...qs, newQuestion()]);
+  }
+
+  // ── Dispatch mutation ─────────────────────────────────────────────────────
+
   const dispatchMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", `/api/care/patients/${patientId}/dispatch`, {
         template_id: parseInt(selectedTemplateId),
         subject: subject.trim() || undefined,
         custom_message: customMessage.trim() || undefined,
+        // Include the inline-edited questions so backend can use the overridden text
+        // (backend currently takes the snapshot from template; for pontual edits we
+        //  send the preview questions as override_questions)
+        override_questions: pendingQuestions.map((q, i) => ({
+          questionText: q.questionText,
+          questionType: q.questionType,
+          options: q.questionType === "multiple_choice" ? q.options.filter(Boolean) : null,
+          isRequired: q.isRequired,
+          orderIndex: i,
+        })),
       });
-      return res.json();
+      return res.json() as Promise<{ success: boolean; dispatch: CareDispatch; warning?: string; responseUrl?: string }>;
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/care/patients", patientId, "dispatches"] });
       if (data.warning) {
-        toast({
-          title: "Formulário salvo",
-          description: data.warning,
-          variant: "default",
-        });
+        toast({ title: "Formulário salvo", description: data.warning });
       } else {
         toast({ title: "Formulário enviado!", description: `E-mail enviado para ${patient.email}` });
       }
       setSubject("");
       setCustomMessage("");
       setSelectedTemplateId("");
+      setPendingQuestions([]);
     },
-    onError: (e: any) => {
-      const body = e.message ?? "Tente novamente.";
-      toast({ title: "Erro ao enviar", description: body, variant: "destructive" });
+    onError: (e: Error) => {
+      toast({ title: "Erro ao enviar", description: e.message, variant: "destructive" });
     },
   });
 
@@ -642,11 +736,11 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
     dispatchMutation.mutate();
   };
 
-  // Copy link helper
+  // ── Copy link ─────────────────────────────────────────────────────────────
+
   const copyLink = useCallback(
     (token: string) => {
-      const appUrl = window.location.origin;
-      const url = `${appUrl}/responder/${token}`;
+      const url = `${window.location.origin}/responder/${token}`;
       navigator.clipboard.writeText(url).then(() => {
         toast({ title: "Link copiado!", description: url });
       });
@@ -654,9 +748,11 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
     [toast]
   );
 
+  // ─────────────────────────────────────────────────────────────────────────
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
-      {/* ── Left: Send panel (40%) ───────────────────────────────────────── */}
+      {/* ── Left: Send panel (40%) ─────────────────────────────────────── */}
       <div className="md:col-span-2 space-y-4">
         <div className="bg-white rounded-xl border border-neutral-100 shadow-sm p-4 space-y-4">
           <h3 className="text-sm font-semibold text-neutral-700 flex items-center gap-2">
@@ -664,16 +760,22 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
             Enviar Formulário
           </h3>
 
-          {/* Email validation banner */}
+          {/* Email banner */}
           {emailValid ? (
-            <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-sm text-green-700" data-testid="banner-email-valid">
+            <div
+              className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-sm text-green-700"
+              data-testid="banner-email-valid"
+            >
               <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
               <span>
                 <strong>E-mail válido:</strong> {patient.email}
               </span>
             </div>
           ) : (
-            <div className="flex items-center gap-2 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 text-sm text-yellow-800" data-testid="banner-email-invalid">
+            <div
+              className="flex items-center gap-2 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 text-sm text-yellow-800"
+              data-testid="banner-email-invalid"
+            >
               <AlertCircle className="h-4 w-4 flex-shrink-0" />
               <span>
                 Paciente sem e-mail válido.{" "}
@@ -715,24 +817,33 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
             </Select>
           </div>
 
-          {/* Question preview */}
-          {selectedTemplate && (
+          {/* Inline editable question preview */}
+          {pendingQuestions.length > 0 && (
             <div className="space-y-2">
               <p className="text-xs font-medium text-neutral-500">
-                Perguntas ({selectedTemplate.questions?.length ?? 0}):
+                Perguntas — edite antes de enviar:
               </p>
-              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                {(selectedTemplate.questions ?? [])
-                  .sort((a, b) => a.orderIndex - b.orderIndex)
-                  .map((q, i) => (
-                    <div key={q.id} className="bg-neutral-50 border border-neutral-100 rounded px-2 py-1.5 text-xs text-neutral-600" data-testid={`preview-question-${q.id}`}>
-                      <span className="text-neutral-400 mr-1">{i + 1}.</span>
-                      {substituteVars(q.questionText, patient)}
-                      {q.isRequired && <span className="text-red-400 ml-0.5">*</span>}
-                      <span className="ml-1 text-neutral-400">({q.questionType === "text" ? "curto" : q.questionType === "textarea" ? "longo" : q.questionType === "scale" ? "escala" : "múltipla"})</span>
-                    </div>
-                  ))}
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {pendingQuestions.map((q) => (
+                  <QuestionEditor
+                    key={q._id}
+                    question={q}
+                    onUpdate={(field, value) => updatePendingQuestion(q._id, field, value)}
+                    onRemove={() => removePendingQuestion(q._id)}
+                  />
+                ))}
               </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={addPendingQuestion}
+                data-testid="btn-add-inline-question"
+              >
+                <Plus className="h-3 w-3 mr-1" />
+                Adicionar pergunta
+              </Button>
             </div>
           )}
 
@@ -749,7 +860,9 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
 
           {/* Custom message */}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-neutral-600">Mensagem personalizada (opcional)</label>
+            <label className="text-xs font-medium text-neutral-600">
+              Mensagem personalizada (opcional)
+            </label>
             <Textarea
               data-testid="textarea-custom-message"
               rows={3}
@@ -854,7 +967,7 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
                     size="sm"
                     className="h-7 text-xs"
                     onClick={() => {
-                      setSelectedTemplateId(d.templateId ? String(d.templateId) : "");
+                      if (d.templateId) setSelectedTemplateId(String(d.templateId));
                       setSubject(d.subject);
                     }}
                     data-testid={`btn-reenviar-${d.id}`}
@@ -883,11 +996,15 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
 
       <TemplateModal
         open={showTemplateModal}
-        onClose={() => setShowTemplateModal(false)}
-        onCreated={(t) => {
+        onClose={() => {
+          setShowTemplateModal(false);
+          setEditingTemplate(undefined);
+        }}
+        onSaved={(t) => {
           setSelectedTemplateId(String(t.id));
           setSubject(`${t.title} — ${firstName}`);
         }}
+        existing={editingTemplate}
       />
 
       {responsesDispatchId !== null && (
