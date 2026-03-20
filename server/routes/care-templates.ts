@@ -178,15 +178,11 @@ router.post("/:id/questions", async (req, res) => {
     const userId = (req.user as any).id;
     const templateId = parseInt(req.params.id);
 
+    // Only own templates can be mutated (not system defaults with psychologistId IS NULL)
     const [template] = await db
       .select()
       .from(careTemplates)
-      .where(
-        and(
-          eq(careTemplates.id, templateId),
-          or(eq(careTemplates.psychologistId, userId), isNull(careTemplates.psychologistId))
-        )
-      );
+      .where(and(eq(careTemplates.id, templateId), eq(careTemplates.psychologistId, userId)));
     if (!template) return res.status(404).json({ message: "Template não encontrado" });
 
     const data = insertCareTemplateQuestionSchema.parse({ ...req.body, templateId });
@@ -206,15 +202,11 @@ router.patch("/:id/questions/:qId", async (req, res) => {
     const templateId = parseInt(req.params.id);
     const qId = parseInt(req.params.qId);
 
+    // Only own templates can be mutated (not system defaults with psychologistId IS NULL)
     const [template] = await db
       .select()
       .from(careTemplates)
-      .where(
-        and(
-          eq(careTemplates.id, templateId),
-          or(eq(careTemplates.psychologistId, userId), isNull(careTemplates.psychologistId))
-        )
-      );
+      .where(and(eq(careTemplates.id, templateId), eq(careTemplates.psychologistId, userId)));
     if (!template) return res.status(404).json({ message: "Template não encontrado" });
 
     const data = insertCareTemplateQuestionSchema.partial().parse(req.body);
@@ -240,15 +232,11 @@ router.delete("/:id/questions/:qId", async (req, res) => {
     const templateId = parseInt(req.params.id);
     const qId = parseInt(req.params.qId);
 
+    // Only own templates can be mutated (not system defaults with psychologistId IS NULL)
     const [template] = await db
       .select()
       .from(careTemplates)
-      .where(
-        and(
-          eq(careTemplates.id, templateId),
-          or(eq(careTemplates.psychologistId, userId), isNull(careTemplates.psychologistId))
-        )
-      );
+      .where(and(eq(careTemplates.id, templateId), eq(careTemplates.psychologistId, userId)));
     if (!template) return res.status(404).json({ message: "Template não encontrado" });
 
     await db

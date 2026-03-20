@@ -135,12 +135,25 @@ router.post("/respond/:token", async (req, res) => {
     const parsed = answerSchema.parse(req.body);
     const { answers } = parsed;
 
-    // Fetch questions to validate required ones
+    // Fetch questions to validate required ones and ownership
     const questions = await db
       .select()
       .from(careDispatchQuestions)
       .where(eq(careDispatchQuestions.dispatchId, dispatch.id));
 
+    const validQuestionIds = new Set(questions.map((q) => q.id));
+
+    // Validate all submitted question IDs belong to this dispatch (prevent IDOR)
+    for (const a of answers) {
+      if (!validQuestionIds.has(a.dispatch_question_id)) {
+        return res.status(422).json({
+          error: "invalid_question",
+          message: `ID de pergunta inválido: ${a.dispatch_question_id}`,
+        });
+      }
+    }
+
+    // Validate required questions are answered
     for (const q of questions.filter((q) => q.isRequired)) {
       const answer = answers.find((a) => a.dispatch_question_id === q.id);
       const hasValue =
@@ -155,7 +168,7 @@ router.post("/respond/:token", async (req, res) => {
       }
     }
 
-    // Save responses
+    // Save responses (only for valid question IDs already validated above)
     if (answers.length > 0) {
       await db.insert(careResponses).values(
         answers.map((a) => ({
