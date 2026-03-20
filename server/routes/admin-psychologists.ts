@@ -95,7 +95,7 @@ router.get("/", async (req, res) => {
         return {
           ...psych,
           user: safeUser,
-          age: calcAge((user as any).birthDate),
+          age: calcAge(user.birthDate),
           specializations: specs,
           activePatientsCount: Number(activePatientsCount[0]?.count ?? 0),
           sessionsCount: Number(sessionsCount[0]?.count ?? 0),
@@ -137,7 +137,7 @@ router.get("/:id", async (req, res) => {
     return res.json({
       ...psych,
       user: safeUser,
-      age: calcAge((user as any).birthDate),
+      age: calcAge(user.birthDate),
       specializations: specs,
       activePatientsCount: Number(activePatientsCount[0]?.count ?? 0),
       sessionsCount: Number(sessionsCount[0]?.count ?? 0),
@@ -186,7 +186,7 @@ router.patch("/:id", async (req, res) => {
     return res.json({
       ...updatedPsych,
       user: safeUser,
-      age: calcAge((updatedUser as any).birthDate),
+      age: calcAge(updatedUser.birthDate),
       specializations: specs,
     });
   } catch (e) {

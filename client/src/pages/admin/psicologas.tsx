@@ -3,15 +3,13 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Search,
   Users,
-  CalendarDays,
-  Lock,
-  Stethoscope,
-  Clock,
+  Calendar,
   CheckCircle,
   XCircle,
   Edit,
-  ToggleLeft,
-  ToggleRight,
+  Lock,
+  X,
+  Check,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
@@ -28,12 +26,20 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import Sidebar from "@/components/sidebar";
 import SpecializationChipSelector from "@/components/specialization-chip-selector";
 import { cn } from "@/lib/utils";
+
+interface Specialization { id: number; name: string; category: string | null }
 
 interface Psychologist {
   id: number;
@@ -52,7 +58,7 @@ interface Psychologist {
     status: string;
   };
   age: number | null;
-  specializations: { id: number; name: string; category: string | null }[];
+  specializations: Specialization[];
   activePatientsCount: number;
   sessionsCount: number;
   monthsAtClinic: number | null;
@@ -69,7 +75,24 @@ interface EditFormState {
   status: string;
 }
 
-function PsychCard({ p, onEdit }: { p: Psychologist; onEdit: () => void }) {
+function formatDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return "—";
+  const [year, month, day] = dateStr.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+function monthsText(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const start = new Date(year, month - 1, day);
+  const now = new Date();
+  const totalMonths = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+  if (totalMonths < 12) return `${totalMonths}m`;
+  const years = Math.floor(totalMonths / 12);
+  return `${years}a${totalMonths % 12 > 0 ? ` ${totalMonths % 12}m` : ""}`;
+}
+
+function PsychCard({ p, onClick }: { p: Psychologist; onClick: () => void }) {
   const isActive = p.user.status === "active";
   return (
     <div
@@ -77,7 +100,7 @@ function PsychCard({ p, onEdit }: { p: Psychologist; onEdit: () => void }) {
         "bg-white rounded-xl border border-neutral-light shadow-sm hover:shadow-md transition-shadow p-4 flex flex-col gap-3 cursor-pointer",
         !isActive && "opacity-60"
       )}
-      onClick={onEdit}
+      onClick={onClick}
       data-testid={`card-psychologist-${p.id}`}
     >
       <div className="flex items-start gap-3">
@@ -140,7 +163,7 @@ function PsychCard({ p, onEdit }: { p: Psychologist; onEdit: () => void }) {
         </div>
         <div className="text-center">
           <p className="text-base font-bold text-neutral-darkest">
-            {p.monthsAtClinic !== null ? `${p.monthsAtClinic}m` : "—"}
+            {p.monthsAtClinic !== null ? monthsText(p.startedAtClinic) : "—"}
           </p>
           <p className="text-[10px] text-neutral-dark leading-tight">Na Clínica</p>
         </div>
@@ -152,8 +175,12 @@ function PsychCard({ p, onEdit }: { p: Psychologist; onEdit: () => void }) {
 export default function AdminPsicologasPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [specFilter, setSpecFilter] = useState<number | "all">("all");
+
+  const [viewingPsych, setViewingPsych] = useState<Psychologist | null>(null);
   const [editingPsych, setEditingPsych] = useState<Psychologist | null>(null);
   const [editForm, setEditForm] = useState<EditFormState | null>(null);
   const [editSpecIds, setEditSpecIds] = useState<number[]>([]);
@@ -162,7 +189,15 @@ export default function AdminPsicologasPage() {
     queryKey: ["/api/admin/psychologists"],
   });
 
+  const { data: areasGrouped = {} } = useQuery<Record<string, { id: number; name: string }[]>>({
+    queryKey: ["/api/specialization-areas"],
+  });
+  const allAreaOptions = Object.values(areasGrouped).flat();
+
+  const openDetails = (p: Psychologist) => setViewingPsych(p);
+
   const openEdit = (p: Psychologist) => {
+    setViewingPsych(null);
     setEditingPsych(p);
     setEditForm({
       fullName: p.user.fullName,
@@ -196,9 +231,8 @@ export default function AdminPsicologasPage() {
   const toggleActiveMutation = useMutation({
     mutationFn: (id: number) =>
       apiRequest("POST", `/api/admin/psychologists/${id}/toggle-active`).then((r) => r.json()),
-    onSuccess: (data, id) => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/psychologists"] });
-      if (editForm) setEditForm((f) => (f ? { ...f, status: data.status } : f));
       toast({ title: data.isActive ? "Psicóloga ativada." : "Psicóloga desativada." });
     },
     onError: () => toast({ title: "Erro ao alterar status", variant: "destructive" }),
@@ -216,7 +250,11 @@ export default function AdminPsicologasPage() {
       (statusFilter === "active" && p.user.status === "active") ||
       (statusFilter === "inactive" && p.user.status !== "active");
 
-    return matchSearch && matchStatus;
+    const matchSpec =
+      specFilter === "all" ||
+      p.specializations.some((s) => s.id === specFilter);
+
+    return matchSearch && matchStatus && matchSpec;
   });
 
   return (
@@ -232,8 +270,8 @@ export default function AdminPsicologasPage() {
         </div>
 
         {/* Filters */}
-        <div className="flex flex-col sm:flex-row gap-3 mb-6">
-          <div className="relative flex-1 max-w-sm">
+        <div className="flex flex-wrap gap-3 mb-6">
+          <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-dark" />
             <Input
               placeholder="Buscar por nome, e-mail ou CRP..."
@@ -248,12 +286,28 @@ export default function AdminPsicologasPage() {
             onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}
           >
             <SelectTrigger className="w-36" data-testid="select-status-filter">
-              <SelectValue />
+              <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas</SelectItem>
               <SelectItem value="active">Ativas</SelectItem>
               <SelectItem value="inactive">Inativas</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={specFilter === "all" ? "all" : String(specFilter)}
+            onValueChange={(v) => setSpecFilter(v === "all" ? "all" : parseInt(v))}
+          >
+            <SelectTrigger className="w-48" data-testid="select-spec-filter">
+              <SelectValue placeholder="Área de Atuação" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas as áreas</SelectItem>
+              {allAreaOptions.map((a) => (
+                <SelectItem key={a.id} value={String(a.id)}>
+                  {a.name}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -283,12 +337,130 @@ export default function AdminPsicologasPage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {filtered.map((p) => (
-              <PsychCard key={p.id} p={p} onEdit={() => openEdit(p)} />
+              <PsychCard key={p.id} p={p} onClick={() => openDetails(p)} />
             ))}
           </div>
         )}
 
-        {/* Edit Modal */}
+        {/* ── Ver Detalhes Modal (read-only) ─────────────────────── */}
+        <Dialog open={!!viewingPsych && !editingPsych} onOpenChange={(open) => !open && setViewingPsych(null)}>
+          <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-3">
+                <Avatar className="w-11 h-11 border border-primary/30">
+                  <AvatarImage src={viewingPsych?.user.profileImage || undefined} />
+                  <AvatarFallback className="bg-primary text-white font-bold text-sm">
+                    {viewingPsych?.user.fullName.charAt(0)}
+                  </AvatarFallback>
+                </Avatar>
+                <div>
+                  <p className="text-base font-semibold leading-tight">{viewingPsych?.user.fullName}</p>
+                  {viewingPsych?.crpNumber && (
+                    <p className="text-xs text-neutral-dark font-normal">CRP {viewingPsych.crpNumber}</p>
+                  )}
+                </div>
+              </DialogTitle>
+            </DialogHeader>
+
+            {viewingPsych && (
+              <div className="space-y-4 py-1">
+                {/* Status + Ativa desde */}
+                <div className="flex flex-wrap gap-2">
+                  <Badge
+                    className={cn(
+                      "text-xs",
+                      viewingPsych.user.status === "active"
+                        ? "bg-green-50 text-green-700 border border-green-200"
+                        : "bg-neutral-lightest text-neutral-dark border border-neutral-light"
+                    )}
+                  >
+                    {viewingPsych.user.status === "active" ? "Ativa" : "Inativa"}
+                  </Badge>
+                  {viewingPsych.startedAtClinic && (
+                    <Badge className="text-xs bg-primary/10 text-primary border border-primary/20 flex items-center gap-1">
+                      <Calendar className="w-3 h-3" />
+                      Ativa desde {formatDate(viewingPsych.startedAtClinic)}
+                    </Badge>
+                  )}
+                </div>
+
+                {/* Stats */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-neutral-lightest rounded-lg border border-neutral-light p-3 text-center">
+                    <p className="text-xl font-bold text-neutral-darkest">{viewingPsych.activePatientsCount}</p>
+                    <p className="text-[11px] text-neutral-dark">Pacientes Ativos</p>
+                  </div>
+                  <div className="bg-neutral-lightest rounded-lg border border-neutral-light p-3 text-center">
+                    <p className="text-xl font-bold text-neutral-darkest">{viewingPsych.sessionsCount}</p>
+                    <p className="text-[11px] text-neutral-dark">Sessões Totais</p>
+                  </div>
+                  <div className="bg-neutral-lightest rounded-lg border border-neutral-light p-3 text-center">
+                    <p className="text-xl font-bold text-neutral-darkest">
+                      {viewingPsych.monthsAtClinic !== null ? monthsText(viewingPsych.startedAtClinic) : "—"}
+                    </p>
+                    <p className="text-[11px] text-neutral-dark">Na Clínica</p>
+                  </div>
+                </div>
+
+                {/* Info grid */}
+                <dl className="grid grid-cols-2 gap-x-8 gap-y-3">
+                  <div>
+                    <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark">E-mail</dt>
+                    <dd className="text-sm text-neutral-darkest mt-0.5">{viewingPsych.user.email}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark">Telefone</dt>
+                    <dd className="text-sm text-neutral-darkest mt-0.5">{viewingPsych.phone || "—"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark">Nascimento</dt>
+                    <dd className="text-sm text-neutral-darkest mt-0.5">
+                      {formatDate(viewingPsych.user.birthDate)}
+                      {viewingPsych.age ? ` (${viewingPsych.age} anos)` : ""}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark">CRP</dt>
+                    <dd className="text-sm text-neutral-darkest mt-0.5">{viewingPsych.crpNumber || "—"}</dd>
+                  </div>
+                </dl>
+
+                {/* Bio */}
+                {viewingPsych.bio && (
+                  <div>
+                    <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark mb-1">Sobre</dt>
+                    <p className="text-sm text-neutral-darkest whitespace-pre-wrap">{viewingPsych.bio}</p>
+                  </div>
+                )}
+
+                {/* Specializations (read-only) */}
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark mb-2">Áreas de Atuação</p>
+                  <SpecializationChipSelector
+                    selectedIds={viewingPsych.specializations.map((s) => s.id)}
+                    onChange={() => {}}
+                    readonly
+                  />
+                </div>
+              </div>
+            )}
+
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setViewingPsych(null)} data-testid="button-close-details">
+                Fechar
+              </Button>
+              <Button
+                onClick={() => viewingPsych && openEdit(viewingPsych)}
+                data-testid="button-open-edit"
+              >
+                <Edit className="w-4 h-4 mr-1.5" />
+                Editar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ── Editar Modal ─────────────────────────────────────────── */}
         <Dialog open={!!editingPsych} onOpenChange={(open) => !open && setEditingPsych(null)}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
@@ -300,7 +472,7 @@ export default function AdminPsicologasPage() {
                   </AvatarFallback>
                 </Avatar>
                 <div>
-                  <p className="text-base font-semibold">{editingPsych?.user.fullName}</p>
+                  <p className="text-base font-semibold">Editar: {editingPsych?.user.fullName}</p>
                   {editingPsych?.crpNumber && (
                     <p className="text-xs text-neutral-dark font-normal">CRP {editingPsych.crpNumber}</p>
                   )}
@@ -322,13 +494,13 @@ export default function AdminPsicologasPage() {
                   </div>
                   <div className="bg-neutral-lightest rounded-lg border border-neutral-light p-3 text-center">
                     <p className="text-lg font-bold text-neutral-darkest">
-                      {editingPsych.monthsAtClinic !== null ? `${editingPsych.monthsAtClinic}m` : "—"}
+                      {editingPsych.monthsAtClinic !== null ? monthsText(editingPsych.startedAtClinic) : "—"}
                     </p>
                     <p className="text-[11px] text-neutral-dark">Na Clínica</p>
                   </div>
                 </div>
 
-                {/* Fields Grid */}
+                {/* Fields */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <Label className="text-xs font-semibold text-neutral-dark">Nome Completo</Label>
@@ -346,10 +518,10 @@ export default function AdminPsicologasPage() {
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <Lock className="w-3 h-3 text-neutral-dark/60 cursor-default" />
+                            <Lock className="w-3 h-3 text-primary/70 cursor-default" />
                           </TooltipTrigger>
                           <TooltipContent side="top" className="max-w-[200px] text-xs">
-                            Editável apenas pelo administrador.
+                            Este campo só pode ser editado pelo administrador.
                           </TooltipContent>
                         </Tooltip>
                       </TooltipProvider>
@@ -363,7 +535,7 @@ export default function AdminPsicologasPage() {
                   </div>
 
                   <div>
-                    <Label className="text-xs font-semibold text-neutral-dark">Telefone / WhatsApp</Label>
+                    <Label className="text-xs font-semibold text-neutral-dark">Telefone</Label>
                     <Input
                       value={editForm.phone}
                       onChange={(e) => setEditForm((f) => f ? { ...f, phone: e.target.value } : f)}
@@ -395,7 +567,6 @@ export default function AdminPsicologasPage() {
                     />
                   </div>
 
-                  {/* Admin-only: startedAtClinic */}
                   <div>
                     <Label className="text-xs font-semibold text-neutral-dark flex items-center gap-1">
                       Entrada na Clínica
@@ -444,14 +615,14 @@ export default function AdminPsicologasPage() {
                 {/* Admin-only: Status toggle */}
                 <div className="border-t border-neutral-light pt-4">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Lock className="w-4 h-4 text-primary/70" />
+                    <div className="flex items-center gap-2">
+                      <Lock className="w-4 h-4 text-primary/70 flex-shrink-0" />
                       <div>
                         <p className="text-sm font-semibold text-neutral-darkest">Status da Psicóloga</p>
                         <p className="text-xs text-neutral-dark">
                           {editingPsych.user.status === "active"
-                            ? "A psicóloga está ativa no sistema."
-                            : "A psicóloga está inativa no sistema."}
+                            ? "Psicóloga está ativa no sistema."
+                            : "Psicóloga está inativa no sistema."}
                         </p>
                       </div>
                     </div>

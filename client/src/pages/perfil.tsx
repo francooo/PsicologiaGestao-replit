@@ -1,9 +1,6 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
-import { Camera, Lock, Save, Users, CalendarDays, Stethoscope, Clock } from "lucide-react";
+import { Camera, Lock, Save, Edit2, Check, X, Calendar } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,21 +8,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import Sidebar from "@/components/sidebar";
 import SpecializationChipSelector from "@/components/specialization-chip-selector";
-
-const profileSchema = z.object({
-  fullName: z.string().min(2, "Nome deve ter pelo menos 2 caracteres"),
-  phone: z.string().optional(),
-  birthDate: z.string().optional(),
-  crpNumber: z.string().optional(),
-  bio: z.string().optional(),
-});
-
-type ProfileFormValues = z.infer<typeof profileSchema>;
 
 interface ProfileData {
   id: number;
@@ -46,65 +34,96 @@ interface ProfileData {
   specializations: { id: number; name: string; category: string | null }[];
 }
 
-function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string | number }) {
-  return (
-    <div className="flex flex-col items-center bg-white rounded-xl border border-neutral-light p-4 gap-1">
-      <div className="text-primary mb-1">{icon}</div>
-      <span className="text-xl font-bold text-neutral-darkest">{value}</span>
-      <span className="text-xs text-neutral-dark text-center">{label}</span>
-    </div>
-  );
+function formatDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return "—";
+  const [year, month, day] = dateStr.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+function monthsText(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const start = new Date(year, month - 1, day);
+  const now = new Date();
+  const totalMonths = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+  if (totalMonths < 12) return `${totalMonths} meses na clínica`;
+  const years = Math.floor(totalMonths / 12);
+  const rem = totalMonths % 12;
+  return rem > 0 ? `${years} ano${years > 1 ? "s" : ""} e ${rem} meses na clínica` : `${years} ano${years > 1 ? "s" : ""} na clínica`;
 }
 
 export default function PerfilPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedSpecIds, setSelectedSpecIds] = useState<number[]>([]);
-  const [specsInitialized, setSpecsInitialized] = useState(false);
+
+  // Per-section edit states
+  const [editingInfo, setEditingInfo] = useState(false);
+  const [editingBio, setEditingBio] = useState(false);
+  const [editingSpecs, setEditingSpecs] = useState(false);
+
+  // Draft values for each section
+  const [draftInfo, setDraftInfo] = useState({ fullName: "", phone: "", birthDate: "", crpNumber: "" });
+  const [draftBio, setDraftBio] = useState("");
+  const [draftSpecIds, setDraftSpecIds] = useState<number[]>([]);
 
   const { data: profile, isLoading } = useQuery<ProfileData>({
     queryKey: ["/api/profile"],
-    select: (data) => {
-      if (!specsInitialized && data.specializations) {
-        setSelectedSpecIds(data.specializations.map((s) => s.id));
-        setSpecsInitialized(true);
-      }
-      return data;
-    },
   });
 
-  const form = useForm<ProfileFormValues>({
-    resolver: zodResolver(profileSchema),
-    defaultValues: {
-      fullName: "",
-      phone: "",
-      birthDate: "",
-      crpNumber: "",
-      bio: "",
-    },
-    values: profile
-      ? {
-          fullName: profile.fullName,
-          phone: profile.psychologist?.phone || "",
-          birthDate: profile.birthDate || "",
-          crpNumber: profile.psychologist?.crpNumber || "",
-          bio: profile.psychologist?.bio || "",
-        }
-      : undefined,
-  });
+  const openEditInfo = () => {
+    if (!profile) return;
+    setDraftInfo({
+      fullName: profile.fullName,
+      phone: profile.psychologist?.phone || "",
+      birthDate: profile.birthDate || "",
+      crpNumber: profile.psychologist?.crpNumber || "",
+    });
+    setEditingInfo(true);
+  };
 
-  const saveMutation = useMutation({
-    mutationFn: async (values: ProfileFormValues) => {
-      await apiRequest("PATCH", "/api/profile", values);
-      await apiRequest("PUT", "/api/profile/specializations", { specializationIds: selectedSpecIds });
-    },
+  const openEditBio = () => {
+    if (!profile) return;
+    setDraftBio(profile.psychologist?.bio || "");
+    setEditingBio(true);
+  };
+
+  const openEditSpecs = () => {
+    if (!profile) return;
+    setDraftSpecIds(profile.specializations.map((s) => s.id));
+    setEditingSpecs(true);
+  };
+
+  const savInfoMutation = useMutation({
+    mutationFn: () => apiRequest("PATCH", "/api/profile", draftInfo),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/profile"] });
       queryClient.invalidateQueries({ queryKey: ["/api/user"] });
-      toast({ title: "Perfil atualizado com sucesso!" });
+      setEditingInfo(false);
+      toast({ title: "Informações atualizadas!" });
     },
-    onError: () => toast({ title: "Erro ao salvar perfil", variant: "destructive" }),
+    onError: () => toast({ title: "Erro ao salvar informações", variant: "destructive" }),
+  });
+
+  const saveBioMutation = useMutation({
+    mutationFn: () => apiRequest("PATCH", "/api/profile", { bio: draftBio }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/profile"] });
+      setEditingBio(false);
+      toast({ title: "Bio atualizada!" });
+    },
+    onError: () => toast({ title: "Erro ao salvar bio", variant: "destructive" }),
+  });
+
+  const saveSpecsMutation = useMutation({
+    mutationFn: () =>
+      apiRequest("PUT", "/api/profile/specializations", { specializationIds: draftSpecIds }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/profile"] });
+      setEditingSpecs(false);
+      toast({ title: "Áreas de atuação atualizadas!" });
+    },
+    onError: () => toast({ title: "Erro ao salvar áreas", variant: "destructive" }),
   });
 
   const avatarMutation = useMutation({
@@ -121,7 +140,7 @@ export default function PerfilPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/profile"] });
       queryClient.invalidateQueries({ queryKey: ["/api/user"] });
-      toast({ title: "Foto atualizada com sucesso!" });
+      toast({ title: "Foto atualizada!" });
     },
     onError: (e: Error) => toast({ title: e.message || "Erro ao enviar foto", variant: "destructive" }),
   });
@@ -131,12 +150,10 @@ export default function PerfilPage() {
     if (file) avatarMutation.mutate(file);
   };
 
-  const onSubmit = (values: ProfileFormValues) => saveMutation.mutate(values);
-
   return (
     <div className="flex min-h-screen bg-neutral-lightest">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-6 max-w-5xl mx-auto">
+      <main className="flex-1 md:ml-64 p-6 max-w-3xl mx-auto">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-neutral-darkest">Meu Perfil Profissional</h1>
           <p className="text-sm text-neutral-dark mt-1">Gerencie suas informações pessoais e áreas de atuação.</p>
@@ -145,14 +162,15 @@ export default function PerfilPage() {
         {isLoading ? (
           <div className="space-y-4">
             <Skeleton className="h-40 rounded-2xl" />
-            <Skeleton className="h-60 rounded-2xl" />
+            <Skeleton className="h-40 rounded-2xl" />
+            <Skeleton className="h-40 rounded-2xl" />
           </div>
         ) : (
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-            {/* Avatar + Info Card */}
+          <div className="space-y-5">
+            {/* ── Header: Avatar + Identity ───────────────────────────── */}
             <Card className="border-neutral-light shadow-sm">
               <CardContent className="pt-6 pb-6">
-                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
+                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5">
                   {/* Avatar */}
                   <div className="relative flex-shrink-0">
                     <Avatar className="w-24 h-24 border-2 border-primary/30">
@@ -180,157 +198,377 @@ export default function PerfilPage() {
                     />
                   </div>
 
-                  {/* Name + email + status */}
-                  <div className="flex-1 space-y-4 w-full">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor="fullName" className="text-xs font-semibold text-neutral-dark">
-                          Nome Completo
-                        </Label>
-                        <Input
-                          id="fullName"
-                          {...form.register("fullName")}
-                          className="mt-1"
-                          data-testid="input-fullName"
-                        />
-                        {form.formState.errors.fullName && (
-                          <p className="text-xs text-red-500 mt-1">{form.formState.errors.fullName.message}</p>
-                        )}
-                      </div>
+                  {/* Identity */}
+                  <div className="flex-1">
+                    <h2 className="text-xl font-bold text-neutral-darkest leading-tight">
+                      {profile?.fullName}
+                    </h2>
+                    {profile?.psychologist?.crpNumber && (
+                      <p className="text-sm text-neutral-dark mt-0.5">CRP {profile.psychologist.crpNumber}</p>
+                    )}
+                    <p className="text-sm text-neutral-dark">{profile?.email}</p>
 
-                      <div>
-                        <Label className="text-xs font-semibold text-neutral-dark flex items-center gap-1">
-                          E-mail
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Lock className="w-3 h-3 text-neutral-dark/60 cursor-default" />
-                              </TooltipTrigger>
-                              <TooltipContent side="top" className="max-w-[200px] text-xs">
-                                Este campo só pode ser editado pelo administrador.
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        </Label>
-                        <Input
-                          value={profile?.email || ""}
-                          readOnly
-                          disabled
-                          className="mt-1 bg-neutral-lightest text-neutral-dark"
-                          data-testid="input-email-readonly"
-                        />
-                      </div>
-
-                      <div>
-                        <Label htmlFor="phone" className="text-xs font-semibold text-neutral-dark">
-                          Telefone / WhatsApp
-                        </Label>
-                        <Input
-                          id="phone"
-                          {...form.register("phone")}
-                          placeholder="(11) 91234-5678"
-                          className="mt-1"
-                          data-testid="input-phone"
-                        />
-                      </div>
-
-                      <div>
-                        <Label htmlFor="birthDate" className="text-xs font-semibold text-neutral-dark">
-                          Data de Nascimento
-                        </Label>
-                        <Input
-                          id="birthDate"
-                          type="date"
-                          {...form.register("birthDate")}
-                          className="mt-1"
-                          data-testid="input-birthDate"
-                        />
-                      </div>
-
-                      <div>
-                        <Label htmlFor="crpNumber" className="text-xs font-semibold text-neutral-dark">
-                          Número do CRP
-                        </Label>
-                        <Input
-                          id="crpNumber"
-                          {...form.register("crpNumber")}
-                          placeholder="06/12345"
-                          className="mt-1"
-                          data-testid="input-crpNumber"
-                        />
-                      </div>
-
-                      <div>
-                        <Label className="text-xs font-semibold text-neutral-dark flex items-center gap-1">
-                          Data de Entrada na Clínica
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Lock className="w-3 h-3 text-neutral-dark/60 cursor-default" />
-                              </TooltipTrigger>
-                              <TooltipContent side="top" className="max-w-[200px] text-xs">
-                                Este campo só pode ser editado pelo administrador.
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        </Label>
-                        <Input
-                          value={profile?.psychologist?.startedAtClinic || ""}
-                          readOnly
-                          disabled
-                          type="date"
-                          className="mt-1 bg-neutral-lightest text-neutral-dark"
-                          data-testid="input-startedAtClinic-readonly"
-                        />
-                      </div>
+                    <div className="flex flex-wrap items-center gap-2 mt-3">
+                      {profile?.age && (
+                        <Badge variant="outline" className="text-xs border-neutral-light text-neutral-dark">
+                          {profile.age} anos
+                        </Badge>
+                      )}
+                      {profile?.psychologist?.startedAtClinic && (
+                        <Badge className="text-xs bg-primary/10 text-primary border border-primary/20 flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          Ativa desde {formatDate(profile.psychologist.startedAtClinic)}
+                          {" · "}
+                          {monthsText(profile.psychologist.startedAtClinic)}
+                        </Badge>
+                      )}
+                      <Badge
+                        className={
+                          profile?.status === "active"
+                            ? "text-xs bg-green-50 text-green-700 border border-green-200"
+                            : "text-xs bg-neutral-lightest text-neutral-dark border border-neutral-light"
+                        }
+                      >
+                        {profile?.status === "active" ? "Ativa" : "Inativa"}
+                      </Badge>
                     </div>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Bio */}
+            {/* ── Section 1: Informações Profissionais ─────────────────── */}
             <Card className="border-neutral-light shadow-sm">
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold text-neutral-darkest">Sobre mim</CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-semibold text-neutral-darkest">
+                    Informações Profissionais
+                  </CardTitle>
+                  {!editingInfo ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs text-primary hover:text-primary/80 gap-1"
+                      onClick={openEditInfo}
+                      data-testid="button-edit-info"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      Editar
+                    </Button>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => setEditingInfo(false)}
+                        data-testid="button-cancel-info"
+                      >
+                        <X className="w-3.5 h-3.5 mr-1" />
+                        Cancelar
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-7 text-xs gap-1"
+                        disabled={savInfoMutation.isPending}
+                        onClick={() => savInfoMutation.mutate()}
+                        data-testid="button-save-info"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        {savInfoMutation.isPending ? "Salvando..." : "Salvar"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
-                <Textarea
-                  {...form.register("bio")}
-                  placeholder="Fale sobre sua trajetória, abordagem terapêutica e o que motiva seu trabalho..."
-                  rows={4}
-                  className="resize-none text-sm"
-                  data-testid="textarea-bio"
-                />
+                {!editingInfo ? (
+                  <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark">Nome</dt>
+                      <dd className="text-sm text-neutral-darkest mt-0.5">{profile?.fullName || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark">Telefone</dt>
+                      <dd className="text-sm text-neutral-darkest mt-0.5">{profile?.psychologist?.phone || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark">Nascimento</dt>
+                      <dd className="text-sm text-neutral-darkest mt-0.5">{formatDate(profile?.birthDate)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark">CRP</dt>
+                      <dd className="text-sm text-neutral-darkest mt-0.5">{profile?.psychologist?.crpNumber || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark flex items-center gap-1">
+                        E-mail
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Lock className="w-3 h-3 text-neutral-dark/60 cursor-default" />
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-[200px] text-xs">
+                              Este campo só pode ser editado pelo administrador.
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </dt>
+                      <dd className="text-sm text-neutral-darkest mt-0.5">{profile?.email || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark flex items-center gap-1">
+                        Entrada na Clínica
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Lock className="w-3 h-3 text-neutral-dark/60 cursor-default" />
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-[200px] text-xs">
+                              Este campo só pode ser editado pelo administrador.
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </dt>
+                      <dd className="text-sm text-neutral-darkest mt-0.5">
+                        {formatDate(profile?.psychologist?.startedAtClinic)}
+                      </dd>
+                    </div>
+                  </dl>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-xs font-semibold text-neutral-dark">Nome Completo</Label>
+                      <Input
+                        value={draftInfo.fullName}
+                        onChange={(e) => setDraftInfo((d) => ({ ...d, fullName: e.target.value }))}
+                        className="mt-1"
+                        data-testid="input-fullName"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs font-semibold text-neutral-dark">Telefone / WhatsApp</Label>
+                      <Input
+                        value={draftInfo.phone}
+                        onChange={(e) => setDraftInfo((d) => ({ ...d, phone: e.target.value }))}
+                        placeholder="(11) 91234-5678"
+                        className="mt-1"
+                        data-testid="input-phone"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs font-semibold text-neutral-dark">Data de Nascimento</Label>
+                      <Input
+                        type="date"
+                        value={draftInfo.birthDate}
+                        onChange={(e) => setDraftInfo((d) => ({ ...d, birthDate: e.target.value }))}
+                        className="mt-1"
+                        data-testid="input-birthDate"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs font-semibold text-neutral-dark">Número do CRP</Label>
+                      <Input
+                        value={draftInfo.crpNumber}
+                        onChange={(e) => setDraftInfo((d) => ({ ...d, crpNumber: e.target.value }))}
+                        placeholder="06/12345"
+                        className="mt-1"
+                        data-testid="input-crpNumber"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs font-semibold text-neutral-dark flex items-center gap-1">
+                        E-mail
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Lock className="w-3 h-3 text-neutral-dark/60 cursor-default" />
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-[200px] text-xs">
+                              Este campo só pode ser editado pelo administrador.
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </Label>
+                      <Input
+                        value={profile?.email || ""}
+                        readOnly
+                        disabled
+                        className="mt-1 bg-neutral-lightest text-neutral-dark"
+                        data-testid="input-email-readonly"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs font-semibold text-neutral-dark flex items-center gap-1">
+                        Entrada na Clínica
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Lock className="w-3 h-3 text-neutral-dark/60 cursor-default" />
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-[200px] text-xs">
+                              Este campo só pode ser editado pelo administrador.
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      </Label>
+                      <Input
+                        value={profile?.psychologist?.startedAtClinic || ""}
+                        readOnly
+                        disabled
+                        type="date"
+                        className="mt-1 bg-neutral-lightest text-neutral-dark"
+                        data-testid="input-startedAtClinic-readonly"
+                      />
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
-            {/* Specializations */}
+            {/* ── Section 2: Bio ───────────────────────────────────────── */}
             <Card className="border-neutral-light shadow-sm">
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-semibold text-neutral-darkest">Áreas de Atuação</CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-semibold text-neutral-darkest">Sobre mim</CardTitle>
+                  {!editingBio ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs text-primary hover:text-primary/80 gap-1"
+                      onClick={openEditBio}
+                      data-testid="button-edit-bio"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      Editar
+                    </Button>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => setEditingBio(false)}
+                        data-testid="button-cancel-bio"
+                      >
+                        <X className="w-3.5 h-3.5 mr-1" />
+                        Cancelar
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-7 text-xs gap-1"
+                        disabled={saveBioMutation.isPending}
+                        onClick={() => saveBioMutation.mutate()}
+                        data-testid="button-save-bio"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        {saveBioMutation.isPending ? "Salvando..." : "Salvar"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
-                <SpecializationChipSelector
-                  selectedIds={selectedSpecIds}
-                  onChange={setSelectedSpecIds}
-                />
+                {!editingBio ? (
+                  <p className="text-sm text-neutral-darkest whitespace-pre-wrap">
+                    {profile?.psychologist?.bio || (
+                      <span className="text-neutral-dark italic">Nenhuma bio cadastrada. Clique em Editar para adicionar.</span>
+                    )}
+                  </p>
+                ) : (
+                  <Textarea
+                    value={draftBio}
+                    onChange={(e) => setDraftBio(e.target.value)}
+                    placeholder="Fale sobre sua trajetória, abordagem terapêutica e o que motiva seu trabalho..."
+                    rows={5}
+                    className="resize-none text-sm"
+                    data-testid="textarea-bio"
+                    autoFocus
+                  />
+                )}
               </CardContent>
             </Card>
 
-            {/* Save Button */}
-            <div className="flex justify-end">
-              <Button
-                type="submit"
-                disabled={saveMutation.isPending}
-                className="gap-2"
-                data-testid="button-save-profile"
-              >
-                <Save className="w-4 h-4" />
-                {saveMutation.isPending ? "Salvando..." : "Salvar Perfil"}
-              </Button>
-            </div>
-          </form>
+            {/* ── Section 3: Áreas de Atuação ──────────────────────────── */}
+            <Card className="border-neutral-light shadow-sm">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-semibold text-neutral-darkest">Áreas de Atuação</CardTitle>
+                  {!editingSpecs ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs text-primary hover:text-primary/80 gap-1"
+                      onClick={openEditSpecs}
+                      data-testid="button-edit-specs"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      Editar
+                    </Button>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => setEditingSpecs(false)}
+                        data-testid="button-cancel-specs"
+                      >
+                        <X className="w-3.5 h-3.5 mr-1" />
+                        Cancelar
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-7 text-xs gap-1"
+                        disabled={saveSpecsMutation.isPending}
+                        onClick={() => saveSpecsMutation.mutate()}
+                        data-testid="button-save-specs"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        {saveSpecsMutation.isPending ? "Salvando..." : "Salvar"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {!editingSpecs ? (
+                  <div>
+                    {profile && profile.specializations.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {profile.specializations.map((s) => (
+                          <span
+                            key={s.id}
+                            className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary border border-primary/20"
+                          >
+                            {s.name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-neutral-dark italic">
+                        Nenhuma área de atuação cadastrada. Clique em Editar para adicionar.
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <SpecializationChipSelector
+                    selectedIds={draftSpecIds}
+                    onChange={setDraftSpecIds}
+                  />
+                )}
+              </CardContent>
+            </Card>
+          </div>
         )}
       </main>
     </div>

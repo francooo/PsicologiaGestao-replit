@@ -83,12 +83,6 @@ export default function Sidebar() {
       roles: ["admin"],
     },
     {
-      name: "Psicólogas",
-      icon: <Users className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
-      href: "/psychologists",
-      roles: ["receptionist"],
-    },
-    {
       name: "Salas",
       icon: <DoorOpen className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
       href: "/rooms",
@@ -133,8 +127,8 @@ export default function Sidebar() {
     {
       name: "Meu Perfil",
       icon: <UserCircle className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
-      href: userRole === "psychologist" ? "/perfil" : "/profile",
-      roles: ["admin", "psychologist", "receptionist"],
+      href: "/perfil",
+      roles: ["psychologist"],
     },
     {
       name: "Configurações",

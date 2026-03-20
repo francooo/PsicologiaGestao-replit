@@ -81,7 +81,7 @@ router.get("/", async (req, res) => {
     return res.json({
       ...safeUser,
       psychologist: psychData || null,
-      age: calcAge((userData as any).birthDate),
+      age: calcAge(userData.birthDate),
       specializations,
     });
   } catch (e) {
@@ -121,7 +121,7 @@ router.patch("/", async (req, res) => {
     const [updated] = await db.select().from(users).where(eq(users.id, user.id));
     const [updatedPsych] = await db.select().from(psychologists).where(eq(psychologists.userId, user.id));
     const { password, ...safeUser } = updated;
-    return res.json({ ...safeUser, psychologist: updatedPsych || null, age: calcAge((updated as any).birthDate) });
+    return res.json({ ...safeUser, psychologist: updatedPsych || null, age: calcAge(updated.birthDate) });
   } catch (e) {
     console.error("PATCH /api/profile error:", e);
     return res.status(500).json({ error: "Erro interno." });
