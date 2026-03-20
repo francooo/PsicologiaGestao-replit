@@ -58,6 +58,8 @@ export default function Sidebar() {
 
   const handleLogout = () => logoutMutation.mutate();
 
+  const userRole = user?.role || "";
+
   const getRoleLabel = (role?: string | null) => {
     switch (role) {
       case "admin": return "Admin";
@@ -77,8 +79,14 @@ export default function Sidebar() {
     {
       name: "Psicólogas",
       icon: <Users className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
+      href: "/admin/psicologas",
+      roles: ["admin"],
+    },
+    {
+      name: "Psicólogas",
+      icon: <Users className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
       href: "/psychologists",
-      roles: ["admin", "receptionist"],
+      roles: ["receptionist"],
     },
     {
       name: "Salas",
@@ -125,7 +133,7 @@ export default function Sidebar() {
     {
       name: "Meu Perfil",
       icon: <UserCircle className="w-5 h-5 mr-3 text-primary flex-shrink-0" />,
-      href: "/profile",
+      href: userRole === "psychologist" ? "/perfil" : "/profile",
       roles: ["admin", "psychologist", "receptionist"],
     },
     {
@@ -135,8 +143,6 @@ export default function Sidebar() {
       roles: ["admin", "psychologist", "receptionist"],
     },
   ];
-
-  const userRole = user?.role || "";
 
   const visibleMain = mainItems.filter(i => i.roles.includes(userRole));
   const visibleFinancial = financialItems.filter(i => i.roles.includes(userRole));

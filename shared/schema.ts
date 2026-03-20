@@ -38,6 +38,9 @@ export const psychologists = pgTable("psychologists", {
   specialization: text("specialization"),
   bio: text("bio"),
   hourlyRate: decimal("hourly_rate", { precision: 10, scale: 2 }).notNull(),
+  phone: text("phone"),
+  crpNumber: text("crp_number"),
+  startedAtClinic: date("started_at_clinic"),
 });
 
 export const insertPsychologistSchema = createInsertSchema(psychologists).pick({
@@ -45,12 +48,56 @@ export const insertPsychologistSchema = createInsertSchema(psychologists).pick({
   specialization: true,
   bio: true,
   hourlyRate: true,
+  phone: true,
+  crpNumber: true,
+  startedAtClinic: true,
 }).extend({
   hourlyRate: z.union([
     z.string().transform((val) => parseFloat(val)),
     z.number()
   ])
 });
+
+// Specialization Areas (Áreas de Atuação)
+export const specializationAreas = pgTable("specialization_areas", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  category: text("category"),
+  isCustom: boolean("is_custom").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertSpecializationAreaSchema = createInsertSchema(specializationAreas).pick({
+  name: true,
+  category: true,
+  isCustom: true,
+});
+
+export type SpecializationArea = typeof specializationAreas.$inferSelect;
+export type InsertSpecializationArea = z.infer<typeof insertSpecializationAreaSchema>;
+
+// Psychologist Specializations (N:N)
+export const psychologistSpecializations = pgTable("psychologist_specializations", {
+  id: serial("id").primaryKey(),
+  psychologistId: integer("psychologist_id").notNull().references(() => psychologists.id, { onDelete: "cascade" }),
+  specializationAreaId: integer("specialization_area_id").notNull().references(() => specializationAreas.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  unique("psych_spec_unique").on(t.psychologistId, t.specializationAreaId),
+]);
+
+export type PsychologistSpecialization = typeof psychologistSpecializations.$inferSelect;
+
+export const psychologistSpecializationsRelations = relations(psychologistSpecializations, ({ one }) => ({
+  psychologist: one(psychologists, {
+    fields: [psychologistSpecializations.psychologistId],
+    references: [psychologists.id],
+  }),
+  area: one(specializationAreas, {
+    fields: [psychologistSpecializations.specializationAreaId],
+    references: [specializationAreas.id],
+  }),
+}));
 
 // Rooms
 export const rooms = pgTable("rooms", {

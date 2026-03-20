@@ -15,6 +15,9 @@ import googleCalendarRoutes from "./routes/google-calendar";
 import * as GoogleCalendarService from "./services/google-calendar";
 import patientRecordsRouter from "./routes/patient-records";
 import meetingsRouter from "./routes/meetings";
+import profileRouter from "./routes/profile";
+import specializationAreasRouter from "./routes/specialization-areas";
+import adminPsychologistsRouter from "./routes/admin-psychologists";
 import { analyzeInvoiceImage, analyzeInvoicePdf, type PsychologistProfileForInvoice, AIServiceError, AIQuotaError, UnsupportedFormatError } from "./services/ai";
 
 // Configure multer for image upload
@@ -1751,6 +1754,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Patient Record System Routes
   console.log("Registering /api/patients routes...");
   app.use("/api/patients", patientRecordsRouter);
+
+  // Profile routes (psicóloga logada)
+  app.use("/api/profile", profileRouter);
+
+  // Specialization areas
+  app.use("/api/specialization-areas", specializationAreasRouter);
+
+  // Admin psychologists management
+  app.use("/api/admin/psychologists", adminPsychologistsRouter);
 
   // ========== INVOICE ROUTES (NFS-e com IA) ==========
 

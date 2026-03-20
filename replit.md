@@ -3,6 +3,14 @@
 This is a psychology practice management system built with a modern full-stack architecture. The application serves as a comprehensive platform for managing appointments, psychologists, rooms, financial transactions, and patient interactions. It features role-based access control, real-time scheduling, and integrates with external services like WhatsApp and Google Calendar for enhanced communication and scheduling capabilities.
 
 ## Recent Updates (March 2026)
+- ✅ Added Psychologist Professional Profile (/perfil) and Admin Psychologists screen (/admin/psicologas)
+- ✅ Extended `psychologists` table with `phone`, `crp_number`, `started_at_clinic` columns
+- ✅ Created `specialization_areas` and `psychologist_specializations` tables (35 pre-seeded areas, 7 categories)
+- ✅ Built backend routes: `server/routes/profile.ts` (GET/PATCH /api/profile, PUT /api/profile/specializations, POST /api/profile/avatar), `server/routes/specialization-areas.ts` (GET/POST), `server/routes/admin-psychologists.ts` (full CRUD)
+- ✅ Created reusable `SpecializationChipSelector` component with search, toggle, and custom area creation
+- ✅ Psychologist /perfil page: avatar upload, professional info form, bio, specialization chips, admin-only fields (email, startedAtClinic) with lock icon
+- ✅ Admin /admin/psicologas page: card grid, search/filter, edit modal with all fields + admin-only fields, toggle active status, stats panel
+- ✅ Updated sidebar: psychologists → /admin/psicologas (admin), /psychologists (receptionist); Meu Perfil → /perfil (psychologist), /profile (others)
 - ✅ Added Meetings module (Módulo de Reuniões) with Google Meet integration
 - ✅ Created `meetings` table in PostgreSQL schema
 - ✅ Extended Google Calendar service with Gmail scope, `createMeetingEvent()` (conferenceData v1), and `sendMeetLinkEmail()` (Gmail API, HTML template)

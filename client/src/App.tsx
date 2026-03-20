@@ -20,6 +20,8 @@ import AdminInvoices from "@/pages/admin-invoices";
 import PatientsList from "@/pages/patients";
 import PatientRecord from "@/pages/patients/record";
 import Meetings from "@/pages/meetings";
+import Perfil from "@/pages/perfil";
+import AdminPsicologas from "@/pages/admin/psicologas";
 import { ProtectedRoute } from "./lib/protected-route";
 import { AuthProvider, useAuth } from "./hooks/use-auth";
 
@@ -42,6 +44,8 @@ function Router() {
       <ProtectedRoute path="/patients" component={PatientsList} />
       <ProtectedRoute path="/patients/:id/record" component={PatientRecord} />
       <ProtectedRoute path="/reunioes" component={Meetings} />
+      {user?.role === "psychologist" && <ProtectedRoute path="/perfil" component={Perfil} />}
+      {user?.role === "admin" && <ProtectedRoute path="/admin/psicologas" component={AdminPsicologas} />}
       <Route path="/auth" component={AuthPage} />
       <Route path="/auth-page" component={AuthPage} />
       <Route path="/password-recovery" component={PasswordRecovery} />
