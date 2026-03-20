@@ -350,18 +350,20 @@ function TemplateModal({ open, onClose, onSaved, existing }: TemplateModalProps)
           description,
         });
         const updatedTemplate = await metaRes.json() as CareTemplate;
-        await apiRequest(
-          "PUT",
-          `/api/care/templates/${existing!.id}/questions`,
-          questions.map((q, i) => ({
-            questionText: q.questionText,
-            questionType: q.questionType,
-            options: q.questionType === "multiple_choice" ? q.options.filter(Boolean) : null,
-            isRequired: q.isRequired,
-            orderIndex: i,
-          }))
-        );
-        return updatedTemplate;
+        const savedQuestions = await (
+          await apiRequest(
+            "PUT",
+            `/api/care/templates/${existing!.id}/questions`,
+            questions.map((q, i) => ({
+              questionText: q.questionText,
+              questionType: q.questionType,
+              options: q.questionType === "multiple_choice" ? q.options.filter(Boolean) : null,
+              isRequired: q.isRequired,
+              orderIndex: i,
+            }))
+          )
+        ).json() as CareTemplateQuestion[];
+        return { ...updatedTemplate, questions: savedQuestions };
       }
       const res = await apiRequest("POST", "/api/care/templates", {
         title,
