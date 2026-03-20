@@ -6,6 +6,9 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { summarizeDocument, UnsupportedFormatError, AIServiceError, AIQuotaError } from '../services/ai';
+import { db } from '../db';
+import { psychologists, users } from '@shared/schema';
+import { eq } from 'drizzle-orm';
 
 const router = Router();
 
@@ -158,18 +161,33 @@ router.get('/', async (req, res) => {
     try {
         const user = req.user as any;
         const activeOnly = req.query.active !== 'false';
-        let patients = await storage.listPatients(activeOnly);
+        let patientsList = await storage.listPatients(activeOnly);
 
         // Filtrar carteira para psicólogos
         if (user.role === 'psychologist') {
             const psychologist = await storage.getPsychologistByUserId(user.id);
             const psychologistId = psychologist?.id ?? -1;
-            // Acessa se for o psicólogo vinculado OU o criador do registro
-            patients = patients.filter(p => isPatientOwned(p, psychologistId, user.id));
+            patientsList = patientsList.filter(p => isPatientOwned(p, psychologistId, user.id));
         }
-        // Outros perfis (receptionist) não devem ver a lista -- apenas admin passa sem filtro
 
-        res.json(patients);
+        // For admins, enrich each patient with the linked psychologist's name
+        if (user.role === 'admin') {
+            const allPsychologists = await db
+                .select({ id: psychologists.id, fullName: users.fullName })
+                .from(psychologists)
+                .innerJoin(users, eq(psychologists.userId, users.id));
+            const psychologistNames: Record<number, string> = {};
+            for (const row of allPsychologists) {
+                psychologistNames[row.id] = row.fullName;
+            }
+            const enriched = patientsList.map(p => ({
+                ...p,
+                psychologistName: p.psychologistId ? (psychologistNames[p.psychologistId] ?? null) : null,
+            }));
+            return res.json(enriched);
+        }
+
+        res.json(patientsList);
     } catch (error) {
         console.error("Error listing patients:", error);
         res.status(500).json({ message: "Erro ao listar pacientes" });

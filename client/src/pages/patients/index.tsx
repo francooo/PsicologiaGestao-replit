@@ -6,6 +6,7 @@ import { insertPatientSchema, type Patient, type InsertPatient } from "@shared/s
 import { useLocation } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 
 import Sidebar from "@/components/sidebar";
 import MobileNav from "@/components/mobile-nav";
@@ -36,14 +37,18 @@ import {
 } from "@/components/ui/form";
 import { Loader2, Plus, Search, FileText } from "lucide-react";
 
+type PatientWithPsychologist = Patient & { psychologistName?: string | null };
+
 export default function PatientsList() {
     const [searchTerm, setSearchTerm] = useState("");
     const [isOpen, setIsOpen] = useState(false);
     const [, setLocation] = useLocation();
     const { toast } = useToast();
+    const { user } = useAuth();
+    const isAdmin = user?.role === "admin";
 
     // Fetch patients
-    const { data: patients, isLoading } = useQuery<Patient[]>({
+    const { data: patients, isLoading } = useQuery<PatientWithPsychologist[]>({
         queryKey: ["/api/patients"],
     });
 
@@ -244,6 +249,7 @@ export default function PatientsList() {
                                     <TableHeader>
                                         <TableRow>
                                             <TableHead>Nome</TableHead>
+                                            {isAdmin && <TableHead>Psicóloga</TableHead>}
                                             <TableHead>CPF</TableHead>
                                             <TableHead>Telefone</TableHead>
                                             <TableHead>Status</TableHead>
@@ -253,7 +259,7 @@ export default function PatientsList() {
                                     <TableBody>
                                         {filteredPatients?.length === 0 ? (
                                             <TableRow>
-                                                <TableCell colSpan={5} className="text-center py-8 text-neutral-dark">
+                                                <TableCell colSpan={isAdmin ? 6 : 5} className="text-center py-8 text-neutral-dark">
                                                     Nenhum paciente encontrado.
                                                 </TableCell>
                                             </TableRow>
@@ -263,8 +269,14 @@ export default function PatientsList() {
                                                     key={patient.id}
                                                     className="cursor-pointer hover:bg-neutral-lightest"
                                                     onClick={() => setLocation(`/patients/${patient.id}/record`)}
+                                                    data-testid={`row-patient-${patient.id}`}
                                                 >
-                                                    <TableCell className="font-medium text-neutral-darkest">{patient.fullName}</TableCell>
+                                                    <TableCell className="font-medium text-neutral-darkest" data-testid={`text-patient-name-${patient.id}`}>{patient.fullName}</TableCell>
+                                                    {isAdmin && (
+                                                        <TableCell className="text-neutral-darkest" data-testid={`text-psychologist-name-${patient.id}`}>
+                                                            {patient.psychologistName ?? "—"}
+                                                        </TableCell>
+                                                    )}
                                                     <TableCell className="text-neutral-darkest">{patient.cpf || '-'}</TableCell>
                                                     <TableCell className="text-neutral-darkest">{patient.phone}</TableCell>
                                                     <TableCell>
@@ -284,6 +296,7 @@ export default function PatientsList() {
                                                                 setLocation(`/patients/${patient.id}/record`);
                                                             }}
                                                             className="text-primary hover:text-primary-dark hover:bg-primary-light/10"
+                                                            data-testid={`btn-prontuario-${patient.id}`}
                                                         >
                                                             <FileText className="h-4 w-4 mr-2" />
                                                             Prontuário
