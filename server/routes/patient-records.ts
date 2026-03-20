@@ -208,9 +208,16 @@ router.get('/:id', checkPatientAccess, async (req, res) => {
 router.post('/', async (req, res) => {
     try {
         const data = insertPatientSchema.parse(req.body);
-        // Add createdBy from current user
         const userId = (req.user as any).id;
-        const patientData = { ...data, createdBy: userId };
+        const userRole = (req.user as any).role;
+
+        let psychologistId = data.psychologistId ?? null;
+        if (!psychologistId && userRole === 'psychologist') {
+            const psychRecord = await storage.getPsychologistByUserId(userId);
+            if (psychRecord) psychologistId = psychRecord.id;
+        }
+
+        const patientData = { ...data, createdBy: userId, psychologistId };
         const patient = await storage.createPatient(patientData);
 
         // Audit log

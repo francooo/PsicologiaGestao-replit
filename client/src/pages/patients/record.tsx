@@ -34,6 +34,7 @@ import {
 import { insertPatientSchema, type Patient, type InsertPatient } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 
 import RecordHeader from "@/components/patient-record/RecordHeader";
 import PersonalDataTab from "@/components/patient-record/PersonalDataTab";
@@ -62,12 +63,19 @@ interface TabCounts {
     assessments: number;
 }
 
+interface PsychologistOption {
+    id: number;
+    user: { fullName: string } | null;
+}
+
 export default function PatientRecord() {
     const [, params] = useRoute("/patients/:id/record");
     const [, setLocation] = useLocation();
     const id = params ? parseInt(params.id) : 0;
     const contentRef = useRef<HTMLDivElement>(null);
     const { toast } = useToast();
+    const { user } = useAuth();
+    const isAdmin = user?.role === "admin";
 
     const [activeTab, setActiveTab] = useState<TabValue>(() => {
         const saved = localStorage.getItem(TAB_KEY);
@@ -95,6 +103,11 @@ export default function PatientRecord() {
         enabled: !!id,
     });
 
+    const { data: psychologistsList } = useQuery<PsychologistOption[]>({
+        queryKey: ["/api/psychologists"],
+        enabled: isAdmin,
+    });
+
     // Edit form
     const editForm = useForm<InsertPatient>({
         resolver: zodResolver(insertPatientSchema),
@@ -114,6 +127,7 @@ export default function PatientRecord() {
             legalGuardianName: "",
             legalGuardianCpf: "",
             status: "active",
+            psychologistId: null,
         },
     });
 
@@ -138,9 +152,14 @@ export default function PatientRecord() {
                 legalGuardianName: patient.legalGuardianName ?? "",
                 legalGuardianCpf: patient.legalGuardianCpf ?? "",
                 status: patient.status ?? "active",
+                psychologistId: patient.psychologistId ?? null,
             });
         }
     }, [patient]);
+
+    const psychologistName = patient?.psychologistId
+        ? (psychologistsList?.find(p => p.id === patient.psychologistId)?.user?.fullName ?? null)
+        : null;
 
     const updatePatientMutation = useMutation({
         mutationFn: async (data: InsertPatient) => {
@@ -278,7 +297,12 @@ export default function PatientRecord() {
 
                         <div className="animate-in fade-in-0 duration-200">
                             <TabsContent value="details" className="mt-0">
-                                <PersonalDataTab patient={patient} onEdit={() => setEditOpen(true)} />
+                                <PersonalDataTab
+                                    patient={patient}
+                                    onEdit={() => setEditOpen(true)}
+                                    isAdmin={isAdmin}
+                                    psychologistName={psychologistName}
+                                />
                             </TabsContent>
 
                             <TabsContent value="anamnesis" className="mt-0">
@@ -498,6 +522,43 @@ export default function PatientRecord() {
                                         />
                                     </div>
                                 </div>
+
+                                {/* Psicóloga Responsável – admin only */}
+                                {isAdmin && (
+                                    <div>
+                                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Psicóloga Responsável</p>
+                                        <div className="grid grid-cols-1 gap-4">
+                                            <FormField
+                                                control={editForm.control}
+                                                name="psychologistId"
+                                                render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel>Psicóloga</FormLabel>
+                                                        <Select
+                                                            onValueChange={(val) => field.onChange(val === "none" ? null : parseInt(val))}
+                                                            value={field.value != null ? String(field.value) : "none"}
+                                                        >
+                                                            <FormControl>
+                                                                <SelectTrigger data-testid="select-psychologistId">
+                                                                    <SelectValue placeholder="Selecione uma psicóloga" />
+                                                                </SelectTrigger>
+                                                            </FormControl>
+                                                            <SelectContent>
+                                                                <SelectItem value="none">Sem vínculo</SelectItem>
+                                                                {psychologistsList?.map((p) => (
+                                                                    <SelectItem key={p.id} value={String(p.id)}>
+                                                                        {p.user?.fullName ?? `Psicóloga #${p.id}`}
+                                                                    </SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* Administrativo */}
                                 <div>

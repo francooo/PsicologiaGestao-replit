@@ -2,13 +2,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Edit, Phone, Mail, MapPin, Briefcase, User, Shield, Heart, ChevronDown, Clock } from "lucide-react";
+import { Edit, Phone, Mail, MapPin, Briefcase, User, Shield, Heart, ChevronDown, Clock, UserCheck } from "lucide-react";
 import { type Patient } from "@shared/schema";
 import { useState } from "react";
 
 interface PersonalDataTabProps {
     patient: Patient;
     onEdit: () => void;
+    isAdmin?: boolean;
+    psychologistName?: string | null;
 }
 
 const genderMap: Record<string, string> = {
@@ -34,7 +36,7 @@ function Field({ label, value }: { label: string; value?: string | null }) {
     );
 }
 
-export default function PersonalDataTab({ patient, onEdit }: PersonalDataTabProps) {
+export default function PersonalDataTab({ patient, onEdit, isAdmin, psychologistName }: PersonalDataTabProps) {
     const [obsOpen, setObsOpen] = useState(false);
     const updatedAt = patient.updatedAt
         ? new Date(patient.updatedAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
@@ -116,6 +118,15 @@ export default function PersonalDataTab({ patient, onEdit }: PersonalDataTabProp
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="px-5 pb-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {isAdmin && (
+                        <div className="md:col-span-2 flex items-center gap-2 pb-2 border-b border-neutral-100">
+                            <UserCheck className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+                            <Field
+                                label="Psicóloga Responsável"
+                                value={psychologistName ?? (patient.psychologistId ? "Carregando..." : "Não vinculada")}
+                            />
+                        </div>
+                    )}
                     <Field label="Convênio" value={patient.insuranceProvider} />
                     <Field label="Contato de Emergência" value={patient.emergencyContactName} />
                     <Field label="Telefone de Emergência" value={patient.emergencyContactPhone} />
