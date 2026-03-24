@@ -296,7 +296,7 @@ export default function AdminComissoes() {
 
   function getPsychName(id: number) {
     const p = psychologists.find((x) => x.id === id);
-    return (p as any)?.user?.fullName ?? `Psicóloga #${id}`;
+    return p?.user?.fullName ?? `Psicóloga #${id}`;
   }
 
   function startEditConfig(cfg: PayoutConfig) {
@@ -398,22 +398,30 @@ export default function AdminComissoes() {
                 <SelectItem value="all">Todas as psicólogas</SelectItem>
                 {psychologists.map((p) => (
                   <SelectItem key={p.id} value={String(p.id)} data-testid={`option-psych-${p.id}`}>
-                    {(p as any)?.user?.fullName ?? `Psicóloga #${p.id}`}
+                    {p.user?.fullName ?? `Psicóloga #${p.id}`}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="w-40 text-sm" data-testid="select-status-filter">
-                <SelectValue placeholder="Todos os status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                <SelectItem value="pending">Pendente</SelectItem>
-                <SelectItem value="paid">Pago</SelectItem>
-                <SelectItem value="cancelled">Cancelado</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex gap-1" data-testid="status-filter-group">
+              {[
+                { value: "all", label: "Todos" },
+                { value: "pending", label: "Pendente" },
+                { value: "paid", label: "Pago" },
+                { value: "cancelled", label: "Cancelado" },
+              ].map((opt) => (
+                <Button
+                  key={opt.value}
+                  size="sm"
+                  variant={filterStatus === opt.value ? "default" : "outline"}
+                  className="h-9 text-xs"
+                  onClick={() => setFilterStatus(opt.value)}
+                  data-testid={`status-btn-${opt.value}`}
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </div>
           </div>
 
           {/* Table */}
@@ -427,20 +435,21 @@ export default function AdminComissoes() {
                   <TableHead className="text-xs font-semibold text-slate-600 text-right">Valor Total</TableHead>
                   <TableHead className="text-xs font-semibold text-slate-600 text-right">Repasse</TableHead>
                   <TableHead className="text-xs font-semibold text-slate-600">Status</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-600">Dt. Pagamento</TableHead>
                   <TableHead className="text-xs font-semibold text-slate-600 text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loadingComm ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-10 text-slate-400">
+                    <TableCell colSpan={8} className="text-center py-10 text-slate-400">
                       <Loader2 className="w-5 h-5 animate-spin inline mr-2" />
                       Carregando...
                     </TableCell>
                   </TableRow>
                 ) : commissions.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-12 text-slate-400 text-sm">
+                    <TableCell colSpan={8} className="text-center py-12 text-slate-400 text-sm">
                       Nenhum comissionamento encontrado para o período selecionado.
                     </TableCell>
                   </TableRow>
@@ -459,6 +468,9 @@ export default function AdminComissoes() {
                         {fmtBRL(c.totalRepasse)}
                       </TableCell>
                       <TableCell>{statusBadge(c.status)}</TableCell>
+                      <TableCell className="text-sm text-slate-600" data-testid={`text-paydate-${c.id}`}>
+                        {c.paymentDate ? fmtDate(c.paymentDate) : "—"}
+                      </TableCell>
                       <TableCell>
                         <div className="flex gap-1 justify-end">
                           <Button
@@ -519,7 +531,7 @@ export default function AdminComissoes() {
                 <SelectContent>
                   {psychologists.map((p) => (
                     <SelectItem key={p.id} value={String(p.id)}>
-                      {(p as any)?.user?.fullName ?? `Psicóloga #${p.id}`}
+                      {p.user?.fullName ?? `Psicóloga #${p.id}`}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -826,7 +838,7 @@ export default function AdminComissoes() {
                     <SelectContent>
                       {psychologists.map((p) => (
                         <SelectItem key={p.id} value={String(p.id)}>
-                          {(p as any)?.user?.fullName ?? `Psicóloga #${p.id}`}
+                          {p.user?.fullName ?? `Psicóloga #${p.id}`}
                         </SelectItem>
                       ))}
                     </SelectContent>
