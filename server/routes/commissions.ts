@@ -304,8 +304,14 @@ commissionConfigsRouter.put("/:id", async (req, res) => {
             validFrom: z.string().optional(),
             validUntil: z.string().nullable().optional(),
         });
-        const data = schema.parse(req.body);
-        const updated = await storage.updateCommissionPayoutConfig(parseInt(req.params.id), data as any);
+        const parsed = schema.parse(req.body);
+        const updateData: Parameters<typeof storage.updateCommissionPayoutConfig>[1] = {
+            ...(parsed.payoutType !== undefined && { payoutType: parsed.payoutType }),
+            ...(parsed.payoutValue !== undefined && { payoutValue: parsed.payoutValue }),
+            ...(parsed.validFrom !== undefined && { validFrom: parsed.validFrom }),
+            ...(parsed.validUntil !== undefined && { validUntil: parsed.validUntil }),
+        };
+        const updated = await storage.updateCommissionPayoutConfig(parseInt(req.params.id), updateData);
         if (!updated) return res.status(404).json({ message: "Configuração não encontrada" });
         res.json(updated);
     } catch (e: any) {
