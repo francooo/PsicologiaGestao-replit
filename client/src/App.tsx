@@ -22,6 +22,7 @@ import PatientRecord from "@/pages/patients/record";
 import Meetings from "@/pages/meetings";
 import Perfil from "@/pages/perfil";
 import AdminPsicologas from "@/pages/admin/psicologas";
+import AdminComissoes from "@/pages/admin/comissoes";
 import ResponderPage from "@/pages/responder";
 import { ProtectedRoute } from "./lib/protected-route";
 import { AuthProvider, useAuth } from "./hooks/use-auth";
@@ -47,6 +48,7 @@ function Router() {
       <ProtectedRoute path="/reunioes" component={Meetings} />
       {user?.role === "psychologist" && <ProtectedRoute path="/perfil" component={Perfil} />}
       {user?.role === "admin" && <ProtectedRoute path="/admin/psicologas" component={AdminPsicologas} />}
+      {user?.role === "admin" && <ProtectedRoute path="/admin/comissoes" component={AdminComissoes} />}
       <Route path="/auth" component={AuthPage} />
       <Route path="/auth-page" component={AuthPage} />
       <Route path="/password-recovery" component={PasswordRecovery} />

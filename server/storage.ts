@@ -17,7 +17,10 @@ import {
   psychologicalAssessments, type PsychologicalAssessment, type InsertPsychologicalAssessment,
   auditLogs, type AuditLog,
   sessionHistory, type SessionHistory,
-  patientTransfers, type PatientTransfer
+  patientTransfers, type PatientTransfer,
+  commissionPayoutConfigs, type CommissionPayoutConfig, type InsertCommissionPayoutConfig,
+  commissions, type Commission,
+  commissionItems, type CommissionItem,
 } from "@shared/schema";
 import session from "express-session";
 import createMemoryStore from "memorystore";
@@ -160,6 +163,18 @@ export interface IStorage {
   }): Promise<PatientTransfer>;
   listTransfersByPatientId(patientId: number): Promise<PatientTransfer[]>;
 
+  // Commission methods
+  listCommissionPayoutConfigs(psychologistId?: number): Promise<CommissionPayoutConfig[]>;
+  getActiveCommissionPayoutConfig(psychologistId: number, forDate: string): Promise<CommissionPayoutConfig | undefined>;
+  createCommissionPayoutConfig(data: InsertCommissionPayoutConfig): Promise<CommissionPayoutConfig>;
+  updateCommissionPayoutConfig(id: number, data: Partial<InsertCommissionPayoutConfig>): Promise<CommissionPayoutConfig | undefined>;
+  listCommissions(filters?: { psychologistId?: number; status?: string; periodStart?: string; periodEnd?: string }): Promise<Commission[]>;
+  getCommission(id: number): Promise<Commission | undefined>;
+  createCommission(data: Omit<Commission, "id" | "createdAt" | "updatedAt">): Promise<Commission>;
+  updateCommission(id: number, data: Partial<Commission>): Promise<Commission | undefined>;
+  listCommissionItems(commissionId: number): Promise<CommissionItem[]>;
+  createCommissionItems(items: Omit<CommissionItem, "id">[]): Promise<CommissionItem[]>;
+  getCommissionDashboard(month: string): Promise<{ totalPendente: string; totalPago: string; numPsicologas: number; numLocacoes: number }>;
 
   // Session store
   sessionStore: session.Store;
@@ -790,6 +805,18 @@ export class MemStorage implements IStorage {
 
   async transferPatient(data: { patientId: number; fromPsychologistId: number | null; toPsychologistId: number; transferredByAdminId: number; reason: string | null; }): Promise<PatientTransfer> { throw new Error("Method not implemented."); }
   async listTransfersByPatientId(patientId: number): Promise<PatientTransfer[]> { return []; }
+
+  async listCommissionPayoutConfigs(psychologistId?: number): Promise<CommissionPayoutConfig[]> { return []; }
+  async getActiveCommissionPayoutConfig(psychologistId: number, forDate: string): Promise<CommissionPayoutConfig | undefined> { return undefined; }
+  async createCommissionPayoutConfig(data: InsertCommissionPayoutConfig): Promise<CommissionPayoutConfig> { throw new Error("Not implemented"); }
+  async updateCommissionPayoutConfig(id: number, data: Partial<InsertCommissionPayoutConfig>): Promise<CommissionPayoutConfig | undefined> { return undefined; }
+  async listCommissions(filters?: { psychologistId?: number; status?: string; periodStart?: string; periodEnd?: string }): Promise<Commission[]> { return []; }
+  async getCommission(id: number): Promise<Commission | undefined> { return undefined; }
+  async createCommission(data: Omit<Commission, "id" | "createdAt" | "updatedAt">): Promise<Commission> { throw new Error("Not implemented"); }
+  async updateCommission(id: number, data: Partial<Commission>): Promise<Commission | undefined> { return undefined; }
+  async listCommissionItems(commissionId: number): Promise<CommissionItem[]> { return []; }
+  async createCommissionItems(items: Omit<CommissionItem, "id">[]): Promise<CommissionItem[]> { return []; }
+  async getCommissionDashboard(month: string): Promise<{ totalPendente: string; totalPago: string; numPsicologas: number; numLocacoes: number }> { return { totalPendente: "0", totalPago: "0", numPsicologas: 0, numLocacoes: 0 }; }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1412,6 +1439,122 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(patientTransfers)
       .where(eq(patientTransfers.patientId, patientId))
       .orderBy(sql`${patientTransfers.createdAt} DESC`);
+  }
+
+  async listCommissionPayoutConfigs(psychologistId?: number): Promise<CommissionPayoutConfig[]> {
+    if (psychologistId !== undefined) {
+      return await db.select().from(commissionPayoutConfigs)
+        .where(eq(commissionPayoutConfigs.psychologistId, psychologistId))
+        .orderBy(sql`${commissionPayoutConfigs.validFrom} DESC`);
+    }
+    return await db.select().from(commissionPayoutConfigs)
+      .orderBy(sql`${commissionPayoutConfigs.validFrom} DESC`);
+  }
+
+  async getActiveCommissionPayoutConfig(psychologistId: number, forDate: string): Promise<CommissionPayoutConfig | undefined> {
+    const results = await db.select().from(commissionPayoutConfigs)
+      .where(
+        and(
+          eq(commissionPayoutConfigs.psychologistId, psychologistId),
+          lte(commissionPayoutConfigs.validFrom, forDate),
+          or(
+            sql`${commissionPayoutConfigs.validUntil} IS NULL`,
+            gte(commissionPayoutConfigs.validUntil, forDate)
+          )
+        )
+      )
+      .orderBy(sql`${commissionPayoutConfigs.validFrom} DESC`)
+      .limit(1);
+    return results[0];
+  }
+
+  async createCommissionPayoutConfig(data: InsertCommissionPayoutConfig): Promise<CommissionPayoutConfig> {
+    const [config] = await db.insert(commissionPayoutConfigs).values(data).returning();
+    return config;
+  }
+
+  async updateCommissionPayoutConfig(id: number, data: Partial<InsertCommissionPayoutConfig>): Promise<CommissionPayoutConfig | undefined> {
+    const [updated] = await db.update(commissionPayoutConfigs).set(data).where(eq(commissionPayoutConfigs.id, id)).returning();
+    return updated;
+  }
+
+  async listCommissions(filters?: { psychologistId?: number; status?: string; periodStart?: string; periodEnd?: string }): Promise<Commission[]> {
+    const conditions = [];
+    if (filters?.psychologistId) conditions.push(eq(commissions.psychologistId, filters.psychologistId));
+    if (filters?.status) conditions.push(eq(commissions.status, filters.status));
+    if (filters?.periodStart) conditions.push(gte(commissions.periodStart, filters.periodStart));
+    if (filters?.periodEnd) conditions.push(lte(commissions.periodEnd, filters.periodEnd));
+
+    if (conditions.length > 0) {
+      return await db.select().from(commissions).where(and(...conditions)).orderBy(sql`${commissions.createdAt} DESC`);
+    }
+    return await db.select().from(commissions).orderBy(sql`${commissions.createdAt} DESC`);
+  }
+
+  async getCommission(id: number): Promise<Commission | undefined> {
+    const [c] = await db.select().from(commissions).where(eq(commissions.id, id));
+    return c;
+  }
+
+  async createCommission(data: Omit<Commission, "id" | "createdAt" | "updatedAt">): Promise<Commission> {
+    const [c] = await db.insert(commissions).values({
+      ...data,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }).returning();
+    return c;
+  }
+
+  async updateCommission(id: number, data: Partial<Commission>): Promise<Commission | undefined> {
+    const [updated] = await db.update(commissions)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(commissions.id, id))
+      .returning();
+    return updated;
+  }
+
+  async listCommissionItems(commissionId: number): Promise<CommissionItem[]> {
+    return await db.select().from(commissionItems)
+      .where(eq(commissionItems.commissionId, commissionId))
+      .orderBy(sql`${commissionItems.bookingDate} ASC`);
+  }
+
+  async createCommissionItems(items: Omit<CommissionItem, "id">[]): Promise<CommissionItem[]> {
+    if (items.length === 0) return [];
+    return await db.insert(commissionItems).values(items).returning();
+  }
+
+  async getCommissionDashboard(month: string): Promise<{ totalPendente: string; totalPago: string; numPsicologas: number; numLocacoes: number }> {
+    const [year, mon] = month.split("-");
+    const periodStart = `${year}-${mon}-01`;
+    const lastDay = new Date(parseInt(year), parseInt(mon), 0).getDate();
+    const periodEnd = `${year}-${mon}-${lastDay.toString().padStart(2, "0")}`;
+
+    const rows = await db.select().from(commissions)
+      .where(
+        and(
+          gte(commissions.periodStart, periodStart),
+          lte(commissions.periodEnd, periodEnd)
+        )
+      );
+
+    const totalPendente = rows
+      .filter(r => r.status === "pending")
+      .reduce((acc, r) => acc + parseFloat(r.totalRepasse), 0);
+
+    const totalPago = rows
+      .filter(r => r.status === "paid")
+      .reduce((acc, r) => acc + parseFloat(r.totalRepasse), 0);
+
+    const numPsicologas = new Set(rows.map(r => r.psychologistId)).size;
+    const numLocacoes = rows.reduce((acc, r) => acc + r.totalBookings, 0);
+
+    return {
+      totalPendente: totalPendente.toFixed(2),
+      totalPago: totalPago.toFixed(2),
+      numPsicologas,
+      numLocacoes,
+    };
   }
 }
 

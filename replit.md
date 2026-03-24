@@ -3,6 +3,15 @@
 This is a psychology practice management system built with a modern full-stack architecture. The application serves as a comprehensive platform for managing appointments, psychologists, rooms, financial transactions, and patient interactions. It features role-based access control, real-time scheduling, and integrates with external services like WhatsApp and Google Calendar for enhanced communication and scheduling capabilities.
 
 ## Recent Updates (March 2026)
+- ✅ Commission Module (Módulo de Comissionamento): Admin-only `/admin/comissoes` page for managing psychologist financial repasses
+  - New DB tables: `commission_payout_configs`, `commissions`, `commission_items`
+  - Backend routes at `server/routes/commissions.ts` mounted at `/api/admin/commissions`
+  - Per-psychologist payout config: percentual (%) or fixed (R$) repasse per booking
+  - Generate commissions from room bookings in a date range, with preview before confirming
+  - Status workflow: pending → paid (with payment date/method/notes) or cancelled
+  - Dashboard KPI cards: totalPendente, totalPago, numPsicologas, numLocacoes
+  - Detail modal showing individual booking items per commission
+  - "Comissões" sidebar + mobile nav link (admin only, HandCoins icon)
 - ✅ Added Psychologist Professional Profile (/perfil) and Admin Psychologists screen (/admin/psicologas)
 - ✅ Extended `psychologists` table with `phone`, `crp_number`, `started_at_clinic` columns
 - ✅ Created `specialization_areas` and `psychologist_specializations` tables (35 pre-seeded areas, 7 categories)

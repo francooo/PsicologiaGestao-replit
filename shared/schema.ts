@@ -557,6 +557,65 @@ export const meetingsRelations = relations(meetings, ({ one }) => ({
 export type Meeting = typeof meetings.$inferSelect;
 export type InsertMeeting = z.infer<typeof insertMeetingSchema>;
 
+// ─── Commission Payout Configs ───────────────────────────────────────────────
+export const commissionPayoutConfigs = pgTable("commission_payout_configs", {
+  id: serial("id").primaryKey(),
+  psychologistId: integer("psychologist_id").notNull().references(() => psychologists.id, { onDelete: "cascade" }),
+  payoutType: text("payout_type").notNull().default("percentual"), // "percentual" | "fixed"
+  payoutValue: decimal("payout_value", { precision: 10, scale: 2 }).notNull(),
+  validFrom: date("valid_from").notNull(),
+  validUntil: date("valid_until"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertCommissionPayoutConfigSchema = createInsertSchema(commissionPayoutConfigs).pick({
+  psychologistId: true,
+  payoutType: true,
+  payoutValue: true,
+  validFrom: true,
+  validUntil: true,
+}).extend({
+  payoutValue: z.union([z.string().transform((v) => parseFloat(v)), z.number()]),
+});
+
+export type CommissionPayoutConfig = typeof commissionPayoutConfigs.$inferSelect;
+export type InsertCommissionPayoutConfig = z.infer<typeof insertCommissionPayoutConfigSchema>;
+
+// ─── Commissions ─────────────────────────────────────────────────────────────
+export const commissions = pgTable("commissions", {
+  id: serial("id").primaryKey(),
+  psychologistId: integer("psychologist_id").notNull().references(() => psychologists.id, { onDelete: "cascade" }),
+  periodStart: date("period_start").notNull(),
+  periodEnd: date("period_end").notNull(),
+  totalBookings: integer("total_bookings").notNull().default(0),
+  totalRoomsValue: decimal("total_rooms_value", { precision: 10, scale: 2 }).notNull().default("0"),
+  totalRepasse: decimal("total_repasse", { precision: 10, scale: 2 }).notNull().default("0"),
+  status: text("status").notNull().default("pending"), // "pending" | "paid" | "cancelled"
+  paymentDate: date("payment_date"),
+  paymentMethod: text("payment_method"),
+  paymentNotes: text("payment_notes"),
+  createdByAdminId: integer("created_by_admin_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type Commission = typeof commissions.$inferSelect;
+
+// ─── Commission Items ─────────────────────────────────────────────────────────
+export const commissionItems = pgTable("commission_items", {
+  id: serial("id").primaryKey(),
+  commissionId: integer("commission_id").notNull().references(() => commissions.id, { onDelete: "cascade" }),
+  bookingId: integer("booking_id").notNull().references(() => roomBookings.id),
+  bookingDate: date("booking_date").notNull(),
+  roomName: text("room_name"),
+  startTime: time("start_time"),
+  endTime: time("end_time"),
+  bookingValue: decimal("booking_value", { precision: 10, scale: 2 }).notNull(),
+  repasseValue: decimal("repasse_value", { precision: 10, scale: 2 }).notNull(),
+});
+
+export type CommissionItem = typeof commissionItems.$inferSelect;
+
 // Export all patient record schemas
 export * from "./patient-schema";
 
