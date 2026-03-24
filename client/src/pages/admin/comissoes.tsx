@@ -149,6 +149,7 @@ export default function AdminComissoes() {
   const [showPay, setShowPay] = useState<Commission | null>(null);
   const [showDetail, setShowDetail] = useState<Commission | null>(null);
   const [showConfig, setShowConfig] = useState(false);
+  const [showCancel, setShowCancel] = useState<Commission | null>(null);
 
   const [genPsychId, setGenPsychId] = useState<string>("");
   const [genPeriodStart, setGenPeriodStart] = useState(monthStart(currentMonth()));
@@ -484,7 +485,7 @@ export default function AdminComissoes() {
                                 size="sm"
                                 variant="ghost"
                                 className="h-7 px-2 text-red-500 hover:text-red-600"
-                                onClick={() => cancelMutation.mutate(c.id)}
+                                onClick={() => setShowCancel(c)}
                                 data-testid={`button-cancel-${c.id}`}
                               >
                                 <XCircle className="w-3.5 h-3.5" />
@@ -769,6 +770,36 @@ export default function AdminComissoes() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDetail(null)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancel Confirmation Modal */}
+      <Dialog open={!!showCancel} onOpenChange={(o) => !o && setShowCancel(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Cancelar Comissionamento</DialogTitle>
+          </DialogHeader>
+          {showCancel && (
+            <div className="text-sm text-slate-600 space-y-2">
+              <p>Tem certeza que deseja cancelar o comissionamento de:</p>
+              <p className="font-semibold text-slate-800">{showCancel.psychologistName}</p>
+              <p className="text-slate-500">{fmtDate(showCancel.periodStart)} – {fmtDate(showCancel.periodEnd)}</p>
+              <p className="text-slate-500">Repasse: <span className="font-medium text-primary">{fmtBRL(showCancel.totalRepasse)}</span></p>
+              <p className="text-red-600 text-xs mt-2">Esta ação não pode ser desfeita.</p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCancel(null)} data-testid="button-cancel-dismiss">Não, manter</Button>
+            <Button
+              variant="destructive"
+              onClick={() => { cancelMutation.mutate(showCancel!.id); setShowCancel(null); }}
+              disabled={cancelMutation.isPending}
+              data-testid="button-cancel-confirm"
+            >
+              {cancelMutation.isPending && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
+              Sim, cancelar
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

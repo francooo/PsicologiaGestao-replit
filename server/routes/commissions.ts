@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { storage } from "../storage";
 import { db } from "../db";
-import { roomBookings, rooms } from "@shared/schema";
+import { roomBookings, rooms, psychologists } from "@shared/schema";
 import { eq, and, gte, lte } from "drizzle-orm";
 import { z } from "zod";
 
@@ -23,6 +23,13 @@ function hoursFromTime(start: string, end: string): number {
 }
 
 async function calcCommissionPreview(psychologistId: number, periodStart: string, periodEnd: string) {
+    const [psychRow] = await db
+        .select({ hourlyRate: psychologists.hourlyRate })
+        .from(psychologists)
+        .where(eq(psychologists.id, psychologistId));
+
+    const hourlyRate = psychRow ? parseFloat(psychRow.hourlyRate) : 0;
+
     const bookings = await db
         .select({
             id: roomBookings.id,
@@ -46,7 +53,7 @@ async function calcCommissionPreview(psychologistId: number, periodStart: string
 
     const items = bookings.map((b) => {
         const hours = hoursFromTime(b.startTime, b.endTime);
-        const bookingValue = hours * 100;
+        const bookingValue = hours * hourlyRate;
         let repasseValue = 0;
         if (config) {
             const val = parseFloat(config.payoutValue);
