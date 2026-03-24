@@ -168,7 +168,7 @@ router.post("/generate", async (req, res) => {
         });
         const { psychologistId, periodStart, periodEnd } = schema.parse(req.body);
 
-        const existing = await storage.listCommissions({ psychologistId, periodStart, periodEnd });
+        const existing = await storage.listCommissions({ psychologistId, exactPeriod: { periodStart, periodEnd } });
         if (existing.length > 0) {
             return res.status(409).json({ message: "Já existe um comissionamento para este período e psicóloga." });
         }
@@ -217,7 +217,7 @@ router.patch("/:id/pay", async (req, res) => {
     try {
         const schema = z.object({
             paymentDate: z.string(),
-            paymentMethod: z.string().optional(),
+            paymentMethod: z.string().min(1, "Informe o método de pagamento"),
             paymentNotes: z.string().optional(),
         });
         const data = schema.parse(req.body);

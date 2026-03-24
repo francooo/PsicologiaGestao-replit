@@ -168,7 +168,7 @@ export interface IStorage {
   getActiveCommissionPayoutConfig(psychologistId: number, forDate: string): Promise<CommissionPayoutConfig | undefined>;
   createCommissionPayoutConfig(data: InsertCommissionPayoutConfig): Promise<CommissionPayoutConfig>;
   updateCommissionPayoutConfig(id: number, data: Partial<InsertCommissionPayoutConfig>): Promise<CommissionPayoutConfig | undefined>;
-  listCommissions(filters?: { psychologistId?: number; status?: string; periodStart?: string; periodEnd?: string }): Promise<Commission[]>;
+  listCommissions(filters?: { psychologistId?: number; status?: string; periodStart?: string; periodEnd?: string; exactPeriod?: { periodStart: string; periodEnd: string } }): Promise<Commission[]>;
   getCommission(id: number): Promise<Commission | undefined>;
   createCommission(data: Omit<Commission, "id" | "createdAt" | "updatedAt">): Promise<Commission>;
   updateCommission(id: number, data: Partial<Commission>): Promise<Commission | undefined>;
@@ -810,7 +810,7 @@ export class MemStorage implements IStorage {
   async getActiveCommissionPayoutConfig(psychologistId: number, forDate: string): Promise<CommissionPayoutConfig | undefined> { return undefined; }
   async createCommissionPayoutConfig(data: InsertCommissionPayoutConfig): Promise<CommissionPayoutConfig> { throw new Error("Not implemented"); }
   async updateCommissionPayoutConfig(id: number, data: Partial<InsertCommissionPayoutConfig>): Promise<CommissionPayoutConfig | undefined> { return undefined; }
-  async listCommissions(filters?: { psychologistId?: number; status?: string; periodStart?: string; periodEnd?: string }): Promise<Commission[]> { return []; }
+  async listCommissions(filters?: { psychologistId?: number; status?: string; periodStart?: string; periodEnd?: string; exactPeriod?: { periodStart: string; periodEnd: string } }): Promise<Commission[]> { return []; }
   async getCommission(id: number): Promise<Commission | undefined> { return undefined; }
   async createCommission(data: Omit<Commission, "id" | "createdAt" | "updatedAt">): Promise<Commission> { throw new Error("Not implemented"); }
   async updateCommission(id: number, data: Partial<Commission>): Promise<Commission | undefined> { return undefined; }
@@ -1478,12 +1478,17 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async listCommissions(filters?: { psychologistId?: number; status?: string; periodStart?: string; periodEnd?: string }): Promise<Commission[]> {
+  async listCommissions(filters?: { psychologistId?: number; status?: string; periodStart?: string; periodEnd?: string; exactPeriod?: { periodStart: string; periodEnd: string } }): Promise<Commission[]> {
     const conditions = [];
     if (filters?.psychologistId) conditions.push(eq(commissions.psychologistId, filters.psychologistId));
     if (filters?.status) conditions.push(eq(commissions.status, filters.status));
-    if (filters?.periodStart) conditions.push(gte(commissions.periodStart, filters.periodStart));
-    if (filters?.periodEnd) conditions.push(lte(commissions.periodEnd, filters.periodEnd));
+    if (filters?.exactPeriod) {
+      conditions.push(eq(commissions.periodStart, filters.exactPeriod.periodStart));
+      conditions.push(eq(commissions.periodEnd, filters.exactPeriod.periodEnd));
+    } else {
+      if (filters?.periodStart) conditions.push(gte(commissions.periodStart, filters.periodStart));
+      if (filters?.periodEnd) conditions.push(lte(commissions.periodEnd, filters.periodEnd));
+    }
 
     if (conditions.length > 0) {
       return await db.select().from(commissions).where(and(...conditions)).orderBy(sql`${commissions.createdAt} DESC`);

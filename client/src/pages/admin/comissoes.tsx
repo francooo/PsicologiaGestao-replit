@@ -685,7 +685,7 @@ export default function AdminComissoes() {
                 paymentMethod: payMethod,
                 paymentNotes: payNotes,
               })}
-              disabled={payMutation.isPending || !payDate}
+              disabled={payMutation.isPending || !payDate || !payMethod}
               className="bg-green-600 hover:bg-green-700 text-white"
               data-testid="button-confirm-pay"
             >
