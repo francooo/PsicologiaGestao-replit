@@ -200,9 +200,9 @@ export default function AdminComissoes() {
   });
 
   const { data: configs = [] } = useQuery<PayoutConfig[]>({
-    queryKey: ["/api/admin/commissions/configs/list"],
+    queryKey: ["/api/admin/commission-configs"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/commissions/configs/list", { credentials: "include" });
+      const res = await fetch("/api/admin/commission-configs", { credentials: "include" });
       if (!res.ok) throw new Error("Erro");
       return res.json();
     },
@@ -265,13 +265,13 @@ export default function AdminComissoes() {
   const createConfigMutation = useMutation({
     mutationFn: (data: any) => {
       if (editingCfgId) {
-        return apiRequest("PUT", `/api/admin/commissions/configs/${editingCfgId}`, data);
+        return apiRequest("PUT", `/api/admin/commission-configs/${editingCfgId}`, data);
       }
-      return apiRequest("POST", "/api/admin/commissions/configs", data);
+      return apiRequest("POST", "/api/admin/commission-configs", data);
     },
     onSuccess: () => {
       toast({ title: editingCfgId ? "Configuração atualizada!" : "Configuração criada!" });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/commissions/configs/list"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/commission-configs"] });
       setCfgPsychId(""); setCfgType("percentual"); setCfgValue(""); setCfgFrom(monthStart(currentMonth())); setCfgUntil(""); setEditingCfgId(null);
     },
     onError: () => toast({ title: "Erro ao salvar configuração", variant: "destructive" }),

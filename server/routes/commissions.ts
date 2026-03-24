@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { storage } from "../storage";
 import { db } from "../db";
-import { roomBookings, rooms, psychologists } from "@shared/schema";
+import { roomBookings, rooms } from "@shared/schema";
 import { eq, and, gte, lte } from "drizzle-orm";
 import { z } from "zod";
 
@@ -23,13 +23,6 @@ function hoursFromTime(start: string, end: string): number {
 }
 
 async function calcCommissionPreview(psychologistId: number, periodStart: string, periodEnd: string) {
-    const [psychRow] = await db
-        .select({ hourlyRate: psychologists.hourlyRate })
-        .from(psychologists)
-        .where(eq(psychologists.id, psychologistId));
-
-    const hourlyRate = psychRow ? parseFloat(psychRow.hourlyRate) : 0;
-
     const bookings = await db
         .select({
             id: roomBookings.id,
@@ -38,6 +31,7 @@ async function calcCommissionPreview(psychologistId: number, periodStart: string
             endTime: roomBookings.endTime,
             roomId: roomBookings.roomId,
             roomName: rooms.name,
+            roomHourlyRate: rooms.hourlyRate,
         })
         .from(roomBookings)
         .leftJoin(rooms, eq(roomBookings.roomId, rooms.id))
@@ -53,6 +47,7 @@ async function calcCommissionPreview(psychologistId: number, periodStart: string
 
     const items = bookings.map((b) => {
         const hours = hoursFromTime(b.startTime, b.endTime);
+        const hourlyRate = b.roomHourlyRate ? parseFloat(b.roomHourlyRate) : 0;
         const bookingValue = hours * hourlyRate;
         let repasseValue = 0;
         if (config) {
@@ -241,10 +236,15 @@ router.patch("/:id/cancel", async (req, res) => {
     }
 });
 
-// ─── Payout Configs ───────────────────────────────────────────────────────────
+export default router;
+
+// ─── Payout Configs Router (mounted at /api/admin/commission-configs) ─────────
+
+export const commissionConfigsRouter = Router();
+commissionConfigsRouter.use(adminOnly);
 
 // GET /api/admin/commission-configs
-router.get("/configs/list", async (req, res) => {
+commissionConfigsRouter.get("/", async (req, res) => {
     try {
         const { psychologistId } = req.query;
         const configs = await storage.listCommissionPayoutConfigs(
@@ -265,7 +265,7 @@ router.get("/configs/list", async (req, res) => {
 });
 
 // POST /api/admin/commission-configs
-router.post("/configs", async (req, res) => {
+commissionConfigsRouter.post("/", async (req, res) => {
     try {
         const schema = z.object({
             psychologistId: z.number(),
@@ -287,7 +287,7 @@ router.post("/configs", async (req, res) => {
 });
 
 // PUT /api/admin/commission-configs/:id
-router.put("/configs/:id", async (req, res) => {
+commissionConfigsRouter.put("/:id", async (req, res) => {
     try {
         const schema = z.object({
             payoutType: z.enum(["percentual", "fixed"]).optional(),
@@ -304,5 +304,3 @@ router.put("/configs/:id", async (req, res) => {
         res.status(500).json({ message: "Erro ao atualizar configuração" });
     }
 });
-
-export default router;

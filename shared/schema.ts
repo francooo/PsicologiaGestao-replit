@@ -108,6 +108,7 @@ export const rooms = pgTable("rooms", {
   hasAirConditioning: boolean("has_air_conditioning").notNull().default(true),
   squareMeters: integer("square_meters"),
   imageUrl: text("image_url"),
+  hourlyRate: decimal("hourly_rate", { precision: 10, scale: 2 }),
 });
 
 export const insertRoomSchema = createInsertSchema(rooms).pick({
@@ -117,6 +118,7 @@ export const insertRoomSchema = createInsertSchema(rooms).pick({
   hasAirConditioning: true,
   squareMeters: true,
   imageUrl: true,
+  hourlyRate: true,
 });
 
 // Appointments
