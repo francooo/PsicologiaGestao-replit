@@ -43,12 +43,21 @@ async function calcCommissionPreview(psychologistId: number, periodStart: string
             )
         );
 
-    const config = await storage.getActiveCommissionPayoutConfig(psychologistId, periodStart);
+    const allConfigs = await storage.listCommissionPayoutConfigs(psychologistId);
+
+    function configForDate(bookingDate: string) {
+        return allConfigs.find((c) => {
+            const after = c.validFrom <= bookingDate;
+            const before = !c.validUntil || c.validUntil >= bookingDate;
+            return after && before;
+        }) ?? null;
+    }
 
     const items = bookings.map((b) => {
         const hours = hoursFromTime(b.startTime, b.endTime);
         const hourlyRate = b.roomHourlyRate ? parseFloat(b.roomHourlyRate) : 0;
         const bookingValue = hours * hourlyRate;
+        const config = configForDate(b.date);
         let repasseValue = 0;
         if (config) {
             const val = parseFloat(config.payoutValue);
@@ -70,7 +79,7 @@ async function calcCommissionPreview(psychologistId: number, periodStart: string
     const totalRoomsValue = items.reduce((acc, i) => acc + i.bookingValue, 0);
     const totalRepasse = items.reduce((acc, i) => acc + i.repasseValue, 0);
 
-    return { items, totalRoomsValue, totalRepasse, totalBookings: items.length, config };
+    return { items, totalRoomsValue, totalRepasse, totalBookings: items.length };
 }
 
 // GET /api/admin/commissions/dashboard
