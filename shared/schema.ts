@@ -3,6 +3,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
 import { sql } from "drizzle-orm";
+import { bytea } from "./pg-types";
 
 // User & Auth related schemas
 export const users = pgTable("users", {
@@ -14,6 +15,8 @@ export const users = pgTable("users", {
   role: text("role").notNull().default("psychologist"), // admin, psychologist, receptionist
   status: text("status").notNull().default("active"), // active, inactive, pending
   profileImage: text("profile_image"),
+  profileImageData: bytea("profile_image_data"),
+  profileImageMimeType: text("profile_image_mime_type"),
   googleId: text("google_id").unique(),
   avatarUrl: text("avatar_url"),
   birthDate: date("birth_date"),
@@ -486,6 +489,8 @@ export const invoices = pgTable(
     // Controle e IA
     imageUrl: text("image_url"),
     imagePath: text("image_path"),
+    imageData: bytea("image_data"),
+    imageMimeType: text("image_mime_type"),
     aiRawResponse: jsonb("ai_raw_response"),
     aiConfidenceScore: decimal("ai_confidence_score", { precision: 4, scale: 3 }),
     aiExtractedAt: timestamp("ai_extracted_at", { withTimezone: true }),

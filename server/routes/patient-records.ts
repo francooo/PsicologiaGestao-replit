@@ -4,7 +4,6 @@ import { insertPatientSchema, insertMedicalRecordSchema, insertClinicalSessionSc
 import { z } from 'zod';
 import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
 import { summarizeDocument, UnsupportedFormatError, AIServiceError, AIQuotaError } from '../services/ai';
 import { db } from '../db';
 import { psychologists, users } from '@shared/schema';
@@ -12,28 +11,14 @@ import { eq } from 'drizzle-orm';
 
 const router = Router();
 
-// Configure multer for document uploads
-const documentsDir = path.join(process.cwd(), "uploads", "documents");
-if (!fs.existsSync(documentsDir)) {
-    fs.mkdirSync(documentsDir, { recursive: true });
-}
-
-const documentStorage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, documentsDir);
-    },
-    filename: function (req, file, cb) {
-        const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-        const ext = path.extname(file.originalname);
-        cb(null, `doc-${uniqueSuffix}${ext}`);
-    },
-});
-
-const MAX_FILE_SIZE_MB = 100;
+// Documentos são armazenados como bytea no Postgres (não em disco — o
+// filesystem do Vercel é efêmero). Limite reduzido para caber no teto de
+// corpo de requisição das funções serverless do Vercel (~4.5MB).
+const MAX_FILE_SIZE_MB = 4;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 const upload = multer({
-    storage: documentStorage,
+    storage: multer.memoryStorage(),
     limits: {
         fileSize: MAX_FILE_SIZE_BYTES,
     },
@@ -486,7 +471,7 @@ router.post('/:id/documents', checkPatientAccess, uploadSingle('file'), async (r
             patientId,
             documentType: documentType || 'other',
             documentName: documentName || req.file.originalname,
-            filePath: `/uploads/documents/${req.file.filename}`,
+            fileData: req.file.buffer,
             fileSize: req.file.size,
             mimeType: req.file.mimetype,
             uploadedBy: userId
@@ -506,7 +491,8 @@ router.post('/:id/documents', checkPatientAccess, uploadSingle('file'), async (r
             details: { filename: doc.documentName }
         });
 
-        res.status(201).json(doc);
+        const { fileData, ...docResponse } = doc;
+        res.status(201).json(docResponse);
     } catch (error) {
         console.error("Document upload error:", error);
         res.status(500).json({ message: "Erro ao fazer upload do documento" });
@@ -523,10 +509,8 @@ router.get('/documents/:docId/download', async (req, res) => {
 
         // Validate permission (check if user has access to patient)
 
-        const filePath = path.join(process.cwd(), "uploads", "documents", path.basename(doc.filePath));
-
-        if (!fs.existsSync(filePath)) {
-            return res.status(404).json({ message: "Arquivo físico não encontrado" });
+        if (!doc.fileData) {
+            return res.status(404).json({ message: "Arquivo não encontrado" });
         }
 
         // Audit log
@@ -541,7 +525,9 @@ router.get('/documents/:docId/download', async (req, res) => {
             details: { filename: doc.documentName }
         });
 
-        res.download(filePath, doc.documentName);
+        res.set('Content-Type', doc.mimeType);
+        res.set('Content-Disposition', `attachment; filename="${encodeURIComponent(doc.documentName)}"`);
+        res.send(doc.fileData);
 
     } catch (error) {
         console.error("Download error:", error);
@@ -556,14 +542,11 @@ router.post('/documents/:docId/summarize', async (req, res) => {
 
         if (!doc) return res.status(404).json({ message: "Documento não encontrado" });
 
-        const filePath = path.join(process.cwd(), "uploads", "documents", path.basename(doc.filePath));
-
-        if (!fs.existsSync(filePath)) {
-            return res.status(404).json({ message: "Arquivo físico não encontrado" });
+        if (!doc.fileData) {
+            return res.status(404).json({ message: "Arquivo não encontrado" });
         }
 
-        const fileBuffer = fs.readFileSync(filePath);
-        const summary = await summarizeDocument(fileBuffer, doc.mimeType, doc.documentName);
+        const summary = await summarizeDocument(doc.fileData, doc.mimeType, doc.documentName);
 
         res.json({ summary });
 
@@ -589,10 +572,6 @@ router.delete('/documents/:docId', async (req, res) => {
         const doc = await storage.getDocument(docId);
 
         if (!doc) return res.status(404).json({ message: "Documento não encontrado" });
-
-        // Optionally delete file from disk
-        // const fullPath = path.join(process.cwd(), doc.filePath);
-        // if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
 
         await storage.deleteDocument(docId);
 

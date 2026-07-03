@@ -26,12 +26,22 @@ import session from "express-session";
 import createMemoryStore from "memorystore";
 import connectPg from "connect-pg-simple";
 import { db, pool } from "./db";
-import { eq, and, gte, lte, sql, desc, ilike, or } from "drizzle-orm";
+import { eq, and, gte, lte, sql, desc, ilike, or, getTableColumns } from "drizzle-orm";
 import fs from "fs";
 import path from "path";
 
 const MemoryStore = createMemoryStore(session);
 const PostgresSessionStore = connectPg(session);
+
+// Listagens de notas fiscais não devem trazer o bytea da imagem (pode ter
+// alguns MB por nota) — só as buscas de uma única nota (para servir a
+// imagem/download) precisam da coluna completa.
+const { imageData: _invoiceImageDataColumn, ...invoiceListColumns } = getTableColumns(invoices);
+
+// Idem para usuários: getUser() roda em toda requisição autenticada
+// (passport deserializeUser), então nunca deve carregar o bytea da foto de
+// perfil — só a rota dedicada de servir a foto usa getUserProfilePhoto().
+const { profileImageData: _userProfileImageDataColumn, ...userColumns } = getTableColumns(users);
 
 export interface IStorage {
   // User related methods
@@ -41,6 +51,7 @@ export interface IStorage {
   updateUser(id: number, user: Partial<User>): Promise<User | undefined>;
   deleteUser(id: number): Promise<boolean>;
   getAllUsers(): Promise<User[]>;
+  getUserProfilePhoto(id: number): Promise<{ data: Buffer; mimeType: string } | undefined>;
 
   // Psychologist related methods
   getPsychologist(id: number): Promise<Psychologist | undefined>;
@@ -108,12 +119,12 @@ export interface IStorage {
   createInvoice(invoice: InsertInvoice): Promise<Invoice>;
   updateInvoice(id: number, data: Partial<Invoice>): Promise<Invoice | undefined>;
   deleteInvoice(id: number): Promise<boolean>;
-  getInvoicesByUserId(userId: number, opts?: { limit?: number; offset?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: Invoice[]; total: number }>;
+  getInvoicesByUserId(userId: number, opts?: { limit?: number; offset?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: Omit<Invoice, "imageData">[]; total: number }>;
   getInvoicesSummary(psychologistId: number, opts?: { dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }>;
   getAllInvoices(): Promise<Invoice[]>;
   getInvoicesByReferenceMonth(referenceMonth: string): Promise<Invoice[]>;
   getInvoiceByUserAndMonth(userId: number, referenceMonth: string): Promise<Invoice | undefined>;
-  getInvoicesAdmin(opts?: { limit?: number; offset?: number; psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: (Invoice & { user: User })[]; total: number }>;
+  getInvoicesAdmin(opts?: { limit?: number; offset?: number; psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: (Omit<Invoice, "imageData"> & { user: User })[]; total: number }>;
   getInvoicesSummaryAdmin(opts?: { psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }>;
 
   // Patient Record System Methods
@@ -137,8 +148,8 @@ export interface IStorage {
 
   // Documents
   getDocument(id: number): Promise<PatientDocument | undefined>;
-  createDocument(document: InsertPatientDocument & { uploadedBy: number }): Promise<PatientDocument>;
-  listDocumentsByPatientId(patientId: number): Promise<PatientDocument[]>;
+  createDocument(document: InsertPatientDocument & { uploadedBy: number; fileData: Buffer }): Promise<PatientDocument>;
+  listDocumentsByPatientId(patientId: number): Promise<Omit<PatientDocument, "fileData">[]>;
   deleteDocument(id: number): Promise<boolean>;
 
   // Assessments
@@ -310,9 +321,12 @@ export class MemStorage implements IStorage {
       role: user.role || 'user',
       status: user.status || 'active',
       profileImage: user.profileImage || null,
+      profileImageData: null,
+      profileImageMimeType: null,
       googleId: user.googleId || null,
       avatarUrl: user.avatarUrl || null,
-      password: user.password || null
+      password: user.password || null,
+      birthDate: (user as any).birthDate || null
     };
     this.users.set(id, newUser);
     return newUser;
@@ -333,6 +347,10 @@ export class MemStorage implements IStorage {
 
   async getAllUsers(): Promise<User[]> {
     return Array.from(this.users.values());
+  }
+
+  async getUserProfilePhoto(id: number): Promise<{ data: Buffer; mimeType: string } | undefined> {
+    return undefined;
   }
 
   // Psychologist methods
@@ -743,7 +761,7 @@ export class MemStorage implements IStorage {
   async deleteInvoice(id: number): Promise<boolean> {
     return false;
   }
-  async getInvoicesByUserId(_userId: number, _opts?: { limit?: number; offset?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: Invoice[]; total: number }> {
+  async getInvoicesByUserId(_userId: number, _opts?: { limit?: number; offset?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: Omit<Invoice, "imageData">[]; total: number }> {
     return { invoices: [], total: 0 };
   }
   async getInvoicesSummary(_psychologistId: number, _opts?: { dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }> {
@@ -758,7 +776,7 @@ export class MemStorage implements IStorage {
   async getInvoiceByUserAndMonth(_userId: number, _referenceMonth: string): Promise<Invoice | undefined> {
     return undefined;
   }
-  async getInvoicesAdmin(_opts?: { limit?: number; offset?: number; psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: (Invoice & { user: User })[]; total: number }> {
+  async getInvoicesAdmin(_opts?: { limit?: number; offset?: number; psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: (Omit<Invoice, "imageData"> & { user: User })[]; total: number }> {
     return { invoices: [], total: 0 };
   }
   async getInvoicesSummaryAdmin(_opts?: { psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }> {
@@ -791,8 +809,8 @@ export class MemStorage implements IStorage {
   async listSessionsByPatientId(patientId: number): Promise<ClinicalSession[]> { return []; }
 
   async getDocument(id: number): Promise<PatientDocument | undefined> { return undefined; }
-  async createDocument(document: InsertPatientDocument & { uploadedBy: number }): Promise<PatientDocument> { throw new Error("Method not implemented."); }
-  async listDocumentsByPatientId(patientId: number): Promise<PatientDocument[]> { return []; }
+  async createDocument(document: InsertPatientDocument & { uploadedBy: number; fileData: Buffer }): Promise<PatientDocument> { throw new Error("Method not implemented."); }
+  async listDocumentsByPatientId(patientId: number): Promise<Omit<PatientDocument, "fileData">[]> { return []; }
   async deleteDocument(id: number): Promise<boolean> { return false; }
 
   async getAssessment(id: number): Promise<PsychologicalAssessment | undefined> { return undefined; }
@@ -824,20 +842,27 @@ export class DatabaseStorage implements IStorage {
 
   constructor() {
     this.sessionStore = new PostgresSessionStore({
-      pool,
+      // connect-pg-simple's types expect a `pg.Pool`; @neondatabase/serverless's
+      // Pool only differs in internal/private fields it never touches
+      // (it just calls .query()), so this is safe at runtime.
+      pool: pool as any,
       createTableIfMissing: true
     });
   }
 
   // User methods
+  // Nota: os métodos de leitura abaixo omitem propositalmente profileImageData
+  // (bytea) do select — getUser() em particular roda a cada requisição
+  // autenticada via passport deserializeUser, então nunca deve trazer o
+  // binário da foto. Quem precisa da foto usa getUserProfilePhoto().
   async getUser(id: number): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user;
+    const [user] = await db.select(userColumns).from(users).where(eq(users.id, id));
+    return user as User | undefined;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.username, username));
-    return user;
+    const [user] = await db.select(userColumns).from(users).where(eq(users.username, username));
+    return user as User | undefined;
   }
 
   async createUser(user: InsertUser): Promise<User> {
@@ -856,17 +881,26 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllUsers(): Promise<User[]> {
-    return await db.select().from(users);
+    return await db.select(userColumns).from(users) as User[];
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.email, email));
-    return user;
+    const [user] = await db.select(userColumns).from(users).where(eq(users.email, email));
+    return user as User | undefined;
   }
 
   async getUserByGoogleId(googleId: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.googleId, googleId));
-    return user;
+    const [user] = await db.select(userColumns).from(users).where(eq(users.googleId, googleId));
+    return user as User | undefined;
+  }
+
+  async getUserProfilePhoto(id: number): Promise<{ data: Buffer; mimeType: string } | undefined> {
+    const [row] = await db.select({
+      data: users.profileImageData,
+      mimeType: users.profileImageMimeType,
+    }).from(users).where(eq(users.id, id));
+    if (!row || !row.data) return undefined;
+    return { data: row.data, mimeType: row.mimeType || "image/jpeg" };
   }
 
   // Password Reset
@@ -1197,7 +1231,7 @@ export class DatabaseStorage implements IStorage {
     return !!deleted;
   }
 
-  async getInvoicesByUserId(psychologistId: number, opts?: { limit?: number; offset?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: Invoice[]; total: number }> {
+  async getInvoicesByUserId(psychologistId: number, opts?: { limit?: number; offset?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: Omit<Invoice, "imageData">[]; total: number }> {
     const conditions = [eq(invoices.psychologistId, psychologistId)];
     if (opts?.dataEmissaoFrom) conditions.push(gte(invoices.dataEmissao, opts.dataEmissaoFrom));
     if (opts?.dataEmissaoTo) conditions.push(lte(invoices.dataEmissao, opts.dataEmissaoTo));
@@ -1209,7 +1243,7 @@ export class DatabaseStorage implements IStorage {
     const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
     const totalResult = await db.select({ count: sql<number>`count(*)::int` }).from(invoices).where(whereClause);
     const total = totalResult[0]?.count ?? 0;
-    let query = db.select().from(invoices).where(whereClause).orderBy(desc(invoices.dataUpload));
+    let query = db.select(invoiceListColumns).from(invoices).where(whereClause).orderBy(desc(invoices.dataUpload));
     if (opts?.limit != null) query = query.limit(opts.limit) as typeof query;
     if (opts?.offset != null) query = query.offset(opts.offset) as typeof query;
     const rows = await query;
@@ -1242,7 +1276,7 @@ export class DatabaseStorage implements IStorage {
     return undefined;
   }
 
-  async getInvoicesAdmin(opts?: { limit?: number; offset?: number; psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: (Invoice & { user: User })[]; total: number }> {
+  async getInvoicesAdmin(opts?: { limit?: number; offset?: number; psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: (Omit<Invoice, "imageData"> & { user: User })[]; total: number }> {
     const conditions: ReturnType<typeof eq>[] = [];
     if (opts?.psychologistId != null) conditions.push(eq(invoices.psychologistId, opts.psychologistId));
     if (opts?.dataEmissaoFrom) conditions.push(gte(invoices.dataEmissao, opts.dataEmissaoFrom));
@@ -1257,8 +1291,8 @@ export class DatabaseStorage implements IStorage {
     const totalCount = totalCountResult[0]?.count ?? 0;
     const limit = opts?.limit ?? 20;
     const offset = opts?.offset ?? 0;
-    const result = await db.select().from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).where(whereClause).orderBy(desc(invoices.dataUpload)).limit(limit).offset(offset);
-    const invoicesWithUsers = result.map((r) => ({ ...r.invoices, user: r.users }));
+    const result = await db.select({ invoices: invoiceListColumns, users: userColumns }).from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).where(whereClause).orderBy(desc(invoices.dataUpload)).limit(limit).offset(offset);
+    const invoicesWithUsers = result.map((r) => ({ ...r.invoices, user: r.users as User }));
     return { invoices: invoicesWithUsers, total: totalCount };
   }
 
@@ -1360,13 +1394,23 @@ export class DatabaseStorage implements IStorage {
     return doc;
   }
 
-  async createDocument(document: InsertPatientDocument & { uploadedBy: number }): Promise<PatientDocument> {
+  async createDocument(document: InsertPatientDocument & { uploadedBy: number; fileData: Buffer }): Promise<PatientDocument> {
     const [newDoc] = await db.insert(patientDocuments).values(document).returning();
     return newDoc;
   }
 
-  async listDocumentsByPatientId(patientId: number): Promise<PatientDocument[]> {
-    return await db.select().from(patientDocuments).where(eq(patientDocuments.patientId, patientId));
+  async listDocumentsByPatientId(patientId: number): Promise<Omit<PatientDocument, "fileData">[]> {
+    return await db.select({
+      id: patientDocuments.id,
+      patientId: patientDocuments.patientId,
+      documentType: patientDocuments.documentType,
+      documentName: patientDocuments.documentName,
+      filePath: patientDocuments.filePath,
+      fileSize: patientDocuments.fileSize,
+      mimeType: patientDocuments.mimeType,
+      uploadedBy: patientDocuments.uploadedBy,
+      createdAt: patientDocuments.createdAt,
+    }).from(patientDocuments).where(eq(patientDocuments.patientId, patientId));
   }
 
   async deleteDocument(id: number): Promise<boolean> {

@@ -7,7 +7,6 @@ import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
 import multer from "multer";
 import path from "path";
-import fs from "fs";
 import crypto from "crypto";
 import { sendPasswordResetEmail } from "./services/email";
 import * as WhatsAppService from "./services/whatsapp";
@@ -24,25 +23,8 @@ import carePublicRouter from "./routes/care-public";
 import commissionsRouter, { commissionConfigsRouter } from "./routes/commissions";
 import { analyzeInvoiceImage, analyzeInvoicePdf, type PsychologistProfileForInvoice, AIServiceError, AIQuotaError, UnsupportedFormatError } from "./services/ai";
 
-// Configure multer for image upload
-const uploadDir = path.join(process.cwd(), "uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const storage_config = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, `profile-${uniqueSuffix}${ext}`);
-  },
-});
-
 const upload = multer({
-  storage: storage_config,
+  storage: multer.memoryStorage(),
   limits: {
     fileSize: 1024 * 1024 * 2, // 2MB max file size
   },
@@ -60,41 +42,6 @@ const upload = multer({
     }
 
     cb(new Error("Apenas imagens nos formatos JPEG, JPG, PNG, GIF e WEBP são permitidas."));
-  },
-});
-
-// Configure multer for invoice upload (PDF, JPG, PNG - 5MB max)
-const invoiceUploadDir = path.join(process.cwd(), "uploads", "invoices");
-if (!fs.existsSync(invoiceUploadDir)) {
-  fs.mkdirSync(invoiceUploadDir, { recursive: true });
-}
-
-const invoiceStorageConfig = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, invoiceUploadDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, `invoice-${uniqueSuffix}${ext}`);
-  },
-});
-
-const invoiceUpload = multer({
-  storage: invoiceStorageConfig,
-  limits: {
-    fileSize: 1024 * 1024 * 5, // 5MB max file size
-  },
-  fileFilter: function (req, file, cb) {
-    const filetypes = /jpeg|jpg|png|pdf/;
-    const mimetype = /image\/(jpeg|jpg|png)|application\/pdf/.test(file.mimetype);
-    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
-
-    if (mimetype && extname) {
-      return cb(null, true);
-    }
-
-    cb(new Error("Apenas arquivos nos formatos PDF, JPG ou PNG são permitidos."));
   },
 });
 
@@ -223,8 +170,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Nenhum arquivo enviado" });
       }
 
-      console.log('File uploaded:', req.file.filename);
-
       // Obter usuário associado
       const user = await storage.getUser(psychologist.userId);
       if (!user) {
@@ -232,22 +177,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Usuário não encontrado" });
       }
 
-      // Remover foto antiga se existir
-      if (user.profileImage) {
-        try {
-          const oldImagePath = path.join(process.cwd(), user.profileImage);
-          if (fs.existsSync(oldImagePath)) {
-            fs.unlinkSync(oldImagePath);
-            console.log('Old image deleted:', oldImagePath);
-          }
-        } catch (err) {
-          console.error("Error deleting old profile image:", err);
-        }
-      }
-
-      // Atualizar foto do usuário associado
-      const imageUrl = `/uploads/${req.file.filename}`;
-      await storage.updateUser(psychologist.userId, { profileImage: imageUrl });
+      // Atualizar foto do usuário associado (armazenada como bytea no Postgres)
+      const imageUrl = `/api/users/${psychologist.userId}/photo`;
+      await storage.updateUser(psychologist.userId, {
+        profileImage: imageUrl,
+        profileImageData: req.file.buffer,
+        profileImageMimeType: req.file.mimetype,
+      });
 
       console.log('Profile image updated successfully:', imageUrl);
       res.json({ profileImage: imageUrl });
@@ -257,6 +193,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: "Erro ao fazer upload da foto",
         error: error instanceof Error ? error.message : 'Erro desconhecido'
       });
+    }
+  });
+
+  // GET /api/users/:id/photo - Servir a foto de perfil de um usuário (armazenada como bytea)
+  app.get("/api/users/:id/photo", async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: "ID de usuário inválido" });
+      }
+      const photo = await storage.getUserProfilePhoto(userId);
+      if (!photo) {
+        return res.status(404).json({ message: "Foto não encontrada" });
+      }
+      res.setHeader("Content-Type", photo.mimeType);
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.send(photo.data);
+    } catch (error) {
+      console.error("Error serving user photo:", error);
+      res.status(500).json({ message: "Erro ao exibir foto" });
     }
   });
 
@@ -1425,30 +1381,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (email) updateData.email = email;
       if (birthDate !== undefined) updateData.birthDate = birthDate || null;
 
-      // Process profile image if uploaded
+      // Process profile image if uploaded (armazenada como bytea no Postgres)
       if (req.file) {
-        console.log('Processing uploaded file:', req.file.filename);
-
-        // If there's an existing profile image, remove it to save space
-        if (existingUser.profileImage) {
-          try {
-            const oldImagePath = path.join(process.cwd(), existingUser.profileImage);
-            if (fs.existsSync(oldImagePath)) {
-              fs.unlinkSync(oldImagePath);
-              console.log('Old image deleted:', oldImagePath);
-            }
-          } catch (err) {
-            console.error("Error deleting old profile image:", err);
-          }
-        }
-
-        // Save path to uploaded image
-        const imageUrl = `/uploads/${req.file.filename}`;
+        const imageUrl = `/api/users/${userId}/photo`;
         updateData.profileImage = imageUrl;
+        updateData.profileImageData = req.file.buffer;
+        updateData.profileImageMimeType = req.file.mimetype;
         console.log('New image URL:', imageUrl);
       }
 
-      console.log('Update data:', updateData);
+      console.log('Update data:', { ...updateData, profileImageData: updateData.profileImageData ? '<buffer>' : undefined });
 
       // Update user in database
       const updatedUser = await storage.updateUser(userId, updateData);
@@ -1459,8 +1401,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log('User updated successfully');
 
-      // Return updated user data without sensitive info
-      const { password, ...userWithoutPassword } = updatedUser;
+      // Return updated user data without sensitive info / heavy binary data
+      const { password, profileImageData, ...userWithoutPassword } = updatedUser;
       res.json(userWithoutPassword);
     } catch (error) {
       console.error("Error updating profile:", error);
@@ -1470,9 +1412,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
   });
-
-  // Serve uploaded images
-  app.use("/uploads", express.static(uploadDir));
 
   // Password Recovery
   app.post("/api/recover-password", async (req, res) => {
@@ -1839,22 +1778,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let imageUrl = body.image_url as string | undefined;
       const imageBase64 = body.image as string | undefined;
       const imageType = (body.image_type as string) || "image/jpeg";
+      let imageData: Buffer | null = null;
+      let imageMimeType: string | null = null;
       if (!imagePath && !imageUrl && !imageBase64) {
         return res.status(400).json({ message: "Imagem da nota é obrigatória (image_path, image_url ou image em base64)." });
       }
       if (imageBase64 && typeof imageBase64 === "string") {
         try {
-          const ext = imageType.includes("pdf") ? "pdf" : imageType.includes("png") ? "png" : imageType.includes("webp") ? "webp" : "jpg";
-          const now = new Date();
-          const dir = path.join(invoiceUploadDir, String(psychologistId), String(now.getFullYear()), String(now.getMonth() + 1).padStart(2, "0"));
-          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-          const filename = `invoice-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.${ext}`;
-          const fullPath = path.join(dir, filename);
           const buf = Buffer.from(imageBase64, "base64");
-          if (buf.length > 5 * 1024 * 1024) return res.status(400).json({ message: "Arquivo muito grande (máx. 5MB)." });
-          fs.writeFileSync(fullPath, buf);
-          const relativePath = path.relative(process.cwd(), fullPath).split(path.sep).join("/");
-          imagePath = relativePath.startsWith("uploads") ? relativePath : `uploads/invoices/${psychologistId}/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/${filename}`;
+          if (buf.length > 4 * 1024 * 1024) return res.status(400).json({ message: "Arquivo muito grande (máx. 4MB)." });
+          imageData = buf;
+          imageMimeType = imageType;
         } catch (err) {
           console.error("Error saving invoice image:", err);
           return res.status(400).json({ message: "Erro ao salvar imagem da nota." });
@@ -1908,6 +1842,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         valorLiquido: valorLiquido != null ? String(valorLiquido) : (valorServicos != null ? String(valorServicos) : null),
         imageUrl: imageUrl ?? null,
         imagePath: imagePath ?? null,
+        imageData: imageData,
+        imageMimeType: imageMimeType,
         aiRawResponse: (body.ai_raw_response as object) ?? null,
         aiConfidenceScore: body.ai_confidence_score != null ? String(Number(body.ai_confidence_score)) : null,
         aiExtractedAt: body.ai_extracted_at ? new Date(body.ai_extracted_at as string) : null,
@@ -1915,7 +1851,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         observacoes: (body.observacoes as string) ?? null,
         status: (body.status as string) ?? "ativa",
       });
-      res.status(201).json({ ...invoice, message: "Nota fiscal registrada com sucesso" });
+      const { imageData: _invoiceImageData, ...invoiceResponse } = invoice;
+      res.status(201).json({ ...invoiceResponse, message: "Nota fiscal registrada com sucesso" });
     } catch (error) {
       console.error("Error creating invoice:", error);
       res.status(500).json({ message: "Erro ao salvar nota fiscal" });
@@ -1976,7 +1913,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (invoice.psychologistId !== user.id && user.role !== "admin") {
         return res.status(403).json({ message: "Acesso negado" });
       }
-      res.json(invoice);
+      const { imageData: _invoiceImageData, ...invoiceResponse } = invoice;
+      res.json(invoiceResponse);
     } catch (error) {
       console.error("Error fetching invoice:", error);
       res.status(500).json({ message: "Erro ao buscar nota fiscal" });
@@ -2016,7 +1954,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         observacoes: body.observacoes as string | undefined,
         status: body.status as string | undefined,
       });
-      res.json(updated);
+      const { imageData: _invoiceImageData, ...updatedResponse } = updated ?? {};
+      res.json(updatedResponse);
     } catch (error) {
       console.error("Error updating invoice:", error);
       res.status(500).json({ message: "Erro ao atualizar nota fiscal" });
@@ -2042,7 +1981,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Status inválido. Use: ativa, cancelada ou pendente." });
       }
       const updated = await storage.updateInvoice(id, { status });
-      res.json(updated);
+      const { imageData: _invoiceImageData, ...updatedResponse } = updated ?? {};
+      res.json(updatedResponse);
     } catch (error) {
       console.error("Error patching invoice status:", error);
       res.status(500).json({ message: "Erro ao alterar status" });
@@ -2178,15 +2118,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (invoice.psychologistId !== user.id && user.role !== "admin") {
         return res.status(403).json({ message: "Acesso negado" });
       }
-      const filePath = invoice.imagePath ? path.join(process.cwd(), invoice.imagePath) : null;
-      if (!filePath || !fs.existsSync(filePath)) {
+      if (!invoice.imageData) {
         return res.status(404).json({ message: "Arquivo da imagem não encontrado" });
       }
-      const ext = path.extname(filePath).toLowerCase();
-      const contentType = ext === ".pdf" ? "application/pdf" : ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
-      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Type", invoice.imageMimeType || "image/jpeg");
       res.setHeader("Content-Disposition", "inline");
-      res.sendFile(path.resolve(filePath));
+      res.send(invoice.imageData);
     } catch (error) {
       console.error("Error serving invoice image:", error);
       res.status(500).json({ message: "Erro ao exibir imagem" });
@@ -2207,13 +2144,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (invoice.psychologistId !== user.id && user.role !== "admin") {
         return res.status(403).json({ message: "Acesso negado" });
       }
-      const filePath = invoice.imagePath ? path.join(process.cwd(), invoice.imagePath) : null;
-      if (!filePath || !fs.existsSync(filePath)) {
+      if (!invoice.imageData) {
         return res.status(404).json({ message: "Arquivo da imagem não encontrado" });
       }
-      const fileExt = path.extname(filePath).toLowerCase() || ".jpg";
+      const mimeType = invoice.imageMimeType || "image/jpeg";
+      const fileExt = mimeType.includes("pdf") ? ".pdf" : mimeType.includes("png") ? ".png" : mimeType.includes("webp") ? ".webp" : ".jpg";
       const filename = `nota-${invoice.numeroNota ?? invoice.id}${fileExt}`;
-      res.download(filePath, filename);
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(invoice.imageData);
     } catch (error) {
       console.error("Error downloading invoice:", error);
       res.status(500).json({ message: "Erro ao baixar nota fiscal" });
@@ -2233,10 +2172,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!invoice) return res.status(404).json({ message: "Nota fiscal não encontrada" });
       if (invoice.psychologistId !== user.id) {
         return res.status(403).json({ message: "Acesso negado. Você só pode excluir suas próprias notas." });
-      }
-      if (invoice.imagePath) {
-        const filePath = path.join(process.cwd(), invoice.imagePath);
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       }
       await storage.deleteInvoice(invoiceId);
       res.json({ message: "Nota fiscal excluída com sucesso" });

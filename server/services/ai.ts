@@ -193,7 +193,15 @@ async function pdfBufferToImageBase64(pdfBuffer: Buffer): Promise<string> {
   };
   try {
     writeFileSync(inputPath, pdfBuffer);
-    await execFileAsync("pdftoppm", ["-png", "-r", "200", "-f", "1", "-l", "1", inputPath, outputPrefix]);
+    try {
+      await execFileAsync("pdftoppm", ["-png", "-r", "200", "-f", "1", "-l", "1", inputPath, outputPrefix]);
+    } catch (err) {
+      // pdftoppm (poppler-utils) não está disponível no runtime serverless do Vercel —
+      // esse fallback só existe para PDFs escaneados sem texto extraível.
+      throw new UnsupportedFormatError(
+        "Não foi possível processar este PDF escaneado automaticamente. Envie uma foto/print da nota em vez do PDF."
+      );
+    }
     const candidates = [`${outputPrefix}-1.png`, `${outputPrefix}-01.png`, `${outputPrefix}-001.png`];
     const pngPath = candidates.find(existsSync);
     if (!pngPath) {

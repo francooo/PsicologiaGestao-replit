@@ -4,6 +4,7 @@ import { z } from "zod";
 import { relations } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { users, psychologists } from "./schema";
+import { bytea } from "./pg-types";
 
 // ========== PATIENT RECORD SYSTEM ==========
 
@@ -137,7 +138,8 @@ export const patientDocuments = pgTable("patient_documents", {
     patientId: integer("patient_id").notNull().references(() => patients.id),
     documentType: text("document_type").notNull(), // consent, contract, report, exam, other
     documentName: text("document_name").notNull(),
-    filePath: text("file_path").notNull(),
+    filePath: text("file_path"), // legado (caminho em disco); novos uploads usam fileData
+    fileData: bytea("file_data"),
     fileSize: integer("file_size").notNull(),
     mimeType: text("mime_type").notNull(),
     uploadedBy: integer("uploaded_by").notNull().references(() => users.id),
@@ -148,7 +150,6 @@ export const insertPatientDocumentSchema = createInsertSchema(patientDocuments).
     patientId: true,
     documentType: true,
     documentName: true,
-    filePath: true,
     fileSize: true,
     mimeType: true,
 });

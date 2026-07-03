@@ -36,6 +36,7 @@ export function setupAuth(app: Express) {
     secret: process.env.SESSION_SECRET || "r8q/+&1LM3)cd*zAGpx1xm{NeQHc;#",
     resave: false,
     saveUninitialized: false,
+    store: storage.sessionStore,
     cookie: {} as any
   };
 
