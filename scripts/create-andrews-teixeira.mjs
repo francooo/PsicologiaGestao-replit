@@ -1,7 +1,8 @@
+import 'dotenv/config';
 import { neon } from '@neondatabase/serverless';
 import bcrypt from 'bcrypt';
 
-const sql = neon('postgresql://neondb_owner:npg_O4rZuwycG6FT@ep-little-mud-a5s0bez0.us-east-2.aws.neon.tech/neondb?sslmode=require');
+const sql = neon(process.env.DATABASE_URL);
 
 const userData = {
     username: 'andrews.teixeira',

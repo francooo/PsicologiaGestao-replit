@@ -26,18 +26,14 @@ O arquivo `server/storage.ts` está corretamente configurado:
 ## Banco de Dados
 
 **Tipo**: PostgreSQL (Neon)  
-**Configuração**: Definida no arquivo `.env`
+**Configuração**: Definida no arquivo `.env` (nunca commitado — ver `.env.example` para o formato esperado)
 
 ```
-DATABASE_URL=postgresql://neondb_owner:npg_F4eEAw3JGzVo@ep-withered-sea-aiv46ynt-pooler.c-4.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+DATABASE_URL=postgresql://<usuario>:<senha>@<host-pooler>.neon.tech/<banco>?sslmode=require&channel_binding=require
 ```
 
-**Detalhes da Conexão:**
-- **Host**: `ep-withered-sea-aiv46ynt-pooler.c-4.us-east-1.aws.neon.tech`
+**Detalhes da Conexão:** use o endpoint **pooled** (host com `-pooler`) do painel do Neon; a senha real fica só no `.env` local e nas variáveis de ambiente do Vercel, nunca no repositório.
 - **Porta**: `5432`
-- **Banco**: `neondb`
-- **Usuário**: `neondb_owner`
-- **Senha**: `npg_F4eEAw3JGzVo`
 - **SSL**: Obrigatório
 - **Connection Pooling**: Habilitado
 

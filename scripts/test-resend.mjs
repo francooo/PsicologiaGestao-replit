@@ -4,7 +4,11 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const apiKey = process.env.RESEND_API_KEY || 're_C3afDVpG_BTRHpWzZxCNoeqbPNGRTt7ki';
+const apiKey = process.env.RESEND_API_KEY;
+if (!apiKey) {
+    console.error('❌ RESEND_API_KEY não definida no .env');
+    process.exit(1);
+}
 
 console.log('🧪 Testando Comunicação com Resend API');
 console.log('='.repeat(60));

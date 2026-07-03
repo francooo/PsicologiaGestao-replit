@@ -13,6 +13,7 @@ uploads/*
 # Environment variables
 .env
 .env.local
+env.local
 
 # Replit config (contains secrets)
 .replit
