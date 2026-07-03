@@ -1,8 +1,8 @@
 {
-  "buildCommand": "vite build",
+  "buildCommand": "vite build && esbuild server/vercel-handler.ts --platform=node --packages=external --bundle --format=esm --outfile=api/index.js",
   "outputDirectory": "dist/public",
   "functions": {
-    "api/index.ts": {
+    "api/index.js": {
       "maxDuration": 10
     }
   },

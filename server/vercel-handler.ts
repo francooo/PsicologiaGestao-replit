@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import type { Express } from "express";
-import { createApp } from "../server/app";
+import { createApp } from "./app";
 
 let appPromise: Promise<{ app: Express }> | null = null;
 
