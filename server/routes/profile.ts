@@ -8,28 +8,15 @@ import {
 } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import multer from "multer";
-import path from "path";
-import fs from "fs";
-import crypto from "crypto";
 
 const router = Router();
 
-const uploadDir = path.join(process.cwd(), "uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const avatarStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const unique = Date.now() + "-" + crypto.randomBytes(6).toString("hex");
-    cb(null, `avatar-${unique}${path.extname(file.originalname)}`);
-  },
-});
-
+// Fotos são armazenadas como bytea no Postgres (não em disco — o filesystem
+// do Vercel é efêmero). Limite reduzido para caber no teto de corpo de
+// requisição das funções serverless do Vercel (~4.5MB).
 const avatarUpload = multer({
-  storage: avatarStorage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 4 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = /image\/(jpeg|jpg|png|webp)/;
     if (allowed.test(file.mimetype)) return cb(null, true);
@@ -77,7 +64,7 @@ router.get("/", async (req, res) => {
       specializations = rows;
     }
 
-    const { password, ...safeUser } = userData;
+    const { password, profileImageData, ...safeUser } = userData;
     return res.json({
       ...safeUser,
       psychologist: psychData || null,
@@ -120,7 +107,7 @@ router.patch("/", async (req, res) => {
 
     const [updated] = await db.select().from(users).where(eq(users.id, user.id));
     const [updatedPsych] = await db.select().from(psychologists).where(eq(psychologists.userId, user.id));
-    const { password, ...safeUser } = updated;
+    const { password, profileImageData, ...safeUser } = updated;
     return res.json({ ...safeUser, psychologist: updatedPsych || null, age: calcAge(updated.birthDate) });
   } catch (e) {
     console.error("PATCH /api/profile error:", e);
@@ -168,7 +155,7 @@ router.post(
   (req, res, next) => {
     avatarUpload.single("avatar")(req, res, (err) => {
       if (err instanceof multer.MulterError) {
-        if (err.code === "LIMIT_FILE_SIZE") return res.status(400).json({ error: "Arquivo muito grande. Máximo 5MB." });
+        if (err.code === "LIMIT_FILE_SIZE") return res.status(400).json({ error: "Arquivo muito grande. Máximo 4MB." });
         return res.status(400).json({ error: err.message });
       } else if (err) {
         return res.status(400).json({ error: err.message });
@@ -184,15 +171,12 @@ router.post(
       const [existingUser] = await db.select().from(users).where(eq(users.id, user.id));
       if (!existingUser) return res.status(404).json({ error: "Usuário não encontrado." });
 
-      if (existingUser.profileImage) {
-        try {
-          const oldPath = path.join(process.cwd(), existingUser.profileImage);
-          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-        } catch {}
-      }
-
-      const imageUrl = `/uploads/${req.file.filename}`;
-      await db.update(users).set({ profileImage: imageUrl }).where(eq(users.id, user.id));
+      const imageUrl = `/api/users/${user.id}/photo`;
+      await db.update(users).set({
+        profileImage: imageUrl,
+        profileImageData: req.file.buffer,
+        profileImageMimeType: req.file.mimetype,
+      }).where(eq(users.id, user.id));
 
       return res.json({ profileImage: imageUrl });
     } catch (e) {

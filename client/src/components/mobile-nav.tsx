@@ -97,7 +97,7 @@ export default function MobileNav() {
     {
       name: "Configurações",
       icon: <Settings className="w-5 h-5" />,
-      href: "/settings",
+      href: "/profile",
       allowedRoles: ["admin", "psychologist", "receptionist"]
     }
   ];
