@@ -1,0 +1,65 @@
+{
+  "expo": {
+    "name": "ConsultaPsi",
+    "slug": "consultapsi",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/app-icon.png",
+    "scheme": "consultapsi",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#FAF6F1",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#FAF6F1",
+        "foregroundImage": "./assets/images/app-icon.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FAF6F1",
+          "image": "./assets/images/app-icon.png",
+          "imageWidth": 120
+        }
+      ],
+      "expo-secure-store",
+      "expo-sharing",
+      "@react-native-community/datetimepicker",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "O ConsultaPsi usa suas fotos para anexar notas fiscais, documentos e foto de perfil.",
+          "cameraPermission": "O ConsultaPsi usa a câmera para fotografar notas fiscais e documentos.",
+          "microphonePermission": false
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0857f96e-afae-42a5-93da-6f2138370cc9"
+      }
+    },
+    "owner": "francooo",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/0857f96e-afae-42a5-93da-6f2138370cc9"
+    }
+  }
+}
