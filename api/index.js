@@ -1,10 +1,4 @@
 var __defProp = Object.defineProperty;
-var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
-  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
-}) : x)(function(x) {
-  if (typeof require !== "undefined") return require.apply(this, arguments);
-  throw Error('Dynamic require of "' + x + '" is not supported');
-});
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -1686,6 +1680,41 @@ var DatabaseStorage = class {
 };
 var storage = new DatabaseStorage();
 
+// server/middleware/auth-guards.ts
+import { createHmac } from "crypto";
+var SESSION_COOKIE_NAME = "connect.sid";
+function signSessionId(sid, secret) {
+  const signature = createHmac("sha256", secret).update(sid).digest("base64").replace(/=+$/, "");
+  return `s:${sid}.${signature}`;
+}
+function bearerSessionBridge(secret) {
+  return (req, _res, next) => {
+    const header = req.headers.authorization;
+    if (header?.startsWith("Bearer ")) {
+      const sid = header.slice("Bearer ".length).trim();
+      if (sid && /^[\w-]+$/.test(sid)) {
+        const cookie = `${SESSION_COOKIE_NAME}=${encodeURIComponent(signSessionId(sid, secret))}`;
+        req.headers.cookie = cookie;
+      }
+    }
+    next();
+  };
+}
+function requireAuth(req, res, next) {
+  if (!req.isAuthenticated()) return res.status(401).json({ message: "N\xE3o autenticado" });
+  next();
+}
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.isAuthenticated()) return res.status(401).json({ message: "N\xE3o autenticado" });
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ message: "Acesso n\xE3o autorizado" });
+    }
+    next();
+  };
+}
+var requireAdmin = requireRole("admin");
+
 // server/auth.ts
 var scryptAsync = promisify(scrypt);
 async function hashPassword(password) {
@@ -1700,9 +1729,15 @@ async function comparePasswords(supplied, stored) {
   const suppliedBuf = await scryptAsync(supplied, salt, 64);
   return timingSafeEqual(hashedBuf, suppliedBuf);
 }
+var MOBILE_SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1e3;
+var MOBILE_REDIRECT_PREFIXES = ["exp://", "exps://", "consultapsi://"];
+function isAllowedMobileRedirect(url) {
+  return typeof url === "string" && MOBILE_REDIRECT_PREFIXES.some((p) => url.startsWith(p));
+}
 function setupAuth(app) {
+  const sessionSecret = process.env.SESSION_SECRET || "r8q/+&1LM3)cd*zAGpx1xm{NeQHc;#";
   const sessionSettings = {
-    secret: process.env.SESSION_SECRET || "r8q/+&1LM3)cd*zAGpx1xm{NeQHc;#",
+    secret: sessionSecret,
     resave: false,
     saveUninitialized: false,
     store: storage.sessionStore,
@@ -1714,13 +1749,14 @@ function setupAuth(app) {
       secure: true
     };
   }
+  app.use(bearerSessionBridge(sessionSecret));
   app.use(session2(sessionSettings));
   app.use(passport.initialize());
   app.use(passport.session());
   passport.use(
     new LocalStrategy(async (username, password, done) => {
       try {
-        const user = await storage.getUserByUsername(username);
+        const user = username.includes("@") ? await storage.getUserByEmail(username) ?? await storage.getUserByUsername(username) : await storage.getUserByUsername(username);
         if (!user || !await comparePasswords(password, user.password)) {
           return done(null, false, { message: "Invalid username or password" });
         } else if (user.status !== "active") {
@@ -1801,16 +1837,32 @@ function setupAuth(app) {
     };
     app.get("/auth/google", (req, res, next) => {
       const callbackURL = buildCallbackUrl(req);
+      const mobileRedirect = req.query.mobile_redirect;
+      if (isAllowedMobileRedirect(mobileRedirect)) {
+        req.session.mobileRedirect = mobileRedirect;
+        return req.session.save(
+          () => passport.authenticate("google", { scope: ["profile", "email"], callbackURL })(req, res, next)
+        );
+      }
       passport.authenticate("google", { scope: ["profile", "email"], callbackURL })(req, res, next);
     });
     app.get(
       "/auth/google/callback",
       (req, res, next) => {
         const callbackURL = buildCallbackUrl(req);
-        passport.authenticate("google", { failureRedirect: "/auth", callbackURL })(req, res, next);
+        res.locals.mobileRedirect = req.session.mobileRedirect;
+        const mobileRedirect = res.locals.mobileRedirect;
+        const failureRedirect = isAllowedMobileRedirect(mobileRedirect) ? `${mobileRedirect}${mobileRedirect.includes("?") ? "&" : "?"}error=google` : "/auth";
+        passport.authenticate("google", { failureRedirect, callbackURL })(req, res, next);
       },
       (req, res) => {
-        res.redirect("/");
+        const mobileRedirect = res.locals.mobileRedirect;
+        if (!isAllowedMobileRedirect(mobileRedirect)) return res.redirect("/");
+        req.session.cookie.maxAge = MOBILE_SESSION_MAX_AGE;
+        req.session.save(() => {
+          const sep = mobileRedirect.includes("?") ? "&" : "?";
+          res.redirect(`${mobileRedirect}${sep}token=${encodeURIComponent(req.sessionID)}`);
+        });
       }
     );
   } else {
@@ -1844,11 +1896,16 @@ function setupAuth(app) {
         return res.status(400).json({ message: "Username already exists" });
       }
       const hashedPassword = await hashPassword(req.body.password);
+      const isAdminCaller = req.isAuthenticated() && req.user.role === "admin";
+      const role = isAdminCaller && req.body.role ? req.body.role : "psychologist";
+      const status = isAdminCaller && req.body.status ? req.body.status : "active";
       const user = await storage.createUser({
         ...req.body,
+        role,
+        status,
         password: hashedPassword
       });
-      if (req.body.role === "psychologist" && req.body.hourlyRate) {
+      if (role === "psychologist" && req.body.hourlyRate) {
         await storage.createPsychologist({
           userId: user.id,
           specialization: req.body.specialization || "",
@@ -1857,6 +1914,9 @@ function setupAuth(app) {
         });
       }
       const { password, ...userResponse } = user;
+      if (req.isAuthenticated()) {
+        return res.status(201).json(userResponse);
+      }
       req.login(user, (err) => {
         if (err) return next(err);
         res.status(201).json(userResponse);
@@ -1865,7 +1925,7 @@ function setupAuth(app) {
       next(error);
     }
   });
-  app.post("/api/login", (req, res, next) => {
+  const handleLogin = (mobile) => (req, res, next) => {
     passport.authenticate("local", (err, user, info) => {
       if (err) return next(err);
       if (!user) {
@@ -1890,14 +1950,21 @@ function setupAuth(app) {
           }
         }
         const { password, ...userResponse } = user;
-        res.status(200).json(userResponse);
+        if (!mobile) return res.status(200).json(userResponse);
+        req.session.cookie.maxAge = MOBILE_SESSION_MAX_AGE;
+        req.session.save((saveErr) => {
+          if (saveErr) return next(saveErr);
+          res.status(200).json({ user: userResponse, token: req.sessionID });
+        });
       });
     })(req, res, next);
-  });
+  };
+  app.post("/api/login", handleLogin(false));
+  app.post("/api/mobile/login", handleLogin(true));
   app.post("/api/logout", (req, res, next) => {
     req.logout((err) => {
       if (err) return next(err);
-      res.sendStatus(200);
+      req.session.destroy(() => res.sendStatus(200));
     });
   });
   app.get("/api/user", (req, res) => {
@@ -1943,8 +2010,8 @@ function setupAuth(app) {
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
 import multer3 from "multer";
-import path3 from "path";
-import crypto3 from "crypto";
+import path2 from "path";
+import crypto2 from "crypto";
 
 // server/services/email.ts
 import { Resend } from "resend";
@@ -3080,6 +3147,21 @@ async function checkPatientAccess(req, res, next) {
 function isPatientOwned(patient, psychologistId, userId) {
   return patient.psychologistId === psychologistId || patient.createdBy === userId;
 }
+function checkAccessVia(paramName, load) {
+  return async (req, res, next) => {
+    try {
+      const resource = await load(parseInt(req.params[paramName]));
+      if (!resource) return res.status(404).json({ message: "Registro n\xE3o encontrado" });
+      req.params.id = String(resource.patientId);
+      return checkPatientAccess(req, res, next);
+    } catch (error) {
+      console.error("checkAccessVia error:", error);
+      return res.status(500).json({ message: "Erro ao verificar permiss\xE3o de acesso" });
+    }
+  };
+}
+var checkSessionAccess = checkAccessVia("sessionId", (id) => storage.getSession(id));
+var checkDocumentAccess = checkAccessVia("docId", (id) => storage.getDocument(id));
 router2.get("/", async (req, res) => {
   try {
     const user = req.user;
@@ -3271,7 +3353,7 @@ router2.post("/:id/sessions", checkPatientAccess, async (req, res) => {
     res.status(500).json({ message: "Erro ao criar sess\xE3o" });
   }
 });
-router2.put("/sessions/:sessionId", async (req, res) => {
+router2.put("/sessions/:sessionId", checkSessionAccess, async (req, res) => {
   try {
     const sessionId = parseInt(req.params.sessionId);
     const userId = req.user.id;
@@ -3295,7 +3377,7 @@ router2.put("/sessions/:sessionId", async (req, res) => {
     res.status(500).json({ message: "Erro ao atualizar sess\xE3o" });
   }
 });
-router2.patch("/sessions/:sessionId/archive", async (req, res) => {
+router2.patch("/sessions/:sessionId/archive", checkSessionAccess, async (req, res) => {
   try {
     const sessionId = parseInt(req.params.sessionId);
     const userId = req.user.id;
@@ -3361,7 +3443,7 @@ router2.post("/:id/documents", checkPatientAccess, uploadSingle("file"), async (
     res.status(500).json({ message: "Erro ao fazer upload do documento" });
   }
 });
-router2.get("/documents/:docId/download", async (req, res) => {
+router2.get("/documents/:docId/download", checkDocumentAccess, async (req, res) => {
   try {
     const docId = parseInt(req.params.docId);
     const userId = req.user.id;
@@ -3388,7 +3470,7 @@ router2.get("/documents/:docId/download", async (req, res) => {
     res.status(500).json({ message: "Erro ao baixar documento" });
   }
 });
-router2.post("/documents/:docId/summarize", async (req, res) => {
+router2.post("/documents/:docId/summarize", checkDocumentAccess, async (req, res) => {
   try {
     const docId = parseInt(req.params.docId);
     const doc = await storage.getDocument(docId);
@@ -3412,7 +3494,7 @@ router2.post("/documents/:docId/summarize", async (req, res) => {
     res.status(500).json({ message: "Erro ao processar documento." });
   }
 });
-router2.delete("/documents/:docId", async (req, res) => {
+router2.delete("/documents/:docId", checkDocumentAccess, async (req, res) => {
   try {
     const docId = parseInt(req.params.docId);
     const userId = req.user.id;
@@ -3555,7 +3637,7 @@ import { Router as Router3 } from "express";
 import { eq as eq5, and as and4, gte as gte2, lte as lte2, desc as desc2 } from "drizzle-orm";
 import { z as z3 } from "zod";
 var router3 = Router3();
-function requireAuth(req, res, next) {
+function requireAuth2(req, res, next) {
   if (!req.isAuthenticated()) return res.status(401).json({ error: "N\xE3o autenticado" });
   next();
 }
@@ -3572,7 +3654,7 @@ function handleGoogleError(res, error) {
   console.error("Google API error:", error);
   return res.status(500).json({ error: "Erro de comunica\xE7\xE3o com o Google" });
 }
-router3.get("/", requireAuth, async (req, res) => {
+router3.get("/", requireAuth2, async (req, res) => {
   try {
     const user = req.user;
     const { status, dateFrom, dateTo, patientId } = req.query;
@@ -3629,7 +3711,7 @@ router3.get("/", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Erro ao listar reuni\xF5es" });
   }
 });
-router3.get("/:id", requireAuth, async (req, res) => {
+router3.get("/:id", requireAuth2, async (req, res) => {
   try {
     const user = req.user;
     const id = parseInt(req.params.id);
@@ -3675,7 +3757,7 @@ var createSchema = z3.object({
   sendLinkNow: z3.boolean().optional().default(false),
   appointmentId: z3.number().int().positive().optional()
 });
-router3.post("/", requireAuth, async (req, res) => {
+router3.post("/", requireAuth2, async (req, res) => {
   try {
     const user = req.user;
     const body = createSchema.parse(req.body);
@@ -3767,7 +3849,7 @@ router3.post("/", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Erro ao criar reuni\xE3o" });
   }
 });
-router3.patch("/:id", requireAuth, async (req, res) => {
+router3.patch("/:id", requireAuth2, async (req, res) => {
   try {
     const user = req.user;
     const id = parseInt(req.params.id);
@@ -3813,7 +3895,7 @@ router3.patch("/:id", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Erro ao atualizar reuni\xE3o" });
   }
 });
-router3.post("/:id/start", requireAuth, async (req, res) => {
+router3.post("/:id/start", requireAuth2, async (req, res) => {
   try {
     const user = req.user;
     const id = parseInt(req.params.id);
@@ -3829,7 +3911,7 @@ router3.post("/:id/start", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Erro ao iniciar reuni\xE3o" });
   }
 });
-router3.post("/:id/end", requireAuth, async (req, res) => {
+router3.post("/:id/end", requireAuth2, async (req, res) => {
   try {
     const user = req.user;
     const id = parseInt(req.params.id);
@@ -3855,7 +3937,7 @@ router3.post("/:id/end", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Erro ao encerrar reuni\xE3o" });
   }
 });
-router3.patch("/:id/notes", requireAuth, async (req, res) => {
+router3.patch("/:id/notes", requireAuth2, async (req, res) => {
   try {
     const user = req.user;
     const id = parseInt(req.params.id);
@@ -3871,7 +3953,7 @@ router3.patch("/:id/notes", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Erro ao salvar anota\xE7\xF5es" });
   }
 });
-router3.post("/:id/send-link", requireAuth, async (req, res) => {
+router3.post("/:id/send-link", requireAuth2, async (req, res) => {
   try {
     const user = req.user;
     const id = parseInt(req.params.id);
@@ -3911,7 +3993,7 @@ router3.post("/:id/send-link", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Erro ao enviar link" });
   }
 });
-router3.delete("/:id", requireAuth, async (req, res) => {
+router3.delete("/:id", requireAuth2, async (req, res) => {
   try {
     const user = req.user;
     const id = parseInt(req.params.id);
@@ -3943,31 +4025,17 @@ var meetings_default = router3;
 import { Router as Router4 } from "express";
 import { eq as eq6 } from "drizzle-orm";
 import multer2 from "multer";
-import path2 from "path";
-import fs from "fs";
-import crypto from "crypto";
 var router4 = Router4();
-var uploadDir = path2.join(process.cwd(), "uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-var avatarStorage = multer2.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
-  filename: (_req, file, cb) => {
-    const unique2 = Date.now() + "-" + crypto.randomBytes(6).toString("hex");
-    cb(null, `avatar-${unique2}${path2.extname(file.originalname)}`);
-  }
-});
 var avatarUpload = multer2({
-  storage: avatarStorage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  storage: multer2.memoryStorage(),
+  limits: { fileSize: 4 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = /image\/(jpeg|jpg|png|webp)/;
     if (allowed.test(file.mimetype)) return cb(null, true);
     cb(new Error("Apenas imagens JPEG, PNG ou WEBP s\xE3o permitidas."));
   }
 });
-function requireAuth2(req, res, next) {
+function requireAuth3(req, res, next) {
   if (!req.isAuthenticated()) return res.status(401).json({ error: "N\xE3o autenticado." });
   next();
 }
@@ -3981,7 +4049,7 @@ function calcAge(birthDate) {
   if (m < 0 || m === 0 && today.getDate() < birth.getDate()) age--;
   return age;
 }
-router4.use(requireAuth2);
+router4.use(requireAuth3);
 router4.get("/", async (req, res) => {
   try {
     const user = req.user;
@@ -3993,7 +4061,7 @@ router4.get("/", async (req, res) => {
       const rows = await db2.select({ id: specializationAreas.id, name: specializationAreas.name, category: specializationAreas.category }).from(psychologistSpecializations).innerJoin(specializationAreas, eq6(psychologistSpecializations.specializationAreaId, specializationAreas.id)).where(eq6(psychologistSpecializations.psychologistId, psychData.id));
       specializations = rows;
     }
-    const { password, ...safeUser } = userData;
+    const { password, profileImageData, ...safeUser } = userData;
     return res.json({
       ...safeUser,
       psychologist: psychData || null,
@@ -4027,7 +4095,7 @@ router4.patch("/", async (req, res) => {
     }
     const [updated] = await db2.select().from(users).where(eq6(users.id, user.id));
     const [updatedPsych] = await db2.select().from(psychologists).where(eq6(psychologists.userId, user.id));
-    const { password, ...safeUser } = updated;
+    const { password, profileImageData, ...safeUser } = updated;
     return res.json({ ...safeUser, psychologist: updatedPsych || null, age: calcAge(updated.birthDate) });
   } catch (e) {
     console.error("PATCH /api/profile error:", e);
@@ -4061,7 +4129,7 @@ router4.post(
   (req, res, next) => {
     avatarUpload.single("avatar")(req, res, (err) => {
       if (err instanceof multer2.MulterError) {
-        if (err.code === "LIMIT_FILE_SIZE") return res.status(400).json({ error: "Arquivo muito grande. M\xE1ximo 5MB." });
+        if (err.code === "LIMIT_FILE_SIZE") return res.status(400).json({ error: "Arquivo muito grande. M\xE1ximo 4MB." });
         return res.status(400).json({ error: err.message });
       } else if (err) {
         return res.status(400).json({ error: err.message });
@@ -4075,15 +4143,12 @@ router4.post(
       if (!req.file) return res.status(400).json({ error: "Nenhum arquivo enviado." });
       const [existingUser] = await db2.select().from(users).where(eq6(users.id, user.id));
       if (!existingUser) return res.status(404).json({ error: "Usu\xE1rio n\xE3o encontrado." });
-      if (existingUser.profileImage) {
-        try {
-          const oldPath = path2.join(process.cwd(), existingUser.profileImage);
-          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-        } catch {
-        }
-      }
-      const imageUrl = `/uploads/${req.file.filename}`;
-      await db2.update(users).set({ profileImage: imageUrl }).where(eq6(users.id, user.id));
+      const imageUrl = `/api/users/${user.id}/photo`;
+      await db2.update(users).set({
+        profileImage: imageUrl,
+        profileImageData: req.file.buffer,
+        profileImageMimeType: req.file.mimetype
+      }).where(eq6(users.id, user.id));
       return res.json({ profileImage: imageUrl });
     } catch (e) {
       console.error("POST /api/profile/avatar error:", e);
@@ -4097,11 +4162,11 @@ var profile_default = router4;
 import { Router as Router5 } from "express";
 import { eq as eq7 } from "drizzle-orm";
 var router5 = Router5();
-function requireAuth3(req, res, next) {
+function requireAuth4(req, res, next) {
   if (!req.isAuthenticated()) return res.status(401).json({ error: "N\xE3o autenticado." });
   next();
 }
-router5.use(requireAuth3);
+router5.use(requireAuth4);
 router5.get("/", async (_req, res) => {
   try {
     const areas = await db2.select().from(specializationAreas).orderBy(specializationAreas.category, specializationAreas.name);
@@ -4136,13 +4201,13 @@ var specialization_areas_default = router5;
 import { Router as Router6 } from "express";
 import { eq as eq8, and as and5, sql as sql2 } from "drizzle-orm";
 var router6 = Router6();
-function requireAdmin(req, res, next) {
+function requireAdmin2(req, res, next) {
   if (!req.isAuthenticated()) return res.status(401).json({ error: "N\xE3o autenticado." });
   const user = req.user;
   if (user.role !== "admin") return res.status(403).json({ error: "Acesso restrito ao administrador." });
   next();
 }
-router6.use(requireAdmin);
+router6.use(requireAdmin2);
 function calcAge2(birthDate) {
   if (!birthDate) return null;
   const [year, month, day] = birthDate.split("-").map(Number);
@@ -4500,9 +4565,9 @@ function isValidEmail(email) {
 }
 
 // server/lib/care-token.ts
-import crypto2 from "crypto";
+import crypto from "crypto";
 function generateResponseToken() {
-  return crypto2.randomBytes(32).toString("hex");
+  return crypto.randomBytes(32).toString("hex");
 }
 
 // server/lib/send-care-email.ts
@@ -5221,7 +5286,7 @@ var upload2 = multer3({
   fileFilter: function(req, file, cb) {
     const allowedExtensions = /jpeg|jpg|png|gif|webp/;
     const allowedMimetypes = /image\/(jpeg|jpg|png|gif|webp)/;
-    const extname = allowedExtensions.test(path3.extname(file.originalname).toLowerCase());
+    const extname = allowedExtensions.test(path2.extname(file.originalname).toLowerCase());
     const mimetype = allowedMimetypes.test(file.mimetype.toLowerCase());
     if (mimetype && extname) {
       return cb(null, true);
@@ -5229,6 +5294,7 @@ var upload2 = multer3({
     cb(new Error("Apenas imagens nos formatos JPEG, JPG, PNG, GIF e WEBP s\xE3o permitidas."));
   }
 });
+var requireStaff = requireRole("admin", "receptionist");
 async function registerRoutes(app) {
   setupAuth(app);
   const handleZodError = (error) => {
@@ -5238,7 +5304,7 @@ async function registerRoutes(app) {
     }
     return { message: "An unexpected error occurred" };
   };
-  app.get("/api/psychologists", async (req, res) => {
+  app.get("/api/psychologists", requireAuth, async (req, res) => {
     try {
       const psychologists2 = await storage.getAllPsychologists();
       const result = await Promise.all(
@@ -5286,7 +5352,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error fetching psychologist" });
     }
   });
-  app.post("/api/psychologists", async (req, res) => {
+  app.post("/api/psychologists", requireStaff, async (req, res) => {
     try {
       const data = insertPsychologistSchema.parse(req.body);
       const psychologist = await storage.createPsychologist(data);
@@ -5298,7 +5364,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error creating psychologist" });
     }
   });
-  app.post("/api/psychologists/:id/photo", (req, res, next) => {
+  app.post("/api/psychologists/:id/photo", requireAuth, (req, res, next) => {
     upload2.single("profileImageFile")(req, res, (err) => {
       if (err instanceof multer3.MulterError) {
         console.error("Multer error:", err);
@@ -5373,7 +5439,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Erro ao exibir foto" });
     }
   });
-  app.put("/api/psychologists/:id", async (req, res) => {
+  app.put("/api/psychologists/:id", requireStaff, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { profileImage, ...psychologistData } = req.body;
@@ -5389,7 +5455,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error updating psychologist" });
     }
   });
-  app.delete("/api/psychologists/:id", async (req, res) => {
+  app.delete("/api/psychologists/:id", requireStaff, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = await storage.deletePsychologist(id);
@@ -5401,7 +5467,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error deleting psychologist" });
     }
   });
-  app.get("/api/rooms", async (req, res) => {
+  app.get("/api/rooms", requireAuth, async (req, res) => {
     try {
       const rooms2 = await storage.getAllRooms();
       res.json(rooms2);
@@ -5409,7 +5475,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error fetching rooms" });
     }
   });
-  app.get("/api/rooms/:id", async (req, res) => {
+  app.get("/api/rooms/:id", requireAuth, async (req, res) => {
     try {
       const room = await storage.getRoom(parseInt(req.params.id));
       if (!room) {
@@ -5420,7 +5486,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error fetching room" });
     }
   });
-  app.post("/api/rooms", async (req, res) => {
+  app.post("/api/rooms", requireAdmin, async (req, res) => {
     try {
       const data = insertRoomSchema.parse(req.body);
       const room = await storage.createRoom(data);
@@ -5432,7 +5498,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error creating room" });
     }
   });
-  app.put("/api/rooms/:id", async (req, res) => {
+  app.put("/api/rooms/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const updatedRoom = await storage.updateRoom(id, req.body);
@@ -5444,7 +5510,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error updating room" });
     }
   });
-  app.delete("/api/rooms/:id", async (req, res) => {
+  app.delete("/api/rooms/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = await storage.deleteRoom(id);
@@ -5456,7 +5522,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error deleting room" });
     }
   });
-  app.get("/api/rooms/availability/:id", async (req, res) => {
+  app.get("/api/rooms/availability/:id", requireAuth, async (req, res) => {
     try {
       const roomId = parseInt(req.params.id);
       const date3 = new Date(req.query.date);
@@ -5468,7 +5534,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error checking room availability" });
     }
   });
-  app.get("/api/appointments", async (req, res) => {
+  app.get("/api/appointments", requireAuth, async (req, res) => {
     try {
       let appointments3;
       const user = req.user;
@@ -5544,7 +5610,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error fetching appointments" });
     }
   });
-  app.get("/api/appointments/:id", async (req, res) => {
+  app.get("/api/appointments/:id", requireAuth, async (req, res) => {
     try {
       const appointment = await storage.getAppointment(parseInt(req.params.id));
       if (!appointment) {
@@ -5569,7 +5635,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error fetching appointment" });
     }
   });
-  app.post("/api/appointments", async (req, res) => {
+  app.post("/api/appointments", requireAuth, async (req, res) => {
     try {
       const user = req.user;
       let body = { ...req.body };
@@ -5678,7 +5744,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Erro ao processar a solicita\xE7\xE3o de agendamento" });
     }
   });
-  app.put("/api/appointments/:id", async (req, res) => {
+  app.put("/api/appointments/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const updatedAppointment = await storage.updateAppointment(id, req.body);
@@ -5690,7 +5756,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error updating appointment" });
     }
   });
-  app.delete("/api/appointments/:id", async (req, res) => {
+  app.delete("/api/appointments/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = await storage.deleteAppointment(id);
@@ -5835,91 +5901,6 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error deleting transaction" });
     }
   });
-  app.post("/api/users/generate-sample-data", async (req, res) => {
-    try {
-      const bcrypt = __require("bcrypt");
-      const hashedPassword = await bcrypt.hash("123456", 10);
-      const sampleUsers = [
-        {
-          username: "admin",
-          password: hashedPassword,
-          email: "admin@psicologia.com",
-          fullName: "Administrador do Sistema",
-          role: "admin",
-          status: "active"
-        },
-        {
-          username: "dra.maria",
-          password: hashedPassword,
-          email: "maria@psicologia.com",
-          fullName: "Dra. Maria Silva",
-          role: "psychologist",
-          status: "active"
-        },
-        {
-          username: "dr.carlos",
-          password: hashedPassword,
-          email: "carlos@psicologia.com",
-          fullName: "Dr. Carlos Santos",
-          role: "psychologist",
-          status: "active"
-        },
-        {
-          username: "ana.recep",
-          password: hashedPassword,
-          email: "ana@psicologia.com",
-          fullName: "Ana Oliveira",
-          role: "receptionist",
-          status: "active"
-        },
-        {
-          username: "joao.psi",
-          password: hashedPassword,
-          email: "joao@psicologia.com",
-          fullName: "Jo\xE3o Pereira",
-          role: "psychologist",
-          status: "inactive"
-        }
-      ];
-      for (const userData of sampleUsers) {
-        try {
-          await storage.createUser(userData);
-        } catch (error) {
-          console.log(`User ${userData.username} may already exist, skipping...`);
-        }
-      }
-      res.status(201).json({
-        message: "Usu\xE1rios de exemplo criados com sucesso",
-        users: sampleUsers.map((u) => ({ username: u.username, fullName: u.fullName, role: u.role }))
-      });
-    } catch (error) {
-      console.error("Error creating sample users:", error);
-      res.status(500).json({ message: "Erro ao gerar usu\xE1rios de exemplo" });
-    }
-  });
-  app.get("/api/users/debug", async (req, res) => {
-    try {
-      const users2 = await storage.getAllUsers();
-      const safeUsers = users2.map((user) => {
-        const { password, ...safeUser } = user;
-        return {
-          id: safeUser.id,
-          username: safeUser.username,
-          fullName: safeUser.fullName,
-          email: safeUser.email,
-          role: safeUser.role,
-          status: safeUser.status
-        };
-      });
-      res.json({
-        total: safeUsers.length,
-        users: safeUsers
-      });
-    } catch (error) {
-      console.error("Error fetching users:", error);
-      res.status(500).json({ message: "Erro ao buscar usu\xE1rios" });
-    }
-  });
   app.post("/api/transactions/generate-sample-data", async (req, res) => {
     try {
       if (!req.isAuthenticated()) {
@@ -6046,7 +6027,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Erro ao gerar dados de exemplo" });
     }
   });
-  app.get("/api/room-bookings", async (req, res) => {
+  app.get("/api/room-bookings", requireAuth, async (req, res) => {
     try {
       let bookings;
       if (req.query.roomId) {
@@ -6085,7 +6066,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error fetching room bookings" });
     }
   });
-  app.get("/api/room-bookings/:id", async (req, res) => {
+  app.get("/api/room-bookings/:id", requireAuth, async (req, res) => {
     try {
       const booking = await storage.getRoomBooking(parseInt(req.params.id));
       if (!booking) {
@@ -6110,7 +6091,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error fetching room booking" });
     }
   });
-  app.post("/api/room-bookings", async (req, res) => {
+  app.post("/api/room-bookings", requireAuth, async (req, res) => {
     try {
       const data = insertRoomBookingSchema.parse(req.body);
       const isRoomAvailable = await storage.checkRoomAvailability(
@@ -6131,7 +6112,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error creating room booking" });
     }
   });
-  app.put("/api/room-bookings/:id", async (req, res) => {
+  app.put("/api/room-bookings/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const updatedBooking = await storage.updateRoomBooking(id, req.body);
@@ -6143,7 +6124,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error updating room booking" });
     }
   });
-  app.delete("/api/room-bookings/:id", async (req, res) => {
+  app.delete("/api/room-bookings/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = await storage.deleteRoomBooking(id);
@@ -6155,7 +6136,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error deleting room booking" });
     }
   });
-  app.get("/api/permissions", async (req, res) => {
+  app.get("/api/permissions", requireAdmin, async (req, res) => {
     try {
       const permissions2 = await storage.getAllPermissions();
       res.json(permissions2);
@@ -6163,7 +6144,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error fetching permissions" });
     }
   });
-  app.post("/api/permissions", async (req, res) => {
+  app.post("/api/permissions", requireAdmin, async (req, res) => {
     try {
       const data = insertPermissionSchema.parse(req.body);
       const permission = await storage.createPermission(data);
@@ -6175,7 +6156,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error creating permission" });
     }
   });
-  app.get("/api/role-permissions", async (req, res) => {
+  app.get("/api/role-permissions", requireAdmin, async (req, res) => {
     try {
       let rolePermissions2;
       if (req.query.role) {
@@ -6197,7 +6178,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error fetching role permissions" });
     }
   });
-  app.post("/api/role-permissions", async (req, res) => {
+  app.post("/api/role-permissions", requireAdmin, async (req, res) => {
     try {
       const data = insertRolePermissionSchema.parse(req.body);
       const rolePermission = await storage.createRolePermission(data);
@@ -6209,7 +6190,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error creating role permission" });
     }
   });
-  app.delete("/api/role-permissions/:id", async (req, res) => {
+  app.delete("/api/role-permissions/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = await storage.deleteRolePermission(id);
@@ -6221,7 +6202,7 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Error deleting role permission" });
     }
   });
-  app.post("/api/share/whatsapp", async (req, res) => {
+  app.post("/api/share/whatsapp", requireAuth, async (req, res) => {
     try {
       const { psychologistId, startDate, endDate, message } = req.body;
       if (!psychologistId || !startDate || !endDate) {
@@ -6370,7 +6351,7 @@ async function registerRoutes(app) {
           message: "Se o email existir, voc\xEA receber\xE1 as instru\xE7\xF5es de recupera\xE7\xE3o."
         });
       }
-      const resetToken = crypto3.randomBytes(32).toString("hex");
+      const resetToken = crypto2.randomBytes(32).toString("hex");
       const expiresAt = new Date(Date.now() + 60 * 60 * 1e3);
       console.log("\u{1F510} Token gerado:", {
         token: resetToken.substring(0, 8) + "...",
@@ -7212,7 +7193,7 @@ async function createApp() {
   app.use(express.urlencoded({ extended: false, limit: "10mb" }));
   app.use((req, res, next) => {
     const start = Date.now();
-    const path4 = req.path;
+    const path3 = req.path;
     let capturedJsonResponse = void 0;
     const originalResJson = res.json;
     res.json = function(bodyJson, ...args) {
@@ -7221,8 +7202,8 @@ async function createApp() {
     };
     res.on("finish", () => {
       const duration = Date.now() - start;
-      if (path4.startsWith("/api")) {
-        let logLine = `${req.method} ${path4} ${res.statusCode} in ${duration}ms`;
+      if (path3.startsWith("/api")) {
+        let logLine = `${req.method} ${path3} ${res.statusCode} in ${duration}ms`;
         if (capturedJsonResponse) {
           logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
         }

@@ -1,6 +1,7 @@
 import express, { type Express, type Request } from "express";
 import { createServer, type Server } from "http";
 import { setupAuth, hashPassword } from "./auth";
+import { requireAuth, requireAdmin, requireRole } from "./middleware/auth-guards";
 import { storage } from "./storage";
 import { insertAppointmentSchema, insertRoomSchema, insertPsychologistSchema, insertTransactionSchema, insertRoomBookingSchema, insertPermissionSchema, insertRolePermissionSchema, insertInvoiceSchema } from "@shared/schema";
 import { ZodError } from "zod";
@@ -45,6 +46,8 @@ const upload = multer({
   },
 });
 
+const requireStaff = requireRole("admin", "receptionist");
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Set up authentication routes
   setupAuth(app);
@@ -59,7 +62,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
 
   // Psychologists routes
-  app.get("/api/psychologists", async (req, res) => {
+  app.get("/api/psychologists", requireAuth, async (req, res) => {
     try {
       const psychologists = await storage.getAllPsychologists();
 
@@ -114,7 +117,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/psychologists", async (req, res) => {
+  app.post("/api/psychologists", requireStaff, async (req, res) => {
     try {
       const data = insertPsychologistSchema.parse(req.body);
       const psychologist = await storage.createPsychologist(data);
@@ -128,7 +131,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Upload de foto para psicóloga específica
-  app.post("/api/psychologists/:id/photo", (req, res, next) => {
+  app.post("/api/psychologists/:id/photo", requireAuth, (req, res, next) => {
     upload.single("profileImageFile")(req, res, (err) => {
       if (err instanceof multer.MulterError) {
         console.error('Multer error:', err);
@@ -216,7 +219,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/psychologists/:id", async (req, res) => {
+  app.put("/api/psychologists/:id", requireStaff, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { profileImage, ...psychologistData } = req.body;
@@ -238,7 +241,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/psychologists/:id", async (req, res) => {
+  app.delete("/api/psychologists/:id", requireStaff, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = await storage.deletePsychologist(id);
@@ -252,7 +255,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Rooms routes
-  app.get("/api/rooms", async (req, res) => {
+  app.get("/api/rooms", requireAuth, async (req, res) => {
     try {
       const rooms = await storage.getAllRooms();
       res.json(rooms);
@@ -261,7 +264,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/rooms/:id", async (req, res) => {
+  app.get("/api/rooms/:id", requireAuth, async (req, res) => {
     try {
       const room = await storage.getRoom(parseInt(req.params.id));
       if (!room) {
@@ -273,7 +276,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/rooms", async (req, res) => {
+  app.post("/api/rooms", requireAdmin, async (req, res) => {
     try {
       const data = insertRoomSchema.parse(req.body);
       const room = await storage.createRoom(data);
@@ -286,7 +289,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/rooms/:id", async (req, res) => {
+  app.put("/api/rooms/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const updatedRoom = await storage.updateRoom(id, req.body);
@@ -299,7 +302,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/rooms/:id", async (req, res) => {
+  app.delete("/api/rooms/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = await storage.deleteRoom(id);
@@ -313,7 +316,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Room availability check
-  app.get("/api/rooms/availability/:id", async (req, res) => {
+  app.get("/api/rooms/availability/:id", requireAuth, async (req, res) => {
     try {
       const roomId = parseInt(req.params.id);
       const date = new Date(req.query.date as string);
@@ -328,7 +331,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Appointments routes
-  app.get("/api/appointments", async (req, res) => {
+  app.get("/api/appointments", requireAuth, async (req, res) => {
     try {
       let appointments;
 
@@ -422,7 +425,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/appointments/:id", async (req, res) => {
+  app.get("/api/appointments/:id", requireAuth, async (req, res) => {
     try {
       const appointment = await storage.getAppointment(parseInt(req.params.id));
       if (!appointment) {
@@ -453,7 +456,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/appointments", async (req, res) => {
+  app.post("/api/appointments", requireAuth, async (req, res) => {
     try {
       const user = req.user as { id: number; role: string } | undefined;
 
@@ -595,7 +598,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/appointments/:id", async (req, res) => {
+  app.put("/api/appointments/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const updatedAppointment = await storage.updateAppointment(id, req.body);
@@ -608,7 +611,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/appointments/:id", async (req, res) => {
+  app.delete("/api/appointments/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = await storage.deleteAppointment(id);
@@ -795,105 +798,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // API para gerar usuários de exemplo para testes
-  app.post("/api/users/generate-sample-data", async (req, res) => {
-    try {
-      // Hash a simple password for demo users
-      const bcrypt = require('bcrypt');
-      const hashedPassword = await bcrypt.hash('123456', 10);
-
-      // Create sample users
-      const sampleUsers = [
-        {
-          username: 'admin',
-          password: hashedPassword,
-          email: 'admin@psicologia.com',
-          fullName: 'Administrador do Sistema',
-          role: 'admin',
-          status: 'active'
-        },
-        {
-          username: 'dra.maria',
-          password: hashedPassword,
-          email: 'maria@psicologia.com',
-          fullName: 'Dra. Maria Silva',
-          role: 'psychologist',
-          status: 'active'
-        },
-        {
-          username: 'dr.carlos',
-          password: hashedPassword,
-          email: 'carlos@psicologia.com',
-          fullName: 'Dr. Carlos Santos',
-          role: 'psychologist',
-          status: 'active'
-        },
-        {
-          username: 'ana.recep',
-          password: hashedPassword,
-          email: 'ana@psicologia.com',
-          fullName: 'Ana Oliveira',
-          role: 'receptionist',
-          status: 'active'
-        },
-        {
-          username: 'joao.psi',
-          password: hashedPassword,
-          email: 'joao@psicologia.com',
-          fullName: 'João Pereira',
-          role: 'psychologist',
-          status: 'inactive'
-        }
-      ];
-
-      // Create users in storage
-      for (const userData of sampleUsers) {
-        try {
-          await storage.createUser(userData);
-        } catch (error) {
-          // User might already exist, continue with next
-          console.log(`User ${userData.username} may already exist, skipping...`);
-        }
-      }
-
-      res.status(201).json({
-        message: "Usuários de exemplo criados com sucesso",
-        users: sampleUsers.map(u => ({ username: u.username, fullName: u.fullName, role: u.role }))
-      });
-    } catch (error) {
-      console.error('Error creating sample users:', error);
-      res.status(500).json({ message: "Erro ao gerar usuários de exemplo" });
-    }
-  });
-
-  // API para listar usuários cadastrados (sem autenticação para debug)
-  app.get("/api/users/debug", async (req, res) => {
-    try {
-      const users = await storage.getAllUsers();
-
-      // Remove passwords for security
-      const safeUsers = users.map(user => {
-        const { password, ...safeUser } = user;
-        return {
-          id: safeUser.id,
-          username: safeUser.username,
-          fullName: safeUser.fullName,
-          email: safeUser.email,
-          role: safeUser.role,
-          status: safeUser.status
-        };
-      });
-
-      res.json({
-        total: safeUsers.length,
-        users: safeUsers
-      });
-    } catch (error) {
-      console.error('Error fetching users:', error);
-      res.status(500).json({ message: "Erro ao buscar usuários" });
-    }
-  });
-
   // API para gerar dados de exemplo para testes
   app.post("/api/transactions/generate-sample-data", async (req, res) => {
     try {
@@ -1043,7 +947,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Room bookings routes
-  app.get("/api/room-bookings", async (req, res) => {
+  app.get("/api/room-bookings", requireAuth, async (req, res) => {
     try {
       let bookings;
 
@@ -1090,7 +994,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/room-bookings/:id", async (req, res) => {
+  app.get("/api/room-bookings/:id", requireAuth, async (req, res) => {
     try {
       const booking = await storage.getRoomBooking(parseInt(req.params.id));
       if (!booking) {
@@ -1120,7 +1024,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/room-bookings", async (req, res) => {
+  app.post("/api/room-bookings", requireAuth, async (req, res) => {
     try {
       const data = insertRoomBookingSchema.parse(req.body);
 
@@ -1146,7 +1050,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.put("/api/room-bookings/:id", async (req, res) => {
+  app.put("/api/room-bookings/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const updatedBooking = await storage.updateRoomBooking(id, req.body);
@@ -1159,7 +1063,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/room-bookings/:id", async (req, res) => {
+  app.delete("/api/room-bookings/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = await storage.deleteRoomBooking(id);
@@ -1173,7 +1077,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Permission routes
-  app.get("/api/permissions", async (req, res) => {
+  app.get("/api/permissions", requireAdmin, async (req, res) => {
     try {
       const permissions = await storage.getAllPermissions();
       res.json(permissions);
@@ -1182,7 +1086,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/permissions", async (req, res) => {
+  app.post("/api/permissions", requireAdmin, async (req, res) => {
     try {
       const data = insertPermissionSchema.parse(req.body);
       const permission = await storage.createPermission(data);
@@ -1196,7 +1100,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Role permission routes
-  app.get("/api/role-permissions", async (req, res) => {
+  app.get("/api/role-permissions", requireAdmin, async (req, res) => {
     try {
       let rolePermissions;
 
@@ -1223,7 +1127,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/role-permissions", async (req, res) => {
+  app.post("/api/role-permissions", requireAdmin, async (req, res) => {
     try {
       const data = insertRolePermissionSchema.parse(req.body);
       const rolePermission = await storage.createRolePermission(data);
@@ -1236,7 +1140,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/role-permissions/:id", async (req, res) => {
+  app.delete("/api/role-permissions/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const result = await storage.deleteRolePermission(id);
@@ -1250,7 +1154,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // WhatsApp sharing endpoint
-  app.post("/api/share/whatsapp", async (req, res) => {
+  app.post("/api/share/whatsapp", requireAuth, async (req, res) => {
     try {
       const { psychologistId, startDate, endDate, message } = req.body;
 

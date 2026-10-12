@@ -139,6 +139,28 @@ function isPatientOwned(patient: any, psychologistId: number, userId: number): b
     return patient.psychologistId === psychologistId || patient.createdBy === userId;
 }
 
+/**
+ * Applies checkPatientAccess to routes addressed by a child resource
+ * (document/session) instead of the patient id: loads the resource, then
+ * checks access to the patient it belongs to.
+ */
+function checkAccessVia(paramName: string, load: (id: number) => Promise<{ patientId: number } | undefined>) {
+    return async (req: any, res: any, next: any) => {
+        try {
+            const resource = await load(parseInt(req.params[paramName]));
+            if (!resource) return res.status(404).json({ message: "Registro não encontrado" });
+            req.params.id = String(resource.patientId);
+            return checkPatientAccess(req, res, next);
+        } catch (error) {
+            console.error("checkAccessVia error:", error);
+            return res.status(500).json({ message: "Erro ao verificar permissão de acesso" });
+        }
+    };
+}
+
+const checkSessionAccess = checkAccessVia('sessionId', (id) => storage.getSession(id));
+const checkDocumentAccess = checkAccessVia('docId', (id) => storage.getDocument(id));
+
 // ========== PATIENTS ROUTES ==========
 
 // List all patients — psicólogos só vêem sua carteira
@@ -383,7 +405,7 @@ router.post('/:id/sessions', checkPatientAccess, async (req, res) => {
     }
 });
 
-router.put('/sessions/:sessionId', async (req, res) => {
+router.put('/sessions/:sessionId', checkSessionAccess, async (req, res) => {
     try {
         const sessionId = parseInt(req.params.sessionId);
         const userId = (req.user as any).id;
@@ -419,7 +441,7 @@ router.put('/sessions/:sessionId', async (req, res) => {
 });
 
 // Archive session (instead of delete)
-router.patch('/sessions/:sessionId/archive', async (req, res) => {
+router.patch('/sessions/:sessionId/archive', checkSessionAccess, async (req, res) => {
     try {
         const sessionId = parseInt(req.params.sessionId);
         const userId = (req.user as any).id;
@@ -499,7 +521,7 @@ router.post('/:id/documents', checkPatientAccess, uploadSingle('file'), async (r
     }
 });
 
-router.get('/documents/:docId/download', async (req, res) => {
+router.get('/documents/:docId/download', checkDocumentAccess, async (req, res) => {
     try {
         const docId = parseInt(req.params.docId);
         const userId = (req.user as any).id;
@@ -535,7 +557,7 @@ router.get('/documents/:docId/download', async (req, res) => {
     }
 });
 
-router.post('/documents/:docId/summarize', async (req, res) => {
+router.post('/documents/:docId/summarize', checkDocumentAccess, async (req, res) => {
     try {
         const docId = parseInt(req.params.docId);
         const doc = await storage.getDocument(docId);
@@ -565,7 +587,7 @@ router.post('/documents/:docId/summarize', async (req, res) => {
     }
 });
 
-router.delete('/documents/:docId', async (req, res) => {
+router.delete('/documents/:docId', checkDocumentAccess, async (req, res) => {
     try {
         const docId = parseInt(req.params.docId);
         const userId = (req.user as any).id;

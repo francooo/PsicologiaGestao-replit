@@ -21,3 +21,15 @@ env.local
 # Logs
 *.log
 *.txt
+# Mobile (Expo)
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+mobile/.env
+mobile/.env.*
+!mobile/.env.example
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision

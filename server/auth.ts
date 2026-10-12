@@ -7,6 +7,7 @@ import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 import { storage } from "./storage";
 import { User as SelectUser } from "@shared/schema";
+import { bearerSessionBridge } from "./middleware/auth-guards";
 
 declare global {
   namespace Express {
@@ -31,9 +32,26 @@ async function comparePasswords(supplied: string, stored: string | null) {
   return timingSafeEqual(hashedBuf, suppliedBuf);
 }
 
+// Mobile sessions live longer than the browser session cookie
+const MOBILE_SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000;
+
+// Deep-link prefixes the Google callback may redirect back to (Expo Go / app scheme)
+const MOBILE_REDIRECT_PREFIXES = ["exp://", "exps://", "consultapsi://"];
+
+function isAllowedMobileRedirect(url: unknown): url is string {
+  return typeof url === "string" && MOBILE_REDIRECT_PREFIXES.some((p) => url.startsWith(p));
+}
+
+declare module "express-session" {
+  interface SessionData {
+    mobileRedirect?: string;
+  }
+}
+
 export function setupAuth(app: Express) {
+  const sessionSecret = process.env.SESSION_SECRET || "r8q/+&1LM3)cd*zAGpx1xm{NeQHc;#";
   const sessionSettings = {
-    secret: process.env.SESSION_SECRET || "r8q/+&1LM3)cd*zAGpx1xm{NeQHc;#",
+    secret: sessionSecret,
     resave: false,
     saveUninitialized: false,
     store: storage.sessionStore,
@@ -47,6 +65,7 @@ export function setupAuth(app: Express) {
     };
   }
 
+  app.use(bearerSessionBridge(sessionSecret));
   app.use(session(sessionSettings));
   app.use(passport.initialize());
   app.use(passport.session());
@@ -156,16 +175,37 @@ export function setupAuth(app: Express) {
     // Google Auth Routes
     app.get('/auth/google', (req, res, next) => {
       const callbackURL = buildCallbackUrl(req);
+      const mobileRedirect = req.query.mobile_redirect;
+      if (isAllowedMobileRedirect(mobileRedirect)) {
+        // Saved in the pre-auth session; read back in the callback below
+        req.session.mobileRedirect = mobileRedirect;
+        return req.session.save(() =>
+          passport.authenticate('google', { scope: ['profile', 'email'], callbackURL } as any)(req, res, next),
+        );
+      }
       passport.authenticate('google', { scope: ['profile', 'email'], callbackURL } as any)(req, res, next);
     });
 
     app.get('/auth/google/callback',
       (req, res, next) => {
         const callbackURL = buildCallbackUrl(req);
-        passport.authenticate('google', { failureRedirect: '/auth', callbackURL } as any)(req, res, next);
+        // Captured before login, since passport regenerates the session on success
+        res.locals.mobileRedirect = req.session.mobileRedirect;
+        const mobileRedirect = res.locals.mobileRedirect;
+        const failureRedirect = isAllowedMobileRedirect(mobileRedirect)
+          ? `${mobileRedirect}${mobileRedirect.includes("?") ? "&" : "?"}error=google`
+          : '/auth';
+        passport.authenticate('google', { failureRedirect, callbackURL } as any)(req, res, next);
       },
       (req, res) => {
-        res.redirect('/');
+        const mobileRedirect = res.locals.mobileRedirect;
+        if (!isAllowedMobileRedirect(mobileRedirect)) return res.redirect('/');
+
+        req.session.cookie.maxAge = MOBILE_SESSION_MAX_AGE;
+        req.session.save(() => {
+          const sep = mobileRedirect.includes("?") ? "&" : "?";
+          res.redirect(`${mobileRedirect}${sep}token=${encodeURIComponent(req.sessionID)}`);
+        });
       }
     );
 
@@ -213,14 +253,21 @@ export function setupAuth(app: Express) {
       // Hash password
       const hashedPassword = await hashPassword(req.body.password);
 
+      // Only an authenticated admin may pick role/status; public sign-up is always a psychologist
+      const isAdminCaller = req.isAuthenticated() && req.user.role === "admin";
+      const role = isAdminCaller && req.body.role ? req.body.role : "psychologist";
+      const status = isAdminCaller && req.body.status ? req.body.status : "active";
+
       // Create the user
       const user = await storage.createUser({
         ...req.body,
+        role,
+        status,
         password: hashedPassword,
       });
 
       // If user is a psychologist, create a psychologist record too
-      if (req.body.role === "psychologist" && req.body.hourlyRate) {
+      if (role === "psychologist" && req.body.hourlyRate) {
         await storage.createPsychologist({
           userId: user.id,
           specialization: req.body.specialization || "",
@@ -232,6 +279,11 @@ export function setupAuth(app: Express) {
       // Clean up sensitive info before returning
       const { password, ...userResponse } = user;
 
+      // Staff creating someone else's account must keep their own session
+      if (req.isAuthenticated()) {
+        return res.status(201).json(userResponse);
+      }
+
       req.login(user, (err) => {
         if (err) return next(err);
         res.status(201).json(userResponse);
@@ -241,14 +293,14 @@ export function setupAuth(app: Express) {
     }
   });
 
-  app.post("/api/login", (req, res, next) => {
+  const handleLogin = (mobile: boolean) => (req: any, res: any, next: any) => {
     passport.authenticate("local", (err: any, user: any, info: any) => {
       if (err) return next(err);
       if (!user) {
         return res.status(401).json({ message: info?.message || "Authentication failed" });
       }
 
-      req.login(user, async (loginErr) => {
+      req.login(user, async (loginErr: any) => {
         if (loginErr) return next(loginErr);
 
         // Auto-create psychologist profile if user has psychologist role but no profile yet
@@ -274,15 +326,26 @@ export function setupAuth(app: Express) {
         // Clean up sensitive info before returning
         const { password, ...userResponse } = user;
 
-        res.status(200).json(userResponse);
+        if (!mobile) return res.status(200).json(userResponse);
+
+        // Mobile: long-lived session, its id is returned as a Bearer token
+        req.session.cookie.maxAge = MOBILE_SESSION_MAX_AGE;
+        req.session.save((saveErr: any) => {
+          if (saveErr) return next(saveErr);
+          res.status(200).json({ user: userResponse, token: req.sessionID });
+        });
       });
     })(req, res, next);
-  });
+  };
+
+  app.post("/api/login", handleLogin(false));
+  app.post("/api/mobile/login", handleLogin(true));
 
   app.post("/api/logout", (req, res, next) => {
     req.logout((err) => {
       if (err) return next(err);
-      res.sendStatus(200);
+      // Drop the stored session too, so a mobile Bearer token stops working
+      req.session.destroy(() => res.sendStatus(200));
     });
   });
 
