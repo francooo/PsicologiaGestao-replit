@@ -5,8 +5,11 @@
   },
   "build": {
     "preview": {
-      "channel": "preview",
-      "distribution": "internal"
+      "channel": "production",
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
     },
     "production": {
       "channel": "production"

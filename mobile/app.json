@@ -9,14 +9,16 @@
     "userInterfaceStyle": "light",
     "backgroundColor": "#FAF6F1",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.francooo.consultapsi"
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#FAF6F1",
         "foregroundImage": "./assets/images/app-icon.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.francooo.consultapsi"
     },
     "web": {
       "output": "static",
