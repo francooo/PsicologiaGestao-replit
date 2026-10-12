@@ -16,7 +16,7 @@ import {
 import { Input, type InputProps } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { insertUserSchema } from "@shared/schema";
-import { BrandLogo } from "@/components/auth/brand-logo";
+import { BrandLogo } from "@/components/brand/brand-logo";
 import { AuthBackground } from "@/components/auth/auth-background";
 import {
   Loader2,

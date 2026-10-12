@@ -73,6 +73,7 @@ import { ptBR } from "date-fns/locale";
 import { type Patient } from "@shared/schema";
 import { useLocation, useSearch } from "wouter";
 import { cn } from "@/lib/utils";
+import { timeToMinutes } from "@/lib/time";
 
 // ─── Schemas ────────────────────────────────────────────────────────────────
 
@@ -115,10 +116,6 @@ function getPsychColor(idx: number) {
   return PSYCH_COLORS[idx % PSYCH_COLORS.length];
 }
 
-function timeToMinutes(t: string) {
-  const [h, m] = t.split(':').map(Number);
-  return h * 60 + (m || 0);
-}
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -398,6 +395,29 @@ export default function Appointments() {
     setSelectedDate(date);
     appointmentForm.setValue('date', formatDateForRequest(date));
   };
+
+  // Opened from the dashboard ("Nova consulta" / "Agendar"): ?new=1&date=&time=&psychologistId=
+  useEffect(() => {
+    const params = new URLSearchParams(searchString);
+    if (params.get('new') !== '1') return;
+    const date = params.get('date');
+    const time = params.get('time');
+    const psych = params.get('psychologistId');
+    if (date) {
+      const [y, m, d] = date.split('-').map(Number);
+      setSelectedDate(new Date(y, m - 1, d));
+      appointmentForm.setValue('date', date);
+    }
+    if (time) {
+      appointmentForm.setValue('startTime', time);
+      appointmentForm.setValue('endTime', calculateEndTime(time, '50'));
+    }
+    // Psychologists always book for themselves (the server enforces it too)
+    if (psych && user?.role !== 'psychologist') appointmentForm.setValue('psychologistId', Number(psych));
+    setIsNewAppointmentDialogOpen(true);
+    // Drop the params so going back doesn't reopen the dialog
+    setLocation('/appointments', { replace: true });
+  }, [searchString]);
 
   const handleAppointmentClick = (_id: number) => {};
 

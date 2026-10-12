@@ -1,11 +1,12 @@
 import { cn } from "@/lib/utils";
 
 type BrandLogoProps = {
-  size?: "md" | "lg";
+  size?: "sm" | "md" | "lg";
   className?: string;
 };
 
 const sizes = {
+  sm: { icon: "h-8 w-8", text: "text-[26px]" },
   md: { icon: "h-11 w-11", text: "text-[34px]" },
   lg: { icon: "h-14 w-14", text: "text-[44px]" },
 };

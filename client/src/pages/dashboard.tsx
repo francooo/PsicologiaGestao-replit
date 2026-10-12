@@ -1,232 +1,462 @@
+import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link, useLocation } from "wouter";
+import { addDays, endOfMonth, format, isToday, startOfMonth, subMonths } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import {
+  ArrowRight,
+  BarChart3,
+  CalendarDays,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  DoorOpen,
+  Loader2,
+  Plus,
+  UserRound,
+  Users,
+} from "lucide-react";
 import Sidebar from "@/components/sidebar";
 import MobileNav from "@/components/mobile-nav";
-import { Loader2, CalendarDays, CheckCircle2, Clock, Users, ChevronRight, DoorOpen } from "lucide-react";
+import { TopBar } from "@/components/top-bar";
+import { LeafDecor } from "@/components/brand/leaf-decor";
 import { useAuth } from "@/hooks/use-auth";
-import { Link } from "wouter";
+import { overlaps, timeToMinutes, toDateKey } from "@/lib/time";
+import { cn } from "@/lib/utils";
 
-const TODAY = new Date().toISOString().split('T')[0];
+type Appointment = {
+  id: number;
+  patientName: string;
+  psychologistId: number;
+  roomId: number;
+  date: string;
+  startTime: string;
+  endTime: string;
+  status: string;
+  room?: { id: number; name: string } | null;
+  psychologist?: { id: number; userId: number; user?: { fullName: string } | null } | null;
+};
+type RoomBooking = {
+  id: number;
+  roomId: number;
+  psychologistId: number;
+  startTime: string;
+  endTime: string;
+  room?: { name: string } | null;
+  psychologist?: { userId: number; user?: { fullName: string } | null } | null;
+};
+type Room = { id: number; name: string };
+type Patient = { id: number; status?: string | null; createdAt?: string | null };
+type Psychologist = { id: number; userId: number; user?: { fullName: string } | null };
 
-function getMonthRange() {
-  const now = new Date();
-  const first = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
-  return { first, last };
+// Free slots in the agenda: whole hours from 08:00 to 18:00
+const FIRST_HOUR = 8;
+const LAST_HOUR = 18;
+const MAX_AGENDA_ITEMS = 8;
+
+async function getJson<T>(url: string): Promise<T> {
+  const res = await fetch(url, { credentials: "include" });
+  if (!res.ok) throw new Error(`${res.status}`);
+  return res.json();
+}
+
+function qs(params: Record<string, string | number | null | undefined>) {
+  const entries = Object.entries(params).filter(([, v]) => v !== null && v !== undefined && v !== "");
+  return entries.length ? `?${entries.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&")}` : "";
+}
+
+const statusBadge: Record<string, { label: string; cls: string; dot: string; row: string }> = {
+  confirmed: { label: "Confirmada", cls: "bg-[#DCE2D3] text-[#3F4A3B]", dot: "bg-[#5E8A55]", row: "bg-[#EEF2EA]" },
+  scheduled: { label: "Pendente", cls: "bg-[#F6E3CF] text-[#B05E1E]", dot: "bg-[#A99BBB]", row: "bg-[#F1EDF6]" },
+  "pending-confirmation": { label: "Pendente", cls: "bg-[#F6E3CF] text-[#B05E1E]", dot: "bg-[#A99BBB]", row: "bg-[#F1EDF6]" },
+  completed: { label: "Concluída", cls: "bg-[#E3EEF5] text-[#2E729B]", dot: "bg-[#2E729B]", row: "bg-[#F4F8FB]" },
+  canceled: { label: "Cancelada", cls: "bg-[#F1EFEC] text-[#6B7178]", dot: "bg-[#C9CED3]", row: "bg-[#F7F5F2]" },
+  "first-session": { label: "1ª sessão", cls: "bg-[#E6E0EE] text-[#4A4257]", dot: "bg-[#A99BBB]", row: "bg-[#F1EDF6]" },
+};
+const badgeFor = (s: string) => statusBadge[s] ?? { label: s, cls: "bg-[#F1EFEC] text-[#6B7178]", dot: "bg-[#C9CED3]", row: "bg-[#F7F5F2]" };
+
+/** "segunda-feira, 12 de outubro de 2026" -> "Segunda-feira, 12 de outubro de 2026" */
+function longDate(date: Date) {
+  const text = format(date, "EEEE, d 'de' MMMM 'de' yyyy", { locale: ptBR });
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function greeting(now: Date) {
+  const h = now.getHours();
+  return h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite";
 }
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const { first: monthStart, last: monthEnd } = getMonthRange();
-
-  const { data: todayAppointments = [], isLoading: loadingToday } = useQuery({
-    queryKey: ['/api/appointments', { date: TODAY }],
-    queryFn: async () => {
-      const res = await fetch(`/api/appointments?date=${TODAY}`);
-      if (!res.ok) throw new Error('Failed');
-      return res.json();
-    }
-  });
-
-  const { data: monthAppointments = [], isLoading: loadingMonth } = useQuery({
-    queryKey: ['/api/appointments', { startDate: monthStart, endDate: monthEnd }],
-    queryFn: async () => {
-      const res = await fetch(`/api/appointments?startDate=${monthStart}&endDate=${monthEnd}`);
-      if (!res.ok) throw new Error('Failed');
-      return res.json();
-    }
-  });
-
-  const { data: patients = [], isLoading: loadingPatients } = useQuery({
-    queryKey: ['/api/patients'],
-    queryFn: async () => {
-      const res = await fetch('/api/patients');
-      if (!res.ok) throw new Error('Failed');
-      return res.json();
-    }
-  });
-
-  const { data: rooms = [], isLoading: loadingRooms } = useQuery({
-    queryKey: ['/api/rooms'],
-    queryFn: async () => {
-      const res = await fetch('/api/rooms');
-      if (!res.ok) throw new Error('Failed');
-      return res.json();
-    }
-  });
-
-  const { data: todayBookings = [], isLoading: loadingBookings } = useQuery({
-    queryKey: ['/api/room-bookings', { date: TODAY }],
-    queryFn: async () => {
-      const res = await fetch(`/api/room-bookings?date=${TODAY}`);
-      if (!res.ok) throw new Error('Failed');
-      return res.json();
-    }
-  });
-
-  const isLoading = loadingToday || loadingMonth || loadingPatients || loadingRooms || loadingBookings;
-
-  const confirmedToday = todayAppointments.filter((a: any) => a.status === 'confirmed').length;
-  const waitingToday = todayAppointments.filter((a: any) => a.status === 'scheduled').length;
-  const completedMonth = monthAppointments.filter((a: any) => a.status === 'completed').length;
-  const waitingAll = monthAppointments.filter((a: any) => a.status === 'scheduled').length;
-
-  const activePatients = Array.isArray(patients) ? patients.filter((p: any) => p.status === 'active' || !p.status).length : 0;
+  const [, setLocation] = useLocation();
+  // Admin and reception see the whole clinic (API returns everything); psychologists only their own
+  const isStaff = user?.role === "admin" || user?.role === "receptionist";
 
   const now = new Date();
-  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const newPatientsThisMonth = Array.isArray(patients)
-    ? patients.filter((p: any) => {
-        if (!p.createdAt) return false;
-        return new Date(p.createdAt) >= thisMonthStart;
-      }).length
-    : 0;
+  const today = toDateKey(now);
+  const [selectedDate, setSelectedDate] = useState(() => new Date());
+  const [psychologistId, setPsychologistId] = useState<number | null>(null);
+  const selectedKey = toDateKey(selectedDate);
+  const psychFilter = isStaff ? psychologistId : null;
 
-  const bookedRoomIds = new Set(todayBookings.map((b: any) => b.roomId));
-  const freeRooms = rooms.filter((r: any) => !bookedRoomIds.has(r.id));
+  const monthRange = { startDate: toDateKey(startOfMonth(now)), endDate: toDateKey(endOfMonth(now)) };
+  const prev = subMonths(now, 1);
+  const prevRange = { startDate: toDateKey(startOfMonth(prev)), endDate: toDateKey(endOfMonth(prev)) };
 
-  const firstName = user?.fullName?.split(' ')[0] || 'Usuária';
+  const appts = (params: Record<string, string | number | null | undefined>) => ({
+    queryKey: ["/api/appointments", params],
+    queryFn: () => getJson<Appointment[]>(`/api/appointments${qs(params)}`),
+  });
+
+  const todayQ = useQuery(appts({ date: today, psychologistId: psychFilter }));
+  const dayQ = useQuery(appts({ date: selectedKey, psychologistId: psychFilter }));
+  const monthQ = useQuery(appts({ ...monthRange, psychologistId: psychFilter }));
+  const prevQ = useQuery(appts({ ...prevRange, psychologistId: psychFilter }));
+  const patientsQ = useQuery({ queryKey: ["/api/patients"], queryFn: () => getJson<Patient[]>("/api/patients") });
+  const roomsQ = useQuery({ queryKey: ["/api/rooms"], queryFn: () => getJson<Room[]>("/api/rooms") });
+  const bookingsQ = useQuery({
+    queryKey: ["/api/room-bookings", { date: today }],
+    queryFn: () => getJson<RoomBooking[]>(`/api/room-bookings?date=${today}`),
+  });
+  const psychologistsQ = useQuery({
+    queryKey: ["/api/psychologists"],
+    queryFn: () => getJson<Psychologist[]>("/api/psychologists"),
+  });
+
+  const isLoading = [todayQ, monthQ, patientsQ, roomsQ, bookingsQ].some((q) => q.isLoading);
+
+  const todayList = todayQ.data ?? [];
+  const monthList = monthQ.data ?? [];
+  const patients = patientsQ.data ?? [];
+  const rooms = roomsQ.data ?? [];
+  const bookings = bookingsQ.data ?? [];
+
+  // ── Stats ──
+  const confirmedToday = todayList.filter((a) => a.status === "confirmed").length;
+  const pendingToday = todayList.filter((a) => a.status === "scheduled" || a.status === "pending-confirmation").length;
+  const completedMonth = monthList.filter((a) => a.status === "completed").length;
+  const completedPrev = (prevQ.data ?? []).filter((a) => a.status === "completed").length;
+  const variation = completedPrev > 0 ? Math.round(((completedMonth - completedPrev) / completedPrev) * 100) : null;
+  const waitingAll = monthList.filter((a) => a.status === "scheduled" || a.status === "pending-confirmation").length;
+  const activePatients = patients.filter((p) => p.status === "active" || !p.status).length;
+  const monthStart = startOfMonth(now);
+  const newPatients = patients.filter((p) => p.createdAt && new Date(p.createdAt) >= monthStart).length;
+
+  // ── Rooms: occupied right now / next booking today ──
+  const nowHm = format(now, "HH:mm");
+  const roomStatus = rooms.map((room) => {
+    const list = bookings.filter((b) => b.roomId === room.id).sort((a, b) => a.startTime.localeCompare(b.startTime));
+    const current = list.find((b) => b.startTime.slice(0, 5) <= nowHm && b.endTime.slice(0, 5) > nowHm);
+    const next = current ?? list.find((b) => b.endTime.slice(0, 5) > nowHm);
+    return { room, current, next };
+  });
+  const freeRooms = roomStatus.filter((r) => !r.current).length;
+
+  // ── Agenda: appointments + free whole hours (only for a single psychologist's agenda) ──
+  const showFreeSlots = !isStaff || psychFilter !== null;
+  const agenda = useMemo(() => {
+    const dayAppts = [...(dayQ.data ?? [])]
+      .filter((a) => a.status !== "canceled")
+      .sort((a, b) => a.startTime.localeCompare(b.startTime));
+    type Item = { kind: "appt"; time: string; appt: Appointment } | { kind: "free"; time: string };
+    const items: Item[] = dayAppts.map((a) => ({ kind: "appt", time: a.startTime.slice(0, 5), appt: a }));
+    if (showFreeSlots) {
+      const viewingToday = isToday(selectedDate);
+      const nowMin = timeToMinutes(format(new Date(), "HH:mm"));
+      for (let h = FIRST_HOUR; h < LAST_HOUR; h++) {
+        const start = `${String(h).padStart(2, "0")}:00`;
+        const end = `${String(h + 1).padStart(2, "0")}:00`;
+        if (viewingToday && timeToMinutes(end) <= nowMin) continue; // past hour
+        if (dayAppts.some((a) => overlaps(start, end, a.startTime, a.endTime))) continue;
+        items.push({ kind: "free", time: start });
+      }
+    }
+    return items.sort((a, b) => a.time.localeCompare(b.time));
+  }, [dayQ.data, showFreeSlots, selectedDate]);
+
+  const scheduleLink = (time?: string) =>
+    `/appointments${qs({ new: 1, date: selectedKey, time, psychologistId: psychFilter })}`;
+
+  const rawFirst = user?.fullName?.trim().split(/\s+/)[0] ?? "";
+  const firstName = rawFirst.charAt(0).toUpperCase() + rawFirst.slice(1);
 
   return (
-    <div className="flex h-screen bg-[#f7f8fa]">
+    <div className="flex h-screen bg-[#FAF6F1]">
       <Sidebar />
-      <div className="flex-1 overflow-y-auto ml-0 md:ml-64 pt-16 md:pt-0">
+      <div className="relative flex-1 overflow-y-auto pt-16 md:ml-64 md:pt-0">
         <MobileNav />
-        <main className="p-6 max-w-[1200px]">
-          {/* Header */}
-          <div className="mb-7">
-            <h1 className="text-2xl font-bold text-slate-800">Dashboard</h1>
-            <p className="text-sm text-slate-400 mt-0.5">Bem-vinda, {firstName}</p>
+        <LeafDecor />
+
+        <main className="relative mx-auto max-w-[1400px] px-4 pt-5 pb-24 sm:px-6 md:pb-8 lg:px-8">
+          <TopBar todayAppointments={todayList} />
+
+
+          {/* Greeting */}
+          <div className="mt-8 flex flex-wrap items-start justify-between gap-5">
+            <div>
+              <h1 className="text-[34px] font-semibold leading-tight tracking-tight text-[#1F3347] sm:text-[40px]">
+                {greeting(now)}{firstName ? `, ${firstName}` : ""}
+              </h1>
+              <p className="mt-1 text-lg text-[#6B7178]">{longDate(now)}</p>
+              <div className="mt-4 flex items-center gap-4">
+                <span className="h-0.5 w-14 rounded bg-[#7E9A6E]" />
+                <span className="text-[15px] text-[#6B7178]">Mais tempo para o que importa</span>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              {isStaff && (
+                <select
+                  aria-label="Filtrar por psicóloga"
+                  value={psychologistId ?? ""}
+                  onChange={(e) => setPsychologistId(e.target.value ? Number(e.target.value) : null)}
+                  className="h-12 rounded-xl border border-[#E3E1DE] bg-white px-3 text-[15px] text-[#1F3347] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2E729B]"
+                >
+                  <option value="">Todas as psicólogas</option>
+                  {(psychologistsQ.data ?? []).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.user?.fullName ?? `Psicóloga #${p.id}`}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <Link
+                href={scheduleLink()}
+                className="flex h-12 items-center gap-2 rounded-xl bg-[#2E729B] px-6 text-[16px] font-medium text-white shadow-sm transition-colors hover:bg-[#255E80]"
+              >
+                <Plus className="h-5 w-5" />
+                Nova consulta
+              </Link>
+              {/* Brand phrase (wide screens only, like the mock) */}
+              <div aria-hidden="true" className="ml-6 hidden 2xl:block">
+                <p className="text-[11px] uppercase leading-6 tracking-[0.45em] text-[#7B7F86]">Organização</p>
+                <p className="text-[11px] uppercase leading-6 tracking-[0.45em] text-[#7B7F86]">também cuida</p>
+                <div className="mt-2 h-px w-10 bg-[#9AA08F]" />
+              </div>
+            </div>
           </div>
 
           {isLoading ? (
-            <div className="flex justify-center items-center h-64">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <div className="flex h-64 items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-[#2E729B]" />
             </div>
           ) : (
             <>
-              {/* 4 Stat Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              {/* Stat cards */}
+              <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <StatCard
-                  icon={<CalendarDays className="w-5 h-5 text-[#1e7e8c]" />}
-                  iconBg="bg-[#e8f4f6]"
-                  label="CONSULTAS HOJE"
-                  value={todayAppointments.length}
-                  sub={`${confirmedToday} confirmada${confirmedToday !== 1 ? 's' : ''} · ${waitingToday} aguardando`}
+                  icon={<CalendarDays className="h-6 w-6 text-[#3F4A3B]" />}
+                  tint="bg-[#DCE2D3]"
+                  label="Consultas hoje"
+                  value={todayList.length}
+                  sub={`${confirmedToday} confirmada${confirmedToday !== 1 ? "s" : ""} · ${pendingToday} pendente${pendingToday !== 1 ? "s" : ""}`}
                 />
                 <StatCard
-                  icon={<CheckCircle2 className="w-5 h-5 text-[#16a34a]" />}
-                  iconBg="bg-[#f0fdf4]"
-                  label="CONCLUÍDAS NO MÊS"
+                  icon={<CheckCircle2 className="h-6 w-6 text-[#5B4C8A]" />}
+                  tint="bg-[#E6E0EE]"
+                  label="Concluídas no mês"
                   value={completedMonth}
-                  sub="+12% vs mês anterior"
+                  sub={
+                    variation === null ? (
+                      "— vs. mês anterior"
+                    ) : (
+                      <span className={variation >= 0 ? "text-[#3E8E63]" : "text-[#C2413A]"}>
+                        {variation >= 0 ? "+" : ""}
+                        {variation}% vs. mês anterior
+                      </span>
+                    )
+                  }
                 />
                 <StatCard
-                  icon={<Clock className="w-5 h-5 text-[#d97706]" />}
-                  iconBg="bg-[#fef9ec]"
-                  label="AGUARDANDO CONFIRMAÇÃO"
+                  icon={<Clock className="h-6 w-6 text-[#B05E1E]" />}
+                  tint="bg-[#F6E3CF]"
+                  label="Aguardando confirmação"
                   value={waitingAll}
                   sub="Via WhatsApp"
                 />
                 <StatCard
-                  icon={<Users className="w-5 h-5 text-[#7c3aed]" />}
-                  iconBg="bg-[#f5f3ff]"
-                  label="PACIENTES ATIVOS"
+                  icon={<Users className="h-6 w-6 text-[#5B4C8A]" />}
+                  tint="bg-[#E6E0EE]"
+                  label="Pacientes ativos"
                   value={activePatients}
-                  sub={newPatientsThisMonth > 0 ? `${newPatientsThisMonth} novo${newPatientsThisMonth !== 1 ? 's' : ''} este mês` : 'Sem novos este mês'}
+                  sub={newPatients > 0 ? `${newPatients} novo${newPatients !== 1 ? "s" : ""} este mês` : "Sem novos este mês"}
                 />
               </div>
 
-              {/* Two panels */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                {/* Minhas Consultas */}
-                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                  <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
-                    <div className="flex items-center gap-2">
-                      <CalendarDays className="w-4 h-4 text-[#1e7e8c]" />
-                      <h3 className="text-[14px] font-bold text-slate-800">Minhas Consultas</h3>
+              <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+                {/* Agenda */}
+                <section className="rounded-2xl border border-[#ECE8E3] bg-white shadow-[0_10px_40px_-18px_rgba(31,51,71,0.18)]">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#ECE8E3] px-6 py-5">
+                    <div className="flex items-center gap-3">
+                      <CalendarDays className="h-6 w-6 text-[#5E8A55]" />
+                      <h2 className="text-[22px] font-semibold text-[#1F3347]">{isToday(selectedDate) ? "Agenda de hoje" : "Agenda do dia"}</h2>
                     </div>
-                    <Link href="/appointments" className="text-slate-300 hover:text-[#1e7e8c] transition-colors">
-                      <ChevronRight className="w-5 h-5" />
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-[#6B7178]">{longDate(selectedDate)}</span>
+                      <button
+                        type="button"
+                        aria-label="Dia anterior"
+                        onClick={() => setSelectedDate((d) => addDays(d, -1))}
+                        className="flex h-8 w-8 items-center justify-center rounded-full border border-[#ECE8E3] hover:bg-[#F4EFE8]"
+                      >
+                        <ChevronLeft className="h-4 w-4 text-[#1F3347]" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Próximo dia"
+                        onClick={() => setSelectedDate((d) => addDays(d, 1))}
+                        className="flex h-8 w-8 items-center justify-center rounded-full border border-[#ECE8E3] hover:bg-[#F4EFE8]"
+                      >
+                        <ChevronRight className="h-4 w-4 text-[#1F3347]" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="px-0">
-                    {todayAppointments.length === 0 ? (
-                      <div className="py-8 text-center text-slate-400 text-sm">Nenhuma consulta hoje</div>
-                    ) : (
-                      <table className="w-full">
-                        <thead>
-                          <tr className="bg-[#f8fafc]">
-                            <th className="py-2.5 px-5 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-400">Paciente</th>
-                            <th className="py-2.5 px-3 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-400">Horário</th>
-                            <th className="py-2.5 px-3 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-400">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {todayAppointments.slice(0, 5).map((a: any) => (
-                            <tr key={a.id} className="border-t border-slate-100 hover:bg-slate-50">
-                              <td className="py-3 px-5 text-[13px] text-slate-700">{a.patientName}</td>
-                              <td className="py-3 px-3 text-[13px] text-slate-600">{a.startTime} – {a.endTime}</td>
-                              <td className="py-3 px-3">
-                                <AppointmentBadge status={a.status} />
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
-                </div>
 
-                {/* Reservas de Salas — hoje */}
-                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                  <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
-                    <div className="flex items-center gap-2">
-                      <DoorOpen className="w-4 h-4 text-[#1e7e8c]" />
-                      <h3 className="text-[14px] font-bold text-slate-800">Reservas de Salas — hoje</h3>
-                    </div>
-                    <Link href="/appointments?tab=rooms" className="text-slate-300 hover:text-[#1e7e8c] transition-colors">
-                      <ChevronRight className="w-5 h-5" />
-                    </Link>
-                  </div>
-                  <div className="px-0">
-                    {todayBookings.length === 0 && freeRooms.length === 0 ? (
-                      <div className="py-8 text-center text-slate-400 text-sm">Nenhuma sala cadastrada</div>
+                  <div className="px-4 py-4 sm:px-6">
+                    {dayQ.isLoading ? (
+                      <div className="flex h-40 items-center justify-center">
+                        <Loader2 className="h-6 w-6 animate-spin text-[#2E729B]" />
+                      </div>
+                    ) : agenda.length === 0 ? (
+                      <p className="py-10 text-center text-sm text-[#8A8F96]">
+                        {isStaff && psychFilter === null
+                          ? "Nenhuma consulta neste dia. Escolha uma psicóloga para ver os horários livres."
+                          : "Nenhuma consulta neste dia."}
+                      </p>
                     ) : (
-                      <>
-                        {todayBookings.length === 0 ? (
-                          <div className="py-8 text-center text-slate-400 text-sm">Nenhuma reserva hoje</div>
-                        ) : (
-                          <table className="w-full">
-                            <thead>
-                              <tr className="bg-[#f8fafc]">
-                                <th className="py-2.5 px-5 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-400">Sala</th>
-                                <th className="py-2.5 px-3 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-400">Horário</th>
-                                <th className="py-2.5 px-3 text-left text-[10.5px] font-bold uppercase tracking-wide text-slate-400">Tipo</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {todayBookings.slice(0, 5).map((b: any) => (
-                                <tr key={b.id} className="border-t border-slate-100 hover:bg-slate-50">
-                                  <td className="py-3 px-5 text-[13px] text-slate-700">{b.room?.name || 'Sala'}</td>
-                                  <td className="py-3 px-3 text-[13px] text-slate-600">{b.startTime} – {b.endTime}</td>
-                                  <td className="py-3 px-3">
-                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-[#e8f4f6] text-[#155f6b]">
-                                      {b.purpose || 'Consulta'}
-                                    </span>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        )}
-                        {freeRooms.length > 0 && (
-                          <p className="px-5 py-3 text-[12px] italic text-slate-400">
-                            {freeRooms.map((r: any) => r.name).join(' e ')} — livre{freeRooms.length !== 1 ? 's' : ''} o dia todo
-                          </p>
-                        )}
-                      </>
+                      <ol className="space-y-2.5">
+                        {agenda.slice(0, MAX_AGENDA_ITEMS).map((item) => {
+                          if (item.kind === "free") {
+                            return (
+                              <li key={`free-${item.time}`} className="grid grid-cols-[52px_20px_1fr] items-center gap-3">
+                                <span className="text-[15px] font-medium text-[#1F3347]">{item.time}</span>
+                                <TimelineDot className="bg-[#D5D2CD]" />
+                                <div className="flex items-center gap-3 rounded-xl bg-[#F7F5F2] px-4 py-3">
+                                  <Clock className="h-5 w-5 shrink-0 text-[#8A8F96]" />
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-[15px] font-medium text-[#1F3347]">Horário disponível</p>
+                                    <p className="text-[13px] text-[#8A8F96]">Agende uma consulta</p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setLocation(scheduleLink(item.time))}
+                                    className="rounded-xl border border-[#E3E1DE] bg-white px-4 py-1.5 text-sm font-medium text-[#1F3347] hover:bg-[#F4EFE8]"
+                                  >
+                                    Agendar
+                                  </button>
+                                </div>
+                              </li>
+                            );
+                          }
+                          const a = item.appt;
+                          const b = badgeFor(a.status);
+                          const detail = [
+                            a.room?.name ?? (a.roomId === 0 ? "Online" : "Consulta"),
+                            isStaff ? a.psychologist?.user?.fullName : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ");
+                          return (
+                            <li key={a.id} className="grid grid-cols-[52px_20px_1fr] items-center gap-3">
+                              <span className="text-[15px] font-medium text-[#1F3347]">{item.time}</span>
+                              <TimelineDot className={b.dot} />
+                              <Link
+                                href="/appointments"
+                                className={cn("flex items-center gap-3 rounded-xl px-4 py-3 transition-opacity hover:opacity-90", b.row)}
+                              >
+                                <UserRound className="h-5 w-5 shrink-0 text-[#3F4A3B]" />
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-[15px] font-medium text-[#1F3347]">{a.patientName}</p>
+                                  <p className="truncate text-[13px] text-[#6B7178]">{detail}</p>
+                                </div>
+                                <span className={cn("rounded-full px-3 py-1 text-xs font-medium", b.cls)}>{b.label}</span>
+                                <ChevronRight className="h-4 w-4 shrink-0 text-[#8A8F96]" />
+                              </Link>
+                            </li>
+                          );
+                        })}
+                      </ol>
                     )}
+                    <div className="mt-4 text-center">
+                      <Link href="/appointments" className="inline-flex items-center gap-2 text-[15px] font-medium text-[#2E729B] hover:underline">
+                        Ver agenda completa <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </div>
                   </div>
+                </section>
+
+                <div className="space-y-5">
+                  {/* Day summary */}
+                  <section className="rounded-2xl border border-[#ECE8E3] bg-white px-6 py-5 shadow-[0_10px_40px_-18px_rgba(31,51,71,0.18)]">
+                    <div className="mb-3 flex items-center gap-3 border-b border-[#ECE8E3] pb-4">
+                      <BarChart3 className="h-6 w-6 text-[#5E8A55]" />
+                      <h2 className="text-[22px] font-semibold text-[#1F3347]">Resumo do dia</h2>
+                    </div>
+                    <SummaryRow
+                      tint="bg-[#E6E0EE]"
+                      icon={<Users className="h-5 w-5 text-[#5B4C8A]" />}
+                      title={`${activePatients} paciente${activePatients !== 1 ? "s" : ""} ativo${activePatients !== 1 ? "s" : ""}`}
+                      sub={newPatients > 0 ? `${newPatients} novo${newPatients !== 1 ? "s" : ""} este mês` : "Sem novos este mês"}
+                    />
+                    <SummaryRow
+                      tint="bg-[#DCE2D3]"
+                      icon={<DoorOpen className="h-5 w-5 text-[#3F4A3B]" />}
+                      title={`${freeRooms} sala${freeRooms !== 1 ? "s" : ""} disponíve${freeRooms !== 1 ? "is" : "l"}`}
+                      sub={`De ${rooms.length} sala${rooms.length !== 1 ? "s" : ""} totais`}
+                    />
+                    <SummaryRow
+                      tint="bg-[#F6E3CF]"
+                      icon={<Clock className="h-5 w-5 text-[#B05E1E]" />}
+                      title={`${waitingAll} confirmaç${waitingAll !== 1 ? "ões pendentes" : "ão pendente"}`}
+                      sub="Via WhatsApp"
+                    />
+                  </section>
+
+                  {/* Room bookings today */}
+                  <section className="rounded-2xl border border-[#ECE8E3] bg-white shadow-[0_10px_40px_-18px_rgba(31,51,71,0.18)]">
+                    <Link href="/appointments?tab=rooms" className="flex items-center justify-between border-b border-[#ECE8E3] px-6 py-4 hover:bg-[#FBF9F6]">
+                      <span className="flex items-center gap-3">
+                        <DoorOpen className="h-6 w-6 text-[#5E8A55]" />
+                        <span className="text-[20px] font-semibold text-[#1F3347]">Reservas de salas — hoje</span>
+                      </span>
+                      <ChevronRight className="h-5 w-5 text-[#8A8F96]" />
+                    </Link>
+                    {roomStatus.length === 0 ? (
+                      <p className="px-6 py-8 text-center text-sm text-[#8A8F96]">Nenhuma sala cadastrada</p>
+                    ) : (
+                      <ul>
+                        {roomStatus.map(({ room, current, next }, i) => {
+                          const booking = current ?? next;
+                          // Psychologists don't see who else booked; their own bookings show as "Você"
+                          const mine = booking?.psychologist?.userId === user?.id;
+                          const who = booking ? (isStaff ? booking.psychologist?.user?.fullName : mine ? "Você" : null) : null;
+                          return (
+                            <li key={room.id} className={cn("flex items-center gap-3 px-6 py-3", i > 0 && "border-t border-[#ECE8E3]")}>
+                              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#F6E3CF]">
+                                <DoorOpen className="h-[18px] w-[18px] text-[#B05E1E]" />
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-[15px] font-medium text-[#1F3347]">{room.name}</p>
+                                <p className="truncate text-[13px] text-[#6B7178]">
+                                  {booking
+                                    ? `${booking.startTime.slice(0, 5)} – ${booking.endTime.slice(0, 5)}${who ? ` · ${who}` : ""}`
+                                    : "Sem reservas hoje"}
+                                </p>
+                              </div>
+                              <span
+                                className={cn(
+                                  "rounded-full px-3 py-1 text-xs font-medium",
+                                  current ? "bg-[#E6E0EE] text-[#4A4257]" : "bg-[#DCE2D3] text-[#3F4A3B]",
+                                )}
+                              >
+                                {current ? "Ocupada" : "Disponível"}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </section>
                 </div>
               </div>
             </>
@@ -237,37 +467,36 @@ export default function Dashboard() {
   );
 }
 
-function StatCard({ icon, iconBg, label, value, sub }: {
-  icon: React.ReactNode;
-  iconBg: string;
-  label: string;
-  value: number;
-  sub: string;
-}) {
+function TimelineDot({ className }: { className: string }) {
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-      <div className={`w-9 h-9 rounded-lg ${iconBg} flex items-center justify-center mb-3`}>
-        {icon}
+    <span className="relative flex h-full items-center justify-center">
+      <span className="absolute inset-y-[-8px] left-1/2 w-px -translate-x-1/2 border-l border-dashed border-[#E3E1DE]" />
+      <span className={cn("relative h-3 w-3 rounded-full ring-4 ring-white", className)} />
+    </span>
+  );
+}
+
+function StatCard({ icon, tint, label, value, sub }: { icon: ReactNode; tint: string; label: string; value: number; sub: ReactNode }) {
+  return (
+    <div className="flex items-start gap-4 rounded-2xl border border-[#ECE8E3] bg-white p-5 shadow-[0_10px_40px_-18px_rgba(31,51,71,0.18)]">
+      <div className={cn("flex h-14 w-14 shrink-0 items-center justify-center rounded-xl", tint)}>{icon}</div>
+      <div className="min-w-0">
+        <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-[#6B7178]">{label}</p>
+        <p className="mt-1 text-[32px] font-semibold leading-tight text-[#1F3347]">{value}</p>
+        <p className="mt-1 text-[14px] text-[#6B7178]">{sub}</p>
       </div>
-      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
-      <p className="text-[32px] font-bold text-slate-800 leading-tight mt-1">{value}</p>
-      <p className="text-[12px] text-slate-400 mt-1">{sub}</p>
     </div>
   );
 }
 
-function AppointmentBadge({ status }: { status: string }) {
-  const map: Record<string, { label: string; cls: string }> = {
-    confirmed: { label: 'Confirmado', cls: 'bg-[#e8f4f6] text-[#155f6b]' },
-    scheduled: { label: 'Aguardando', cls: 'bg-[#fef9ec] text-[#92400e]' },
-    completed: { label: 'Concluído', cls: 'bg-[#f0fdf4] text-[#14532d]' },
-    canceled:  { label: 'Cancelado', cls: 'bg-slate-100 text-slate-500' },
-    'first-session': { label: 'Primeira Sessão', cls: 'bg-[#f5f3ff] text-[#5b21b6]' },
-  };
-  const { label, cls } = map[status] || { label: status, cls: 'bg-slate-100 text-slate-500' };
+function SummaryRow({ tint, icon, title, sub }: { tint: string; icon: ReactNode; title: string; sub: string }) {
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${cls}`}>
-      {label}
-    </span>
+    <div className="flex items-center gap-4 py-3">
+      <div className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-xl", tint)}>{icon}</div>
+      <div>
+        <p className="text-[16px] font-medium text-[#1F3347]">{title}</p>
+        <p className="text-[13px] text-[#6B7178]">{sub}</p>
+      </div>
+    </div>
   );
 }
