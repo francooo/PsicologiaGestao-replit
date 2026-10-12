@@ -89,9 +89,14 @@ export async function pickDocument(types: string[] = ['*/*'], base64 = false): P
   return { uri: a.uri, name: a.name, type: a.mimeType ?? 'application/octet-stream', size: a.size, base64: a.base64 };
 }
 
-/** Appends a local file to FormData in the shape React Native's fetch expects. */
+/**
+ * Appends a local file to FormData. Expo's fetch (SDK 52+) rejects React Native's
+ * `{ uri, name, type }` parts ("Unsupported FormDataPart implementation"); it needs a
+ * part exposing `bytes()`, plus `name`/`type` for the filename and content-type headers.
+ */
 export function appendFile(form: FormData, field: string, file: LocalFile) {
-  form.append(field, { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
+  const part = { name: file.name, type: file.type, bytes: () => new File(file.uri).bytes() };
+  form.append(field, part as unknown as Blob);
 }
 
 /** Reads a local file as base64 (for JSON uploads like invoices). */
