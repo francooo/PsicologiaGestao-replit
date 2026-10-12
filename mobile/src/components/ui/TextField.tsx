@@ -108,6 +108,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 12,
   },
-  trailing: { paddingHorizontal: 14, height: '100%', justifyContent: 'center' },
+  // No percentage height here: on Android it made the whole field grow to fill the screen
+  trailing: { paddingHorizontal: 14, paddingVertical: 12, justifyContent: 'center' },
   helper: { marginTop: 2 },
 });

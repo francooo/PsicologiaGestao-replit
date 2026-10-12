@@ -16,13 +16,15 @@ export function AuthShell({ title, subtitle, children }: { title: string; subtit
       <ScrollView
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}>
-        <View style={styles.card}>
-          <BrandLogo style={styles.logo} />
-          <View style={styles.header}>
-            <AppText variant="title">{title}</AppText>
-            {subtitle && <AppText tone="muted">{subtitle}</AppText>}
+        <View style={styles.center}>
+          <View style={styles.card}>
+            <BrandLogo style={styles.logo} />
+            <View style={styles.header}>
+              <AppText variant="title">{title}</AppText>
+              {subtitle && <AppText tone="muted">{subtitle}</AppText>}
+            </View>
+            {children}
           </View>
-          {children}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -31,7 +33,9 @@ export function AuthShell({ title, subtitle, children }: { title: string; subtit
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
-  scroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 16 },
+  scroll: { flexGrow: 1, paddingHorizontal: 16 },
+  // Grows to fill short content and centers it; taller content simply scrolls (never clipped at the top)
+  center: { flexGrow: 1, justifyContent: 'center' },
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.xl,
