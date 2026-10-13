@@ -2753,11 +2753,28 @@ import { tmpdir } from "os";
 import { join } from "path";
 var require2 = createRequire(import.meta.url);
 var pdfParse = require2("pdf-parse");
+var mammoth = require2("mammoth");
 var execFileAsync = promisify2(execFile);
 if (!process.env.GROQ_API_KEY) {
   console.warn("GROQ_API_KEY not set. AI summarization and invoice NFS-e image analysis will not work.");
 }
 var groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+var GROQ_TEXT_MODEL = process.env.GROQ_TEXT_MODEL || "openai/gpt-oss-120b";
+var GROQ_VISION_MODEL = process.env.GROQ_VISION_MODEL || "qwen/qwen3.8-27b";
+function reasoningOptions(model) {
+  if (model.startsWith("openai/gpt-oss")) return { reasoning_effort: "low" };
+  if (model.startsWith("qwen/qwen3")) return { reasoning_effort: "none" };
+  return {};
+}
+function logGroqError(context, model, error) {
+  const err = error;
+  console.error(`[${context}] Groq error`, {
+    model,
+    status: err?.status,
+    code: err?.error?.error?.code,
+    message: err?.error?.error?.message ?? err?.message
+  });
+}
 var CLINICAL_PROMPT = `Voc\xEA \xE9 um assistente cl\xEDnico especializado em psicologia. 
 Analise o documento a seguir e forne\xE7a:
 
@@ -2767,11 +2784,24 @@ Analise o documento a seguir e forne\xE7a:
 4. **Sugest\xF5es de follow-up** (perguntas ou temas a explorar nas pr\xF3ximas sess\xF5es)
 
 Seja preciso, emp\xE1tico e use linguagem t\xE9cnica adequada \xE0 psicologia cl\xEDnica.`;
-var SUPPORTED_MIME_TYPES = ["application/pdf", "text/plain", "text/"];
+var DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+var SUPPORTED_MIME_TYPES = ["application/pdf", DOCX_MIME, "text/plain", "text/"];
+function effectiveMimeType(mimeType, fileName) {
+  if (/\.docx$/i.test(fileName)) return DOCX_MIME;
+  if (/\.pdf$/i.test(fileName) && !mimeType.startsWith("application/pdf")) return "application/pdf";
+  return mimeType;
+}
 function isSupportedMimeType(mimeType) {
   return SUPPORTED_MIME_TYPES.some((supported) => mimeType.startsWith(supported));
 }
 async function extractTextFromBuffer(fileBuffer, mimeType) {
+  if (mimeType === DOCX_MIME) {
+    const { value } = await mammoth.extractRawText({ buffer: fileBuffer });
+    if (!value || value.trim().length === 0) {
+      throw new UnsupportedFormatError("N\xE3o foi poss\xEDvel extrair texto deste documento Word. O arquivo pode estar vazio.");
+    }
+    return value;
+  }
   if (mimeType === "application/pdf") {
     const data = await pdfParse(fileBuffer);
     if (!data.text || data.text.trim().length === 0) {
@@ -2784,9 +2814,10 @@ async function extractTextFromBuffer(fileBuffer, mimeType) {
   return fileBuffer.toString("utf-8");
 }
 async function summarizeDocument(fileBuffer, mimeType, fileName) {
+  mimeType = effectiveMimeType(mimeType, fileName);
   if (!isSupportedMimeType(mimeType)) {
     throw new UnsupportedFormatError(
-      `Formato n\xE3o suportado: ${mimeType}. Apenas PDF e arquivos de texto s\xE3o suportados.`
+      `Formato n\xE3o suportado para resumo: ${mimeType}. S\xE3o aceitos PDF, Word (.docx) e arquivos de texto.`
     );
   }
   let textContent;
@@ -2802,7 +2833,8 @@ async function summarizeDocument(fileBuffer, mimeType, fileName) {
   }
   try {
     const completion = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      model: GROQ_TEXT_MODEL,
+      ...reasoningOptions(GROQ_TEXT_MODEL),
       messages: [
         {
           role: "system",
@@ -2816,7 +2848,8 @@ ${textContent}`
         }
       ],
       temperature: 0.4,
-      max_tokens: 1500
+      // Room for the model's reasoning tokens plus a ~1500-token answer
+      max_tokens: 4e3
     });
     const text3 = completion.choices[0]?.message?.content;
     if (!text3) {
@@ -2832,7 +2865,7 @@ ${textContent}`
         "Limite de requisi\xE7\xF5es atingido. Aguarde alguns instantes e tente novamente."
       );
     }
-    console.error("Groq API error:", error);
+    logGroqError("summarizeDocument", GROQ_TEXT_MODEL, error);
     throw new AIServiceError("Erro ao conectar com a IA. Tente novamente.");
   }
 }
@@ -2854,26 +2887,8 @@ var AIQuotaError = class extends Error {
     this.name = "AIQuotaError";
   }
 };
-var GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 var MAX_BASE64_SIZE_BYTES = 4 * 1024 * 1024;
-var NFS_E_EXTRACTION_PROMPT = `Voc\xEA \xE9 um especialista em leitura de Notas Fiscais de Servi\xE7os brasileiras (NFS-e), especialmente de profissionais de sa\xFAde como psic\xF3logos.
-
-Analise a imagem da nota fiscal e extraia TODOS os campos dispon\xEDveis. Para cada campo, informe o valor extra\xEDdo e um score de confian\xE7a de 0 a 1 (0 = n\xE3o encontrado/ileg\xEDvel, 1 = certeza total).
-
-Retorne APENAS um JSON v\xE1lido, sem explica\xE7\xF5es, sem markdown, sem texto adicional.
-
-Estrutura obrigat\xF3ria do JSON (cada chave com objeto { "valor": ... | null, "confianca": n\xFAmero 0-1 }):
-
-chave_nfe, numero_nota, serie, data_emissao (YYYY-MM-DD), codigo_verificacao, protocolo_autorizacao, codigo_municipio_ibge,
-emitente_nome, emitente_cnpj_cpf, emitente_crp, emitente_ie, emitente_im, emitente_endereco, emitente_bairro, emitente_municipio, emitente_uf, emitente_cep, emitente_telefone, emitente_email, emitente_complemento,
-tomador_nome, tomador_cpf_cnpj, tomador_endereco, tomador_bairro, tomador_municipio, tomador_uf, tomador_cep, tomador_email, tomador_telefone, tomador_ie, tomador_im, tomador_complemento,
-descricao_servico, codigo_servico, codigo_cnae, nbs, codigo_municipio_servico,
-iss_retido (boolean), aliquota_iss (decimal ex: 0.05 para 5%),
-valor_servicos, valor_deducoes, base_calculo, valor_iss, valor_pis, valor_cofins, valor_inss, valor_ir, valor_csll, valor_liquido, valor_ibs, valor_cbs, cst, codigo_classificacao_tributaria,
-emitente_divergencias (string ou null: descreva diverg\xEAncias entre dados do emitente na nota e os dados cadastrados fornecidos; null se n\xE3o houver).
-
-Regras: Valores monet\xE1rios como n\xFAmero decimal (ex: 1200.50). Datas YYYY-MM-DD. CPF/CNPJ/CEP formatados. Campo vazio ou ileg\xEDvel: valor null.`;
-var GROQ_TEXT_MODEL = "llama-3.3-70b-versatile";
+var INVOICE_TRANSCRIPTION_PROMPT = `Transcreva todo o texto vis\xEDvel desta nota fiscal, linha por linha, preservando r\xF3tulos, n\xFAmeros, datas e valores exatamente como aparecem. N\xE3o comente, n\xE3o resuma, n\xE3o invente campos.`;
 var NFS_E_TEXT_EXTRACTION_PROMPT = `Voc\xEA \xE9 um especialista em leitura de Notas Fiscais de Servi\xE7os brasileiras (NFS-e), especialmente de profissionais de sa\xFAde como psic\xF3logos.
 
 Analise o texto da nota fiscal abaixo e extraia TODOS os campos dispon\xEDveis. Para cada campo, informe o valor extra\xEDdo e um score de confian\xE7a de 0 a 1 (0 = n\xE3o encontrado, 1 = certeza total).
@@ -2942,6 +2957,10 @@ async function analyzeInvoicePdf(pdfBase64, psychologistProfile) {
     const imageBase64 = await pdfBufferToImageBase64(pdfBuffer);
     return analyzeInvoiceImage(imageBase64, "image/png", psychologistProfile);
   }
+  return extractInvoiceFromText(textContent, psychologistProfile, "analyzeInvoicePdf");
+}
+async function extractInvoiceFromText(rawText, psychologistProfile, context) {
+  let textContent = rawText;
   const maxChars = 12e3;
   if (textContent.length > maxChars) {
     textContent = textContent.slice(0, maxChars) + "\n\n[...documento truncado...]";
@@ -2952,6 +2971,7 @@ ${JSON.stringify(psychologistProfile, null, 2)}` : "";
   try {
     const completion = await groq.chat.completions.create({
       model: GROQ_TEXT_MODEL,
+      ...reasoningOptions(GROQ_TEXT_MODEL),
       messages: [
         { role: "system", content: NFS_E_TEXT_EXTRACTION_PROMPT + profileText },
         { role: "user", content: `Texto extra\xEDdo da nota fiscal:
@@ -2959,7 +2979,7 @@ ${JSON.stringify(psychologistProfile, null, 2)}` : "";
 ${textContent}` }
       ],
       temperature: 0.2,
-      max_tokens: 2e3,
+      max_tokens: 6e3,
       response_format: { type: "json_object" }
     });
     const rawContent = completion.choices[0]?.message?.content;
@@ -2983,8 +3003,8 @@ ${textContent}` }
     if (status === 429) {
       throw new AIQuotaError("Limite de requisi\xE7\xF5es atingido. Aguarde alguns instantes e tente novamente.");
     }
-    console.error("Groq PDF analysis error:", error);
-    throw new AIServiceError("Erro ao analisar o PDF da nota fiscal. Tente novamente.");
+    logGroqError(context, GROQ_TEXT_MODEL, error);
+    throw new AIServiceError("Erro ao analisar a nota fiscal. Tente novamente.");
   }
 }
 async function analyzeInvoiceImage(imageBase64, imageType, psychologistProfile) {
@@ -3005,52 +3025,40 @@ async function analyzeInvoiceImage(imageBase64, imageType, psychologistProfile) 
   }
   const mediaType = mime.includes("png") ? "image/png" : mime.includes("webp") ? "image/webp" : "image/jpeg";
   const dataUrl = `data:${mediaType};base64,${imageBase64}`;
-  const profileText = psychologistProfile ? `
-Dados cadastrados da psic\xF3loga emitente para refer\xEAncia e compara\xE7\xE3o (informe diverg\xEAncias em emitente_divergencias):
-${JSON.stringify(psychologistProfile, null, 2)}` : "";
+  let transcription;
   try {
     const completion = await groq.chat.completions.create({
       model: GROQ_VISION_MODEL,
+      ...reasoningOptions(GROQ_VISION_MODEL),
       messages: [
         {
           role: "user",
           content: [
-            { type: "text", text: NFS_E_EXTRACTION_PROMPT + profileText },
+            { type: "text", text: INVOICE_TRANSCRIPTION_PROMPT },
             { type: "image_url", image_url: { url: dataUrl } }
           ]
         }
       ],
-      temperature: 0.2,
-      max_tokens: 2e3,
-      response_format: { type: "json_object" }
+      temperature: 0,
+      max_tokens: 900
     });
-    const rawContent = completion.choices[0]?.message?.content;
-    if (!rawContent || typeof rawContent !== "string") {
-      throw new AIServiceError("A IA n\xE3o retornou dados. Tente outra imagem.");
-    }
-    let parsed;
-    try {
-      const cleaned = rawContent.replace(/^```json\s*/i, "").replace(/\s*```\s*$/i, "").trim();
-      parsed = JSON.parse(cleaned);
-    } catch {
-      throw new AIServiceError("N\xE3o foi poss\xEDvel interpretar a resposta da IA. Verifique a qualidade da foto e tente novamente.");
-    }
-    const confidences = Object.values(parsed).filter((v) => typeof v === "object" && v !== null && "confianca" in v).map((v) => v.confianca);
-    const ai_confidence_score = confidences.length ? confidences.reduce((a, b) => a + b, 0) / confidences.length : 0;
-    return { data: parsed, ai_confidence_score: Math.round(ai_confidence_score * 1e3) / 1e3 };
+    transcription = completion.choices[0]?.message?.content ?? "";
   } catch (error) {
-    if (error instanceof UnsupportedFormatError || error instanceof AIServiceError) throw error;
     const err = error;
     const status = err?.status ?? err?.statusCode ?? err?.error?.status;
+    logGroqError("analyzeInvoiceImage", GROQ_VISION_MODEL, error);
     if (status === 429) {
       throw new AIQuotaError("Limite de requisi\xE7\xF5es atingido. Aguarde alguns instantes e tente novamente.");
     }
     if (status === 413) {
       throw new UnsupportedFormatError("Imagem muito grande. Use no m\xE1ximo 4MB.");
     }
-    console.error("Groq vision error:", error);
     throw new AIServiceError("Erro ao analisar a imagem da nota fiscal. Tente novamente.");
   }
+  if (transcription.trim().length < 20) {
+    throw new AIServiceError("N\xE3o foi poss\xEDvel ler o texto da nota. Verifique a qualidade da foto e tente novamente.");
+  }
+  return extractInvoiceFromText(transcription, psychologistProfile, "analyzeInvoiceImage");
 }
 
 // server/routes/patient-records.ts

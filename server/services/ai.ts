@@ -7,6 +7,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 const require = createRequire(import.meta.url);
 const pdfParse = require("pdf-parse");
+const mammoth = require("mammoth");
 const execFileAsync = promisify(execFile);
 
 if (!process.env.GROQ_API_KEY) {
@@ -14,6 +15,33 @@ if (!process.env.GROQ_API_KEY) {
 }
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+/**
+ * Groq retires models periodically (llama-3.3-70b-versatile and llama-4-scout were
+ * removed), so the model names come from env vars and can be swapped on Vercel
+ * without a code change. Defaults were checked against the Groq model list.
+ */
+const GROQ_TEXT_MODEL = process.env.GROQ_TEXT_MODEL || "openai/gpt-oss-120b";
+const GROQ_VISION_MODEL = process.env.GROQ_VISION_MODEL || "qwen/qwen3.8-27b";
+
+/** Reasoning models spend tokens "thinking" before answering; keep that short. */
+function reasoningOptions(model: string) {
+  if (model.startsWith("openai/gpt-oss")) return { reasoning_effort: "low" as const };
+  // Qwen3 "thinking" would eat the vision model's small output budget
+  if (model.startsWith("qwen/qwen3")) return { reasoning_effort: "none" as const };
+  return {};
+}
+
+/** Logs the real Groq failure (status, code, model) — the user only sees a generic message. */
+function logGroqError(context: string, model: string, error: unknown) {
+  const err = error as { status?: number; error?: { error?: { message?: string; code?: string } }; message?: string };
+  console.error(`[${context}] Groq error`, {
+    model,
+    status: err?.status,
+    code: err?.error?.error?.code,
+    message: err?.error?.error?.message ?? err?.message,
+  });
+}
 
 const CLINICAL_PROMPT = `Você é um assistente clínico especializado em psicologia. 
 Analise o documento a seguir e forneça:
@@ -25,13 +53,28 @@ Analise o documento a seguir e forneça:
 
 Seja preciso, empático e use linguagem técnica adequada à psicologia clínica.`;
 
-const SUPPORTED_MIME_TYPES = ["application/pdf", "text/plain", "text/"];
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const SUPPORTED_MIME_TYPES = ["application/pdf", DOCX_MIME, "text/plain", "text/"];
+
+/** Some pickers send .docx as application/octet-stream; fall back to the file extension. */
+function effectiveMimeType(mimeType: string, fileName: string) {
+  if (/\.docx$/i.test(fileName)) return DOCX_MIME;
+  if (/\.pdf$/i.test(fileName) && !mimeType.startsWith("application/pdf")) return "application/pdf";
+  return mimeType;
+}
 
 export function isSupportedMimeType(mimeType: string): boolean {
   return SUPPORTED_MIME_TYPES.some((supported) => mimeType.startsWith(supported));
 }
 
 async function extractTextFromBuffer(fileBuffer: Buffer, mimeType: string): Promise<string> {
+  if (mimeType === DOCX_MIME) {
+    const { value } = await mammoth.extractRawText({ buffer: fileBuffer });
+    if (!value || value.trim().length === 0) {
+      throw new UnsupportedFormatError("Não foi possível extrair texto deste documento Word. O arquivo pode estar vazio.");
+    }
+    return value;
+  }
   if (mimeType === "application/pdf") {
     const data = await pdfParse(fileBuffer);
     if (!data.text || data.text.trim().length === 0) {
@@ -49,9 +92,10 @@ export async function summarizeDocument(
   mimeType: string,
   fileName: string
 ): Promise<string> {
+  mimeType = effectiveMimeType(mimeType, fileName);
   if (!isSupportedMimeType(mimeType)) {
     throw new UnsupportedFormatError(
-      `Formato não suportado: ${mimeType}. Apenas PDF e arquivos de texto são suportados.`
+      `Formato não suportado para resumo: ${mimeType}. São aceitos PDF, Word (.docx) e arquivos de texto.`
     );
   }
 
@@ -70,7 +114,8 @@ export async function summarizeDocument(
 
   try {
     const completion = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      model: GROQ_TEXT_MODEL,
+      ...reasoningOptions(GROQ_TEXT_MODEL),
       messages: [
         {
           role: "system",
@@ -82,7 +127,8 @@ export async function summarizeDocument(
         },
       ],
       temperature: 0.4,
-      max_tokens: 1500,
+      // Room for the model's reasoning tokens plus a ~1500-token answer
+      max_tokens: 4000,
     });
 
     const text = completion.choices[0]?.message?.content;
@@ -102,7 +148,7 @@ export async function summarizeDocument(
       );
     }
 
-    console.error("Groq API error:", error);
+    logGroqError("summarizeDocument", GROQ_TEXT_MODEL, error);
     throw new AIServiceError("Erro ao conectar com a IA. Tente novamente.");
   }
 }
@@ -130,7 +176,6 @@ export class AIQuotaError extends Error {
 
 // --- Invoice (NFS-e) image analysis with vision ---
 
-const GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 const MAX_BASE64_SIZE_BYTES = 4 * 1024 * 1024; // 4MB Groq limit
 
 export interface PsychologistProfileForInvoice {
@@ -144,25 +189,7 @@ export interface PsychologistProfileForInvoice {
   telefone?: string;
 }
 
-const NFS_E_EXTRACTION_PROMPT = `Você é um especialista em leitura de Notas Fiscais de Serviços brasileiras (NFS-e), especialmente de profissionais de saúde como psicólogos.
-
-Analise a imagem da nota fiscal e extraia TODOS os campos disponíveis. Para cada campo, informe o valor extraído e um score de confiança de 0 a 1 (0 = não encontrado/ilegível, 1 = certeza total).
-
-Retorne APENAS um JSON válido, sem explicações, sem markdown, sem texto adicional.
-
-Estrutura obrigatória do JSON (cada chave com objeto { "valor": ... | null, "confianca": número 0-1 }):
-
-chave_nfe, numero_nota, serie, data_emissao (YYYY-MM-DD), codigo_verificacao, protocolo_autorizacao, codigo_municipio_ibge,
-emitente_nome, emitente_cnpj_cpf, emitente_crp, emitente_ie, emitente_im, emitente_endereco, emitente_bairro, emitente_municipio, emitente_uf, emitente_cep, emitente_telefone, emitente_email, emitente_complemento,
-tomador_nome, tomador_cpf_cnpj, tomador_endereco, tomador_bairro, tomador_municipio, tomador_uf, tomador_cep, tomador_email, tomador_telefone, tomador_ie, tomador_im, tomador_complemento,
-descricao_servico, codigo_servico, codigo_cnae, nbs, codigo_municipio_servico,
-iss_retido (boolean), aliquota_iss (decimal ex: 0.05 para 5%),
-valor_servicos, valor_deducoes, base_calculo, valor_iss, valor_pis, valor_cofins, valor_inss, valor_ir, valor_csll, valor_liquido, valor_ibs, valor_cbs, cst, codigo_classificacao_tributaria,
-emitente_divergencias (string ou null: descreva divergências entre dados do emitente na nota e os dados cadastrados fornecidos; null se não houver).
-
-Regras: Valores monetários como número decimal (ex: 1200.50). Datas YYYY-MM-DD. CPF/CNPJ/CEP formatados. Campo vazio ou ilegível: valor null.`;
-
-const GROQ_TEXT_MODEL = "llama-3.3-70b-versatile";
+const INVOICE_TRANSCRIPTION_PROMPT = `Transcreva todo o texto visível desta nota fiscal, linha por linha, preservando rótulos, números, datas e valores exatamente como aparecem. Não comente, não resuma, não invente campos.`;
 
 const NFS_E_TEXT_EXTRACTION_PROMPT = `Você é um especialista em leitura de Notas Fiscais de Serviços brasileiras (NFS-e), especialmente de profissionais de saúde como psicólogos.
 
@@ -242,6 +269,18 @@ export async function analyzeInvoicePdf(
     return analyzeInvoiceImage(imageBase64, "image/png", psychologistProfile);
   }
 
+  return extractInvoiceFromText(textContent, psychologistProfile, "analyzeInvoicePdf");
+}
+
+type InvoiceExtraction = { data: Record<string, { valor: unknown; confianca: number }>; ai_confidence_score: number };
+
+/** Text of an NFS-e (from a PDF or transcribed from a photo) -> structured fields with confidence. */
+async function extractInvoiceFromText(
+  rawText: string,
+  psychologistProfile: PsychologistProfileForInvoice | undefined,
+  context: string,
+): Promise<InvoiceExtraction> {
+  let textContent = rawText;
   const maxChars = 12000;
   if (textContent.length > maxChars) {
     textContent = textContent.slice(0, maxChars) + "\n\n[...documento truncado...]";
@@ -254,12 +293,13 @@ export async function analyzeInvoicePdf(
   try {
     const completion = await groq.chat.completions.create({
       model: GROQ_TEXT_MODEL,
+      ...reasoningOptions(GROQ_TEXT_MODEL),
       messages: [
         { role: "system", content: NFS_E_TEXT_EXTRACTION_PROMPT + profileText },
         { role: "user", content: `Texto extraído da nota fiscal:\n\n${textContent}` },
       ],
       temperature: 0.2,
-      max_tokens: 2000,
+      max_tokens: 6000,
       response_format: { type: "json_object" },
     });
 
@@ -291,8 +331,8 @@ export async function analyzeInvoicePdf(
     if (status === 429) {
       throw new AIQuotaError("Limite de requisições atingido. Aguarde alguns instantes e tente novamente.");
     }
-    console.error("Groq PDF analysis error:", error);
-    throw new AIServiceError("Erro ao analisar o PDF da nota fiscal. Tente novamente.");
+    logGroqError(context, GROQ_TEXT_MODEL, error);
+    throw new AIServiceError("Erro ao analisar a nota fiscal. Tente novamente.");
   }
 }
 
@@ -322,55 +362,42 @@ export async function analyzeInvoiceImage(
   const mediaType = mime.includes("png") ? "image/png" : mime.includes("webp") ? "image/webp" : "image/jpeg";
   const dataUrl = `data:${mediaType};base64,${imageBase64}`;
 
-  const profileText = psychologistProfile
-    ? `\nDados cadastrados da psicóloga emitente para referência e comparação (informe divergências em emitente_divergencias):\n${JSON.stringify(psychologistProfile, null, 2)}`
-    : "";
-
+  // Two steps: the vision model only transcribes the invoice (short output — Groq's free
+  // tier caps vision output at ~1000 tokens/min), then the text model extracts the fields.
+  let transcription: string;
   try {
     const completion = await groq.chat.completions.create({
       model: GROQ_VISION_MODEL,
+      ...reasoningOptions(GROQ_VISION_MODEL),
       messages: [
         {
           role: "user",
           content: [
-            { type: "text", text: NFS_E_EXTRACTION_PROMPT + profileText },
+            { type: "text", text: INVOICE_TRANSCRIPTION_PROMPT },
             { type: "image_url", image_url: { url: dataUrl } },
           ],
         },
       ],
-      temperature: 0.2,
-      max_tokens: 2000,
-      response_format: { type: "json_object" },
+      temperature: 0,
+      max_tokens: 900,
     });
-
-    const rawContent = completion.choices[0]?.message?.content;
-    if (!rawContent || typeof rawContent !== "string") {
-      throw new AIServiceError("A IA não retornou dados. Tente outra imagem.");
-    }
-
-    let parsed: Record<string, { valor: unknown; confianca: number }>;
-    try {
-      const cleaned = rawContent.replace(/^```json\s*/i, "").replace(/\s*```\s*$/i, "").trim();
-      parsed = JSON.parse(cleaned) as Record<string, { valor: unknown; confianca: number }>;
-    } catch {
-      throw new AIServiceError("Não foi possível interpretar a resposta da IA. Verifique a qualidade da foto e tente novamente.");
-    }
-
-    const confidences = Object.values(parsed).filter((v) => typeof v === "object" && v !== null && "confianca" in v).map((v) => (v as { confianca: number }).confianca);
-    const ai_confidence_score = confidences.length ? confidences.reduce((a, b) => a + b, 0) / confidences.length : 0;
-
-    return { data: parsed, ai_confidence_score: Math.round(ai_confidence_score * 1000) / 1000 };
+    transcription = completion.choices[0]?.message?.content ?? "";
   } catch (error) {
-    if (error instanceof UnsupportedFormatError || error instanceof AIServiceError) throw error;
     const err = error as { status?: number; statusCode?: number; error?: { status?: number } };
     const status = err?.status ?? err?.statusCode ?? err?.error?.status;
+    logGroqError("analyzeInvoiceImage", GROQ_VISION_MODEL, error);
     if (status === 429) {
       throw new AIQuotaError("Limite de requisições atingido. Aguarde alguns instantes e tente novamente.");
     }
     if (status === 413) {
       throw new UnsupportedFormatError("Imagem muito grande. Use no máximo 4MB.");
     }
-    console.error("Groq vision error:", error);
     throw new AIServiceError("Erro ao analisar a imagem da nota fiscal. Tente novamente.");
   }
+
+  if (transcription.trim().length < 20) {
+    throw new AIServiceError("Não foi possível ler o texto da nota. Verifique a qualidade da foto e tente novamente.");
+  }
+
+  return extractInvoiceFromText(transcription, psychologistProfile, "analyzeInvoiceImage");
 }
