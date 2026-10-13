@@ -259,7 +259,11 @@ var patientDocuments = pgTable("patient_documents", {
   fileSize: integer("file_size").notNull(),
   mimeType: text("mime_type").notNull(),
   uploadedBy: integer("uploaded_by").notNull().references(() => users.id),
-  createdAt: timestamp("created_at").notNull().defaultNow()
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  // AI summary cached once per document (the file never changes), so later views cost no tokens
+  aiSummary: text("ai_summary"),
+  aiSummaryAt: timestamp("ai_summary_at"),
+  aiSummaryModel: text("ai_summary_model")
 });
 var insertPatientDocumentSchema = createInsertSchema(patientDocuments).pick({
   patientId: true,
@@ -1540,8 +1544,14 @@ var DatabaseStorage = class {
       fileSize: patientDocuments.fileSize,
       mimeType: patientDocuments.mimeType,
       uploadedBy: patientDocuments.uploadedBy,
-      createdAt: patientDocuments.createdAt
+      createdAt: patientDocuments.createdAt,
+      // Only the date: lets the UI show "Ver resumo" without shipping the summary text
+      aiSummaryAt: patientDocuments.aiSummaryAt
     }).from(patientDocuments).where(eq(patientDocuments.patientId, patientId));
+  }
+  async saveDocumentSummary(id, summary, model) {
+    const [doc] = await db2.update(patientDocuments).set({ aiSummary: summary, aiSummaryAt: /* @__PURE__ */ new Date(), aiSummaryModel: model }).where(eq(patientDocuments.id, id)).returning();
+    return doc;
   }
   async deleteDocument(id) {
     const [deleted] = await db2.delete(patientDocuments).where(eq(patientDocuments.id, id)).returning();
@@ -2855,7 +2865,7 @@ ${textContent}`
     if (!text3) {
       throw new Error("A IA retornou uma resposta vazia.");
     }
-    return text3;
+    return { summary: text3, model: GROQ_TEXT_MODEL };
   } catch (error) {
     if (error instanceof UnsupportedFormatError) throw error;
     const err = error;
@@ -3483,11 +3493,36 @@ router2.post("/documents/:docId/summarize", checkDocumentAccess, async (req, res
     const docId = parseInt(req.params.docId);
     const doc = await storage.getDocument(docId);
     if (!doc) return res.status(404).json({ message: "Documento n\xE3o encontrado" });
+    const user = req.user;
+    const wantsRefresh = req.query.refresh === "1";
+    if (wantsRefresh && user.role !== "admin") {
+      return res.status(403).json({ message: "Apenas administradores podem gerar o resumo novamente." });
+    }
+    if (doc.aiSummary && !wantsRefresh) {
+      return res.json({
+        summary: doc.aiSummary,
+        generatedAt: doc.aiSummaryAt,
+        model: doc.aiSummaryModel,
+        cached: true
+      });
+    }
     if (!doc.fileData) {
       return res.status(404).json({ message: "Arquivo n\xE3o encontrado" });
     }
-    const summary = await summarizeDocument(doc.fileData, doc.mimeType, doc.documentName);
-    res.json({ summary });
+    const { summary, model } = await summarizeDocument(doc.fileData, doc.mimeType, doc.documentName);
+    const saved = await storage.saveDocumentSummary(docId, summary, model);
+    await storage.createAuditLog({
+      userId: user.id,
+      action: wantsRefresh ? "ai_summary_refresh" : "ai_summary",
+      resourceType: "document",
+      resourceId: docId,
+      patientId: doc.patientId,
+      ipAddress: req.ip || null,
+      userAgent: req.get("user-agent") || null,
+      details: { model }
+    }).catch(() => {
+    });
+    res.json({ summary, generatedAt: saved?.aiSummaryAt ?? /* @__PURE__ */ new Date(), model, cached: false });
   } catch (error) {
     if (error instanceof UnsupportedFormatError) {
       return res.status(400).json({ message: error.message });
@@ -7194,6 +7229,21 @@ function log(message, source = "express") {
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
+// server/migrations.ts
+async function runStartupMigrations() {
+  try {
+    await pool.query(`
+      ALTER TABLE patient_documents
+        ADD COLUMN IF NOT EXISTS ai_summary text,
+        ADD COLUMN IF NOT EXISTS ai_summary_at timestamp,
+        ADD COLUMN IF NOT EXISTS ai_summary_model text
+    `);
+  } catch (error) {
+    log(`startup migration failed: ${error.message}`);
+    throw error;
+  }
+}
+
 // server/app.ts
 async function createApp() {
   const app = express();
@@ -7223,6 +7273,7 @@ async function createApp() {
     });
     next();
   });
+  await runStartupMigrations();
   await seedSpecializationAreas();
   await seedCareTemplates();
   const server = await registerRoutes(app);

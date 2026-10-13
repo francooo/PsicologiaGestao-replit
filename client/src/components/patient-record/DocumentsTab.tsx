@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import {
     Dialog,
     DialogContent,
@@ -99,15 +100,23 @@ export default function DocumentsTab({ patientId }: DocumentsTabProps) {
     const [aiDocName, setAiDocName] = useState("");
     const [aiSummary, setAiSummary] = useState("");
     const [aiError, setAiError] = useState<string | null>(null);
+    const [aiGeneratedAt, setAiGeneratedAt] = useState<string | null>(null);
+    const [aiDoc, setAiDoc] = useState<PatientDocument | null>(null);
+    const { user } = useAuth();
+    const isAdmin = user?.role === "admin";
 
-    async function handleAISummarize(doc: PatientDocument) {
+    // First call generates and saves the summary; later calls return the saved one (no AI tokens).
+    // Only admins can force a new summary (refresh).
+    async function handleAISummarize(doc: PatientDocument, refresh = false) {
         setAiLoadingId(doc.id);
+        setAiDoc(doc);
         setAiDocName(doc.documentName);
         setAiSummary("");
         setAiError(null);
+        setAiGeneratedAt(null);
         setAiModalOpen(true);
         try {
-            const res = await fetch(`/api/patients/documents/${doc.id}/summarize`, {
+            const res = await fetch(`/api/patients/documents/${doc.id}/summarize${refresh ? "?refresh=1" : ""}`, {
                 method: "POST",
                 credentials: "include",
             });
@@ -116,6 +125,10 @@ export default function DocumentsTab({ patientId }: DocumentsTabProps) {
                 setAiError(data.message || "Erro ao processar documento.");
             } else {
                 setAiSummary(data.summary);
+                setAiGeneratedAt(data.generatedAt ?? null);
+                if (!data.cached) {
+                    queryClient.invalidateQueries({ queryKey: [`/api/patients/${patientId}/documents`] });
+                }
             }
         } catch {
             setAiError("Erro ao conectar com a IA. Tente novamente.");
@@ -286,12 +299,17 @@ export default function DocumentsTab({ patientId }: DocumentsTabProps) {
                                     <span className="text-xs text-muted-foreground">
                                         {format(new Date(doc.createdAt), "dd/MM/yyyy", { locale: ptBR })}
                                     </span>
+                                    {doc.aiSummaryAt && (
+                                        <span className="inline-flex items-center gap-1 text-xs text-purple-600" title="Resumo IA salvo">
+                                            <Sparkles className="h-3 w-3" /> Resumo salvo
+                                        </span>
+                                    )}
                                 </div>
                             </div>
                             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button
                                     className="p-1.5 rounded-lg hover:bg-purple-100 text-purple-500 hover:text-purple-700 transition-colors disabled:opacity-50"
-                                    title="Resumir com IA"
+                                    title={doc.aiSummaryAt ? "Ver resumo IA (salvo)" : "Resumir com IA"}
                                     onClick={() => handleAISummarize(doc)}
                                     disabled={aiLoadingId === doc.id}
                                     data-testid={`button-ai-summarize-${doc.id}`}
@@ -470,6 +488,8 @@ export default function DocumentsTab({ patientId }: DocumentsTabProps) {
                 summary={aiSummary}
                 isLoading={aiLoadingId !== null}
                 error={aiError}
+                generatedAt={aiGeneratedAt}
+                onRegenerate={isAdmin && aiDoc ? () => handleAISummarize(aiDoc, true) : undefined}
             />
 
             {/* ─── Delete Confirmation ───────────────────────────────── */}

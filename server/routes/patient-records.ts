@@ -564,13 +564,41 @@ router.post('/documents/:docId/summarize', checkDocumentAccess, async (req, res)
 
         if (!doc) return res.status(404).json({ message: "Documento não encontrado" });
 
+        // The summary is generated once and reused (no new AI tokens). Only an admin may
+        // force a new one with ?refresh=1; for anyone else the saved summary is returned.
+        const user = req.user as any;
+        const wantsRefresh = req.query.refresh === '1';
+        if (wantsRefresh && user.role !== 'admin') {
+            return res.status(403).json({ message: "Apenas administradores podem gerar o resumo novamente." });
+        }
+        if (doc.aiSummary && !wantsRefresh) {
+            return res.json({
+                summary: doc.aiSummary,
+                generatedAt: doc.aiSummaryAt,
+                model: doc.aiSummaryModel,
+                cached: true,
+            });
+        }
+
         if (!doc.fileData) {
             return res.status(404).json({ message: "Arquivo não encontrado" });
         }
 
-        const summary = await summarizeDocument(doc.fileData, doc.mimeType, doc.documentName);
+        const { summary, model } = await summarizeDocument(doc.fileData, doc.mimeType, doc.documentName);
+        const saved = await storage.saveDocumentSummary(docId, summary, model);
 
-        res.json({ summary });
+        await storage.createAuditLog({
+            userId: user.id,
+            action: wantsRefresh ? "ai_summary_refresh" : "ai_summary",
+            resourceType: "document",
+            resourceId: docId,
+            patientId: doc.patientId,
+            ipAddress: req.ip || null,
+            userAgent: req.get('user-agent') || null,
+            details: { model },
+        }).catch(() => { /* never block the response on audit logging */ });
+
+        res.json({ summary, generatedAt: saved?.aiSummaryAt ?? new Date(), model, cached: false });
 
     } catch (error) {
         if (error instanceof UnsupportedFormatError) {

@@ -91,7 +91,7 @@ export async function summarizeDocument(
   fileBuffer: Buffer,
   mimeType: string,
   fileName: string
-): Promise<string> {
+): Promise<{ summary: string; model: string }> {
   mimeType = effectiveMimeType(mimeType, fileName);
   if (!isSupportedMimeType(mimeType)) {
     throw new UnsupportedFormatError(
@@ -135,7 +135,7 @@ export async function summarizeDocument(
     if (!text) {
       throw new Error("A IA retornou uma resposta vazia.");
     }
-    return text;
+    return { summary: text, model: GROQ_TEXT_MODEL };
   } catch (error) {
     if (error instanceof UnsupportedFormatError) throw error;
 

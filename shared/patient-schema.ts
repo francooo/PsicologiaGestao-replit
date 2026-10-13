@@ -144,6 +144,10 @@ export const patientDocuments = pgTable("patient_documents", {
     mimeType: text("mime_type").notNull(),
     uploadedBy: integer("uploaded_by").notNull().references(() => users.id),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    // AI summary cached once per document (the file never changes), so later views cost no tokens
+    aiSummary: text("ai_summary"),
+    aiSummaryAt: timestamp("ai_summary_at"),
+    aiSummaryModel: text("ai_summary_model"),
 });
 
 export const insertPatientDocumentSchema = createInsertSchema(patientDocuments).pick({

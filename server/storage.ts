@@ -149,8 +149,9 @@ export interface IStorage {
   // Documents
   getDocument(id: number): Promise<PatientDocument | undefined>;
   createDocument(document: InsertPatientDocument & { uploadedBy: number; fileData: Buffer }): Promise<PatientDocument>;
-  listDocumentsByPatientId(patientId: number): Promise<Omit<PatientDocument, "fileData">[]>;
+  listDocumentsByPatientId(patientId: number): Promise<Omit<PatientDocument, "fileData" | "aiSummary" | "aiSummaryModel">[]>;
   deleteDocument(id: number): Promise<boolean>;
+  saveDocumentSummary(id: number, summary: string, model: string): Promise<PatientDocument | undefined>;
 
   // Assessments
   getAssessment(id: number): Promise<PsychologicalAssessment | undefined>;
@@ -810,8 +811,9 @@ export class MemStorage implements IStorage {
 
   async getDocument(id: number): Promise<PatientDocument | undefined> { return undefined; }
   async createDocument(document: InsertPatientDocument & { uploadedBy: number; fileData: Buffer }): Promise<PatientDocument> { throw new Error("Method not implemented."); }
-  async listDocumentsByPatientId(patientId: number): Promise<Omit<PatientDocument, "fileData">[]> { return []; }
+  async listDocumentsByPatientId(patientId: number): Promise<Omit<PatientDocument, "fileData" | "aiSummary" | "aiSummaryModel">[]> { return []; }
   async deleteDocument(id: number): Promise<boolean> { return false; }
+  async saveDocumentSummary(id: number, summary: string, model: string): Promise<PatientDocument | undefined> { return undefined; }
 
   async getAssessment(id: number): Promise<PsychologicalAssessment | undefined> { return undefined; }
   async createAssessment(assessment: InsertPsychologicalAssessment): Promise<PsychologicalAssessment> { throw new Error("Method not implemented."); }
@@ -1399,7 +1401,7 @@ export class DatabaseStorage implements IStorage {
     return newDoc;
   }
 
-  async listDocumentsByPatientId(patientId: number): Promise<Omit<PatientDocument, "fileData">[]> {
+  async listDocumentsByPatientId(patientId: number): Promise<Omit<PatientDocument, "fileData" | "aiSummary" | "aiSummaryModel">[]> {
     return await db.select({
       id: patientDocuments.id,
       patientId: patientDocuments.patientId,
@@ -1410,7 +1412,18 @@ export class DatabaseStorage implements IStorage {
       mimeType: patientDocuments.mimeType,
       uploadedBy: patientDocuments.uploadedBy,
       createdAt: patientDocuments.createdAt,
+      // Only the date: lets the UI show "Ver resumo" without shipping the summary text
+      aiSummaryAt: patientDocuments.aiSummaryAt,
     }).from(patientDocuments).where(eq(patientDocuments.patientId, patientId));
+  }
+
+  async saveDocumentSummary(id: number, summary: string, model: string): Promise<PatientDocument | undefined> {
+    const [doc] = await db
+      .update(patientDocuments)
+      .set({ aiSummary: summary, aiSummaryAt: new Date(), aiSummaryModel: model })
+      .where(eq(patientDocuments.id, id))
+      .returning();
+    return doc;
   }
 
   async deleteDocument(id: number): Promise<boolean> {

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
-import { Camera, Download, FileImage, FileText, FolderOpen, Sparkles, Trash2, Upload } from 'lucide-react-native';
+import { Camera, Download, FileImage, FileText, FolderOpen, RefreshCw, Sparkles, Trash2, Upload } from 'lucide-react-native';
 
 import { AppText } from '@/components/ui/AppText';
 import { Badge } from '@/components/ui/Badge';
@@ -14,6 +14,7 @@ import { Sheet } from '@/components/ui/Sheet';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
 import { TextField } from '@/components/ui/TextField';
 import { api } from '@/api/client';
+import { useAuth } from '@/auth/AuthProvider';
 import { patientKeys, useDocuments } from '@/api/patients';
 import { confirm } from '@/utils/confirm';
 import { appendFile, downloadAndShare, MAX_UPLOAD_BYTES, pickDocument, pickImage, type LocalFile } from '@/utils/files';
@@ -65,7 +66,9 @@ export function DocumentsTab({ patientId }: { patientId: number }) {
   const [file, setFile] = useState<LocalFile | null>(null);
   const [docType, setDocType] = useState('other');
   const [docName, setDocName] = useState('');
-  const [summary, setSummary] = useState<{ doc: PatientDocument; text?: string; error?: string } | null>(null);
+  const [summary, setSummary] = useState<{ doc: PatientDocument; text?: string; error?: string; generatedAt?: string | null } | null>(null);
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: patientKeys.documents(patientId) });
@@ -100,11 +103,19 @@ export function DocumentsTab({ patientId }: { patientId: number }) {
     onError: (e: Error) => toast.error('Erro ao excluir', e.message),
   });
 
+  // First call generates and saves the summary; later calls return the saved one (no AI tokens).
+  // Only admins can force a new one (refresh).
   const summarize = useMutation({
-    mutationFn: (doc: PatientDocument) =>
-      api<{ summary: string }>(`/api/patients/documents/${doc.id}/summarize`, { method: 'POST' }),
-    onSuccess: (res, doc) => setSummary({ doc, text: res.summary }),
-    onError: (e: Error, doc) => setSummary({ doc, error: e.message || 'Erro ao conectar com a IA. Tente novamente.' }),
+    mutationFn: ({ doc, refresh }: { doc: PatientDocument; refresh?: boolean }) =>
+      api<{ summary: string; generatedAt?: string; cached?: boolean }>(
+        `/api/patients/documents/${doc.id}/summarize${refresh ? '?refresh=1' : ''}`,
+        { method: 'POST' },
+      ),
+    onSuccess: (res, { doc }) => {
+      setSummary({ doc, text: res.summary, generatedAt: res.generatedAt ?? null });
+      if (!res.cached) queryClient.invalidateQueries({ queryKey: patientKeys.documents(patientId) });
+    },
+    onError: (e: Error, { doc }) => setSummary({ doc, error: e.message || 'Erro ao conectar com a IA. Tente novamente.' }),
   });
 
   const choose = async (source: 'document' | 'camera') => {
@@ -195,15 +206,15 @@ export function DocumentsTab({ patientId }: { patientId: number }) {
               </View>
               <View style={styles.actions}>
                 <Button
-                  title="Resumir com IA"
+                  title={d.aiSummaryAt ? 'Ver resumo IA' : 'Resumir com IA'}
                   size="sm"
                   variant="secondary"
                   fullWidth={false}
                   icon={<Sparkles size={16} color={colors.primary} />}
-                  loading={summarize.isPending && summarize.variables?.id === d.id}
+                  loading={summarize.isPending && summarize.variables?.doc.id === d.id}
                   onPress={() => {
                     setSummary({ doc: d });
-                    summarize.mutate(d);
+                    summarize.mutate({ doc: d });
                   }}
                 />
                 <View style={{ flexDirection: 'row' }}>
@@ -268,17 +279,36 @@ export function DocumentsTab({ patientId }: { patientId: number }) {
         title={summary ? `Resumo IA — ${summary.doc.documentName}` : undefined}
         footer={
           summary?.text ? (
-            <Button
-              title="Copiar resumo"
-              variant="secondary"
-              onPress={async () => {
-                await Clipboard.setStringAsync(summary.text!);
-                toast.success('Copiado!', 'Resumo copiado para a área de transferência.');
-              }}
-            />
+            <>
+              <Button
+                title="Copiar resumo"
+                variant="secondary"
+                onPress={async () => {
+                  await Clipboard.setStringAsync(summary.text!);
+                  toast.success('Copiado!', 'Resumo copiado para a área de transferência.');
+                }}
+              />
+              {isAdmin && (
+                <Button
+                  title="Gerar novamente"
+                  variant="ghost"
+                  icon={<RefreshCw size={16} color={colors.primary} />}
+                  onPress={() => {
+                    const doc = summary.doc;
+                    setSummary({ doc });
+                    summarize.mutate({ doc, refresh: true });
+                  }}
+                />
+              )}
+            </>
           ) : undefined
         }>
         {summary && !summary.text && !summary.error && <LoadingState label="A IA está lendo o documento..." />}
+        {summary?.text && summary.generatedAt && (
+          <AppText variant="caption" tone="subtle">
+            Resumo salvo — gerado em {formatDate(new Date(summary.generatedAt), "dd/MM/yyyy 'às' HH:mm")}
+          </AppText>
+        )}
         {summary?.error && (
           <View style={styles.errorBox}>
             <AppText tone="danger">{summary.error}</AppText>

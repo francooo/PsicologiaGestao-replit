@@ -3,6 +3,7 @@ import { type Server } from "http";
 import { registerRoutes } from "./routes";
 import { seedSpecializationAreas } from "./seed-specializations";
 import { seedCareTemplates } from "./seed-care";
+import { runStartupMigrations } from "./migrations";
 import { log } from "./log";
 
 export async function createApp(): Promise<{ app: Express; server: Server }> {
@@ -40,6 +41,7 @@ export async function createApp(): Promise<{ app: Express; server: Server }> {
     next();
   });
 
+  await runStartupMigrations();
   await seedSpecializationAreas();
   await seedCareTemplates();
   const server = await registerRoutes(app);

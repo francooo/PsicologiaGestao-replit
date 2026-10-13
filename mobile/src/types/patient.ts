@@ -76,6 +76,8 @@ export interface PatientDocument {
   fileSize: number;
   mimeType: string;
   createdAt: string;
+  /** Set once the AI summary was generated and saved (the text is fetched on demand) */
+  aiSummaryAt?: string | null;
 }
 
 export interface Assessment {
