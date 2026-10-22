@@ -10,7 +10,15 @@ import {
   Lock,
   X,
   Check,
+  Mail,
+  Phone,
+  FileText,
+  Info,
+  Leaf,
+  Home,
 } from "lucide-react";
+import { StatusBadge } from "@/components/cp/StatusBadge";
+import { cpButton } from "@/components/cp/PageHeader";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -354,119 +362,133 @@ export default function AdminPsicologasPage() {
 
         {/* ── Ver Detalhes Modal (read-only) ─────────────────────── */}
         <Dialog open={!!viewingPsych && !editingPsych} onOpenChange={(open) => !open && setViewingPsych(null)}>
-          <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-3">
-                <Avatar className="w-11 h-11 border border-primary/30">
-                  <AvatarImage src={viewingPsych?.user.profileImage || undefined} />
-                  <AvatarFallback className="bg-primary text-white font-bold text-sm">
-                    {viewingPsych?.user.fullName.charAt(0)}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="text-base font-semibold leading-tight">{viewingPsych?.user.fullName}</p>
-                  {viewingPsych?.crpNumber && (
-                    <p className="text-xs text-neutral-dark font-normal">CRP {viewingPsych.crpNumber}</p>
-                  )}
-                </div>
-              </DialogTitle>
-            </DialogHeader>
+          <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto rounded-3xl border-cp-divider bg-cp-bg p-0">
+            <div className="relative overflow-hidden px-6 pb-6 pt-8 sm:px-10">
+              {/* soft decorative blobs, behind content */}
+              <div aria-hidden="true" className="pointer-events-none absolute -right-10 -top-16 h-48 w-48 rounded-full bg-cp-sage-soft" />
+              <div aria-hidden="true" className="pointer-events-none absolute -right-2 top-20 h-28 w-28 rounded-full bg-cp-lavender-soft" />
+              <div aria-hidden="true" className="pointer-events-none absolute -bottom-20 -left-16 h-48 w-60 rounded-full bg-cp-sand-soft" />
 
-            {viewingPsych && (
-              <div className="space-y-4 py-1">
-                {/* Status + Ativa desde */}
-                <div className="flex flex-wrap gap-2">
-                  <Badge
-                    className={cn(
-                      "text-xs",
-                      viewingPsych.user.status === "active"
-                        ? "bg-green-50 text-green-700 border border-green-200"
-                        : "bg-neutral-lightest text-neutral-dark border border-neutral-light"
+              <DialogHeader className="relative space-y-0 text-left">
+                <DialogTitle className="flex items-center gap-5">
+                  <Avatar className="h-20 w-20 shrink-0 sm:h-24 sm:w-24">
+                    <AvatarImage src={viewingPsych?.user.profileImage || undefined} />
+                    <AvatarFallback className="bg-cp-action text-3xl font-bold text-white">
+                      {viewingPsych?.user.fullName.charAt(0)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <p className="truncate text-[26px] font-bold leading-tight text-cp-ink sm:text-[30px]">{viewingPsych?.user.fullName}</p>
+                    {viewingPsych?.crpNumber && (
+                      <p className="mt-0.5 text-sm font-normal text-cp-muted">CRP {viewingPsych.crpNumber}</p>
                     )}
+                    {viewingPsych && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <StatusBadge
+                          label={viewingPsych.user.status === "active" ? "Ativa" : "Inativa"}
+                          tone={viewingPsych.user.status === "active" ? "success" : "neutral"}
+                        />
+                        {viewingPsych.startedAtClinic && (
+                          <span className="inline-flex items-center gap-1 text-xs font-normal text-cp-muted">
+                            <Calendar className="h-3 w-3" />
+                            Ativa desde {formatDate(viewingPsych.startedAtClinic)}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </DialogTitle>
+              </DialogHeader>
+
+              {viewingPsych && (
+                <div className="relative mt-6 space-y-5">
+                  {/* Stats */}
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { icon: Users, value: viewingPsych.activePatientsCount, label: "Pacientes Ativos", box: "bg-cp-sage-soft", dot: "bg-white/70 text-cp-sage-ink" },
+                      { icon: Calendar, value: viewingPsych.sessionsCount, label: "Sessões Totais", box: "bg-cp-lavender-soft", dot: "bg-white/70 text-cp-lavender-ink" },
+                      { icon: Home, value: viewingPsych.monthsAtClinic !== null ? monthsText(viewingPsych.startedAtClinic) : "—", label: "Na Clínica", box: "bg-cp-sand-soft", dot: "bg-white/70 text-cp-sand-ink" },
+                    ].map(({ icon: Icon, value, label, box, dot }) => (
+                      <div key={label} className={cn("flex flex-col items-center rounded-2xl px-2 py-4 text-center", box)}>
+                        <span className={cn("mb-2 flex h-11 w-11 items-center justify-center rounded-full", dot)}>
+                          <Icon className="h-5 w-5" />
+                        </span>
+                        <p className="text-[26px] font-bold leading-tight text-cp-ink">{value}</p>
+                        <p className="text-[13px] text-cp-ink sm:text-[15px]">{label}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Info grid */}
+                  <dl className="grid grid-cols-1 gap-x-8 gap-y-4 border-t border-cp-divider pt-5 sm:grid-cols-2">
+                    {[
+                      { icon: Mail, label: "E-mail", value: viewingPsych.user.email },
+                      { icon: Phone, label: "Telefone", value: viewingPsych.phone || "—" },
+                      { icon: Calendar, label: "Nascimento", value: `${formatDate(viewingPsych.user.birthDate)}${viewingPsych.age ? ` (${viewingPsych.age} anos)` : ""}` },
+                      { icon: FileText, label: "CRP", value: viewingPsych.crpNumber || "—" },
+                    ].map(({ icon: Icon, label, value }) => (
+                      <div key={label} className="flex items-start gap-3">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cp-hover text-cp-ink">
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cp-muted">{label}</dt>
+                          <dd className="mt-0.5 break-words text-[15px] text-cp-ink">{value}</dd>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="flex items-start gap-3 sm:col-span-2">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cp-hover text-cp-ink">
+                        <Info className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cp-muted">Sobre</dt>
+                        <dd className={cn("mt-0.5 whitespace-pre-wrap text-[15px]", viewingPsych.bio ? "text-cp-ink" : "text-cp-muted")}>
+                          {viewingPsych.bio || "Bio pendente…"}
+                        </dd>
+                      </div>
+                    </div>
+                  </dl>
+
+                  {/* Specializations (read-only) */}
+                  <div className="flex items-start gap-3 border-t border-cp-divider pt-5">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cp-sage-soft text-cp-sage-ink">
+                      <Leaf className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-cp-muted">Áreas de Atuação</p>
+                      <SpecializationChipSelector
+                        selectedIds={viewingPsych.specializations.map((s) => s.id)}
+                        onChange={() => {}}
+                        readonly
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="relative mt-6 flex items-center justify-between gap-3 border-t border-cp-divider pt-5">
+                <div aria-hidden="true" className="hidden sm:block">
+                  <p className="text-[10px] uppercase leading-5 tracking-[0.4em] text-cp-subtle">Cuidar</p>
+                  <p className="text-[10px] uppercase leading-5 tracking-[0.4em] text-cp-subtle">também</p>
+                  <p className="text-[10px] uppercase leading-5 tracking-[0.4em] text-cp-subtle">organiza</p>
+                </div>
+                <div className="ml-auto flex gap-3">
+                  <button type="button" className={cpButton.secondary} onClick={() => setViewingPsych(null)} data-testid="button-close-details">
+                    Fechar
+                  </button>
+                  <button
+                    type="button"
+                    className={cpButton.primary}
+                    onClick={() => viewingPsych && openEdit(viewingPsych)}
+                    data-testid="button-open-edit"
                   >
-                    {viewingPsych.user.status === "active" ? "Ativa" : "Inativa"}
-                  </Badge>
-                  {viewingPsych.startedAtClinic && (
-                    <Badge className="text-xs bg-primary/10 text-primary border border-primary/20 flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
-                      Ativa desde {formatDate(viewingPsych.startedAtClinic)}
-                    </Badge>
-                  )}
-                </div>
-
-                {/* Stats */}
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-neutral-lightest rounded-lg border border-neutral-light p-3 text-center">
-                    <p className="text-xl font-bold text-neutral-darkest">{viewingPsych.activePatientsCount}</p>
-                    <p className="text-[11px] text-neutral-dark">Pacientes Ativos</p>
-                  </div>
-                  <div className="bg-neutral-lightest rounded-lg border border-neutral-light p-3 text-center">
-                    <p className="text-xl font-bold text-neutral-darkest">{viewingPsych.sessionsCount}</p>
-                    <p className="text-[11px] text-neutral-dark">Sessões Totais</p>
-                  </div>
-                  <div className="bg-neutral-lightest rounded-lg border border-neutral-light p-3 text-center">
-                    <p className="text-xl font-bold text-neutral-darkest">
-                      {viewingPsych.monthsAtClinic !== null ? monthsText(viewingPsych.startedAtClinic) : "—"}
-                    </p>
-                    <p className="text-[11px] text-neutral-dark">Na Clínica</p>
-                  </div>
-                </div>
-
-                {/* Info grid */}
-                <dl className="grid grid-cols-2 gap-x-8 gap-y-3">
-                  <div>
-                    <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark">E-mail</dt>
-                    <dd className="text-sm text-neutral-darkest mt-0.5">{viewingPsych.user.email}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark">Telefone</dt>
-                    <dd className="text-sm text-neutral-darkest mt-0.5">{viewingPsych.phone || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark">Nascimento</dt>
-                    <dd className="text-sm text-neutral-darkest mt-0.5">
-                      {formatDate(viewingPsych.user.birthDate)}
-                      {viewingPsych.age ? ` (${viewingPsych.age} anos)` : ""}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark">CRP</dt>
-                    <dd className="text-sm text-neutral-darkest mt-0.5">{viewingPsych.crpNumber || "—"}</dd>
-                  </div>
-                </dl>
-
-                {/* Bio */}
-                {viewingPsych.bio && (
-                  <div>
-                    <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark mb-1">Sobre</dt>
-                    <p className="text-sm text-neutral-darkest whitespace-pre-wrap">{viewingPsych.bio}</p>
-                  </div>
-                )}
-
-                {/* Specializations (read-only) */}
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark mb-2">Áreas de Atuação</p>
-                  <SpecializationChipSelector
-                    selectedIds={viewingPsych.specializations.map((s) => s.id)}
-                    onChange={() => {}}
-                    readonly
-                  />
+                    <Edit className="h-4 w-4" />
+                    Editar
+                  </button>
                 </div>
               </div>
-            )}
-
-            <DialogFooter className="gap-2">
-              <Button variant="outline" onClick={() => setViewingPsych(null)} data-testid="button-close-details">
-                Fechar
-              </Button>
-              <Button
-                onClick={() => viewingPsych && openEdit(viewingPsych)}
-                data-testid="button-open-edit"
-              >
-                <Edit className="w-4 h-4 mr-1.5" />
-                Editar
-              </Button>
-            </DialogFooter>
+            </div>
           </DialogContent>
         </Dialog>
 
