@@ -46,7 +46,7 @@ function Router() {
       <ProtectedRoute path="/patients" component={PatientsList} />
       <ProtectedRoute path="/patients/:id/record" component={PatientRecord} />
       <ProtectedRoute path="/reunioes" component={Meetings} />
-      {user?.role === "psychologist" && <ProtectedRoute path="/perfil" component={Perfil} />}
+      <ProtectedRoute path="/perfil" component={Perfil} />
       {user?.role === "admin" && <ProtectedRoute path="/admin/psicologas" component={AdminPsicologas} />}
       {user?.role === "admin" && <ProtectedRoute path="/admin/comissoes" component={AdminComissoes} />}
       <Route path="/auth" component={AuthPage} />

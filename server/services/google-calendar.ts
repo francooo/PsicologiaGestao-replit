@@ -367,6 +367,24 @@ export async function isUserAuthenticated(userId: number): Promise<boolean> {
 }
 
 /**
+ * Desconecta o Google Calendar do usuário: tenta revogar o token no Google e
+ * apaga os tokens salvos (a remoção local acontece mesmo se a revogação falhar).
+ */
+export async function disconnectUser(userId: number): Promise<void> {
+  const [row] = await db.select().from(googleTokens).where(eq(googleTokens.userId, userId));
+  const token = row?.refreshToken || row?.accessToken;
+  if (token) {
+    try {
+      await oauth2Client.revokeToken(token);
+    } catch (error) {
+      console.warn('Não foi possível revogar o token do Google (seguindo com a remoção local):', error);
+    }
+  }
+  await db.delete(googleTokens).where(eq(googleTokens.userId, userId));
+  delete tokenCache[userId];
+}
+
+/**
  * Retorna um link para agendamento do Google Calendar
  */
 export function getAppointmentSchedulingLink(

@@ -196,14 +196,12 @@ export function TopBar({ todayAppointments = [] }: { todayAppointments?: Appoint
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuItem onClick={() => setLocation("/perfil")}>
+              <UserCircle className="mr-2 h-4 w-4" /> Meu perfil
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setLocation("/profile")}>
               <Settings className="mr-2 h-4 w-4" /> Configurações
             </DropdownMenuItem>
-            {user?.role === "psychologist" && (
-              <DropdownMenuItem onClick={() => setLocation("/perfil")}>
-                <UserCircle className="mr-2 h-4 w-4" /> Meu perfil
-              </DropdownMenuItem>
-            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => logoutMutation.mutate()}>
               <LogOut className="mr-2 h-4 w-4" /> Sair

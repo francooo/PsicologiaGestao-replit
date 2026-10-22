@@ -91,7 +91,7 @@ export default function MobileNav() {
     {
       name: "Meu Perfil",
       icon: <UserCircle className="w-5 h-5" />,
-      href: "/profile",
+      href: "/perfil",
       allowedRoles: ["admin", "psychologist", "receptionist"]
     },
     {
@@ -222,8 +222,8 @@ export default function MobileNav() {
           </li>
           <li>
             <Link
-              href="/profile"
-              className={`flex flex-col items-center ${isActive("/profile") ? "text-primary" : "text-neutral-dark"}`}
+              href="/perfil"
+              className={`flex flex-col items-center ${isActive("/perfil") ? "text-primary" : "text-neutral-dark"}`}
             >
               <UserCircle className="h-5 w-5" />
               <span className="text-xs mt-1">Perfil</span>

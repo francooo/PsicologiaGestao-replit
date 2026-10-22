@@ -2429,6 +2429,19 @@ async function isUserAuthenticated(userId) {
     return false;
   }
 }
+async function disconnectUser(userId) {
+  const [row] = await db2.select().from(googleTokens).where(eq2(googleTokens.userId, userId));
+  const token = row?.refreshToken || row?.accessToken;
+  if (token) {
+    try {
+      await oauth2Client.revokeToken(token);
+    } catch (error) {
+      console.warn("N\xE3o foi poss\xEDvel revogar o token do Google (seguindo com a remo\xE7\xE3o local):", error);
+    }
+  }
+  await db2.delete(googleTokens).where(eq2(googleTokens.userId, userId));
+  delete tokenCache[userId];
+}
 function getAppointmentSchedulingLink(psychologistUserId, eventData) {
   return "https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ3aKuNW3rK7lCY0OqdA6kDDjma9niQdzEMxU7GkWhEfBGHjPHUcrX27OIVwwR9WMc2HZ04Uaj-C";
 }
@@ -2607,6 +2620,18 @@ router.get("/status", async (req, res) => {
   }
   const isAuthenticated = await isUserAuthenticated(req.user.id);
   res.json({ authenticated: isAuthenticated });
+});
+router.delete("/auth", async (req, res) => {
+  if (!req.isAuthenticated()) {
+    return res.status(401).json({ error: "Usu\xE1rio n\xE3o autenticado" });
+  }
+  try {
+    await disconnectUser(req.user.id);
+    res.json({ authenticated: false });
+  } catch (error) {
+    console.error("Erro ao desconectar Google Calendar:", error);
+    res.status(500).json({ error: "N\xE3o foi poss\xEDvel desconectar o Google Calendar" });
+  }
 });
 router.post("/sync/:appointmentId", async (req, res) => {
   if (!req.isAuthenticated()) {

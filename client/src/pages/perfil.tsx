@@ -1,25 +1,26 @@
-import { useState, useRef } from "react";
+import { useState, useRef, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Camera, Lock, Save, Edit2, Check, X, Calendar } from "lucide-react";
+import { Camera, Lock, Save, Pencil, Calendar, Mail, Phone, FileText, User as UserIcon, Info, Leaf, Home, Loader2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 import Sidebar from "@/components/sidebar";
+import MobileNav from "@/components/mobile-nav";
 import SpecializationChipSelector from "@/components/specialization-chip-selector";
+import { PageHeader, cpButton } from "@/components/cp/PageHeader";
+import { CharCountTextarea, IconField } from "@/components/cp/fields";
+import { StatusBadge } from "@/components/cp/StatusBadge";
+import { roleName } from "@/components/cp/status";
 
 interface ProfileData {
   id: number;
   fullName: string;
   email: string;
+  role: string;
   profileImage: string | null;
   birthDate: string | null;
   status: string;
@@ -34,6 +35,10 @@ interface ProfileData {
   } | null;
   specializations: { id: number; name: string; category: string | null }[];
 }
+
+const card = "rounded-2xl border border-cp-divider bg-white shadow-[0_10px_40px_-20px_rgba(36,54,71,0.18)]";
+const fieldLabel = "mb-1.5 block text-[13px] font-semibold text-cp-ink";
+const smallBtn = "inline-flex h-9 items-center gap-1.5 rounded-xl px-3 text-sm font-medium transition-colors disabled:opacity-60";
 
 function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return "—";
@@ -51,6 +56,89 @@ function monthsText(dateStr: string | null | undefined): string {
   const years = Math.floor(totalMonths / 12);
   const rem = totalMonths % 12;
   return rem > 0 ? `${years} ano${years > 1 ? "s" : ""} e ${rem} meses na clínica` : `${years} ano${years > 1 ? "s" : ""} na clínica`;
+}
+
+function AdminOnlyHint() {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Lock className="h-3 w-3 cursor-default text-cp-muted" aria-label="Somente o administrador edita" />
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-[200px] text-xs">
+          Este campo só pode ser editado pelo administrador.
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+function InfoRow({ icon: Icon, label, children, locked }: { icon: typeof Mail; label: string; children: ReactNode; locked?: boolean }) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cp-hover text-cp-ink">
+        <Icon className="h-4 w-4" />
+      </span>
+      <div className="min-w-0">
+        <dt className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-cp-muted">
+          {label}
+          {locked && <AdminOnlyHint />}
+        </dt>
+        <dd className="mt-0.5 break-words text-[15px] text-cp-ink">{children}</dd>
+      </div>
+    </div>
+  );
+}
+
+/** Card with a title and the Editar / Cancelar + Salvar pair used by each section. */
+function Section({
+  title,
+  icon: Icon,
+  editing,
+  saving,
+  onEdit,
+  onCancel,
+  onSave,
+  testId,
+  children,
+}: {
+  title: string;
+  icon: typeof Mail;
+  editing: boolean;
+  saving: boolean;
+  onEdit: () => void;
+  onCancel: () => void;
+  onSave: () => void;
+  testId: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className={cn(card, "p-5 sm:p-6")}>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 text-[18px] font-semibold text-cp-ink">
+          <Icon className="h-5 w-5 text-cp-muted" />
+          {title}
+        </h2>
+        {!editing ? (
+          <button type="button" className={cn(smallBtn, "text-cp-action hover:bg-cp-action-soft")} onClick={onEdit} data-testid={`button-edit-${testId}`}>
+            <Pencil className="h-3.5 w-3.5" />
+            Editar
+          </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <button type="button" className={cn(smallBtn, "bg-cp-sand-soft text-cp-ink hover:bg-cp-sand")} onClick={onCancel} data-testid={`button-cancel-${testId}`}>
+              Cancelar
+            </button>
+            <button type="button" className={cn(smallBtn, "bg-cp-action text-white hover:bg-cp-action-hover")} disabled={saving} onClick={onSave} data-testid={`button-save-${testId}`}>
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              {saving ? "Salvando..." : "Salvar"}
+            </button>
+          </div>
+        )}
+      </div>
+      {children}
+    </section>
+  );
 }
 
 export default function PerfilPage() {
@@ -71,21 +159,22 @@ export default function PerfilPage() {
   const { data: profile, isLoading } = useQuery<ProfileData>({
     queryKey: ["/api/profile"],
   });
+  // Phone, CRP, bio and areas live on the psychologist record; other roles only have name/birth date/photo
+  const psych = profile?.psychologist ?? null;
 
   const openEditInfo = () => {
     if (!profile) return;
     setDraftInfo({
       fullName: profile.fullName,
-      phone: profile.psychologist?.phone || "",
+      phone: psych?.phone || "",
       birthDate: profile.birthDate || "",
-      crpNumber: profile.psychologist?.crpNumber || "",
+      crpNumber: psych?.crpNumber || "",
     });
     setEditingInfo(true);
   };
 
   const openEditBio = () => {
-    if (!profile) return;
-    setDraftBio(profile.psychologist?.bio || "");
+    setDraftBio(psych?.bio || "");
     setEditingBio(true);
   };
 
@@ -95,8 +184,8 @@ export default function PerfilPage() {
     setEditingSpecs(true);
   };
 
-  const savInfoMutation = useMutation({
-    mutationFn: () => apiRequest("PATCH", "/api/profile", draftInfo),
+  const saveInfoMutation = useMutation({
+    mutationFn: () => apiRequest("PATCH", "/api/profile", psych ? draftInfo : { fullName: draftInfo.fullName, birthDate: draftInfo.birthDate }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/profile"] });
       queryClient.invalidateQueries({ queryKey: ["/api/user"] });
@@ -131,7 +220,7 @@ export default function PerfilPage() {
     mutationFn: async (file: File) => {
       const form = new FormData();
       form.append("avatar", file);
-      const res = await fetch("/api/profile/avatar", { method: "POST", body: form });
+      const res = await fetch("/api/profile/avatar", { method: "POST", body: form, credentials: "include" });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Erro desconhecido" }));
         throw new Error(err.error || "Erro ao enviar imagem");
@@ -149,35 +238,42 @@ export default function PerfilPage() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) avatarMutation.mutate(file);
+    e.target.value = "";
   };
 
-  return (
-    <div className="flex min-h-screen bg-neutral-lightest">
-      <Sidebar />
-      <main className="flex-1 md:ml-64 p-6 max-w-3xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-neutral-darkest">Meu Perfil Profissional</h1>
-          <p className="text-sm text-neutral-dark mt-1">Gerencie suas informações pessoais e áreas de atuação.</p>
-        </div>
+  const setDraft = (k: keyof typeof draftInfo) => (e: React.ChangeEvent<HTMLInputElement>) => setDraftInfo((d) => ({ ...d, [k]: e.target.value }));
 
-        {isLoading ? (
-          <div className="space-y-4">
-            <Skeleton className="h-40 rounded-2xl" />
-            <Skeleton className="h-40 rounded-2xl" />
-            <Skeleton className="h-40 rounded-2xl" />
-          </div>
-        ) : (
-          <div className="space-y-5">
-            {/* ── Header: Avatar + Identity ───────────────────────────── */}
-            <Card className="border-neutral-light shadow-sm">
-              <CardContent className="pt-6 pb-6">
-                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5">
-                  {/* Avatar */}
+  return (
+    <div className="flex h-screen bg-cp-bg">
+      <Sidebar />
+      <div className="ml-0 flex-1 overflow-y-auto overflow-x-hidden pt-16 md:ml-64 md:pt-0">
+        <MobileNav />
+        <main className="max-w-5xl p-4 pb-20 sm:px-7 sm:py-6">
+          <PageHeader
+            className="mb-6"
+            title="Meu Perfil"
+            icon={UserIcon}
+            subtitle={psych ? "Suas informações pessoais e profissionais e áreas de atuação." : "Suas informações pessoais."}
+            phrase
+          />
+
+          {isLoading ? (
+            <div className="space-y-4">
+              <Skeleton className="h-40 rounded-2xl" />
+              <Skeleton className="h-40 rounded-2xl" />
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {/* Identidade */}
+              <section className={cn(card, "relative overflow-hidden p-5 sm:p-6")}>
+                <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-16 h-44 w-44 rounded-full bg-cp-sage-soft" />
+                <div aria-hidden="true" className="pointer-events-none absolute -right-2 top-16 h-24 w-24 rounded-full bg-cp-lavender-soft" />
+                <div className="relative flex flex-col items-center gap-5 sm:flex-row sm:items-center">
                   <div className="relative flex-shrink-0">
-                    <Avatar className="w-24 h-24 border-2 border-primary/30">
+                    <Avatar className="h-24 w-24">
                       <AvatarImage src={profile?.profileImage || undefined} />
-                      <AvatarFallback className="bg-primary text-white text-3xl font-bold">
-                        {profile?.fullName?.charAt(0) || "P"}
+                      <AvatarFallback className="bg-cp-action text-3xl font-bold text-white">
+                        {profile?.fullName?.charAt(0) || "U"}
                       </AvatarFallback>
                     </Avatar>
                     <button
@@ -185,388 +281,140 @@ export default function PerfilPage() {
                       onClick={() => fileInputRef.current?.click()}
                       disabled={avatarMutation.isPending}
                       data-testid="button-change-avatar"
-                      className="absolute bottom-0 right-0 bg-primary text-white rounded-full p-1.5 shadow hover:bg-primary/90 transition-colors"
+                      aria-label="Alterar foto"
+                      className="absolute bottom-0 right-0 flex h-9 w-9 items-center justify-center rounded-full border-2 border-white bg-cp-action text-white shadow transition-colors hover:bg-cp-action-hover"
                     >
-                      <Camera className="w-3.5 h-3.5" />
+                      {avatarMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
                     </button>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      className="hidden"
-                      onChange={handleFileChange}
-                      data-testid="input-avatar-file"
-                    />
+                    <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleFileChange} data-testid="input-avatar-file" />
                   </div>
 
-                  {/* Identity */}
-                  <div className="flex-1">
-                    <h2 className="text-xl font-bold text-neutral-darkest leading-tight">
-                      {profile?.fullName}
-                    </h2>
-                    {profile?.psychologist?.crpNumber && (
-                      <p className="text-sm text-neutral-dark mt-0.5">CRP {profile.psychologist.crpNumber}</p>
-                    )}
-                    <p className="text-sm text-neutral-dark">{profile?.email}</p>
-
-                    <div className="flex flex-wrap items-center gap-2 mt-3">
-                      {profile?.age && (
-                        <Badge variant="outline" className="text-xs border-neutral-light text-neutral-dark">
-                          {profile.age} anos
-                        </Badge>
+                  <div className="min-w-0 text-center sm:text-left">
+                    <h2 className="text-[26px] font-bold leading-tight text-cp-ink">{profile?.fullName}</h2>
+                    <p className="mt-0.5 text-sm text-cp-muted">
+                      {psych?.crpNumber ? `CRP ${psych.crpNumber} · ` : ""}{roleName(profile?.role)}
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+                      <StatusBadge label={profile?.status === "active" ? (psych ? "Ativa" : "Ativo") : (psych ? "Inativa" : "Inativo")} tone={profile?.status === "active" ? "success" : "neutral"} />
+                      {(profile?.age ?? 0) > 0 && <StatusBadge label={`${profile!.age} anos`} tone="neutral" />}
+                      {psych?.startedAtClinic && (
+                        <span className="inline-flex items-center gap-1 text-xs text-cp-muted">
+                          <Calendar className="h-3 w-3" />
+                          Desde {formatDate(psych.startedAtClinic)} · {monthsText(psych.startedAtClinic)}
+                        </span>
                       )}
-                      {profile?.psychologist?.startedAtClinic && (
-                        <Badge className="text-xs bg-primary/10 text-primary border border-primary/20 flex items-center gap-1">
-                          <Calendar className="w-3 h-3" />
-                          Ativa desde {formatDate(profile.psychologist.startedAtClinic)}
-                          {" · "}
-                          {monthsText(profile.psychologist.startedAtClinic)}
-                        </Badge>
-                      )}
-                      <Badge
-                        className={
-                          profile?.status === "active"
-                            ? "text-xs bg-green-50 text-green-700 border border-green-200"
-                            : "text-xs bg-neutral-lightest text-neutral-dark border border-neutral-light"
-                        }
-                      >
-                        {profile?.status === "active" ? "Ativa" : "Inativa"}
-                      </Badge>
                     </div>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              </section>
 
-            {/* ── Section 1: Informações Profissionais ─────────────────── */}
-            <Card className="border-neutral-light shadow-sm">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-semibold text-neutral-darkest">
-                    Informações Profissionais
-                  </CardTitle>
-                  {!editingInfo ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 text-xs text-primary hover:text-primary/80 gap-1"
-                      onClick={openEditInfo}
-                      data-testid="button-edit-info"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                      Editar
-                    </Button>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => setEditingInfo(false)}
-                        data-testid="button-cancel-info"
-                      >
-                        <X className="w-3.5 h-3.5 mr-1" />
-                        Cancelar
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="h-7 text-xs gap-1"
-                        disabled={savInfoMutation.isPending}
-                        onClick={() => savInfoMutation.mutate()}
-                        data-testid="button-save-info"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        {savInfoMutation.isPending ? "Salvando..." : "Salvar"}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
+              {/* Informações */}
+              <Section
+                title={psych ? "Informações Profissionais" : "Informações Pessoais"}
+                icon={FileText}
+                editing={editingInfo}
+                saving={saveInfoMutation.isPending}
+                onEdit={openEditInfo}
+                onCancel={() => setEditingInfo(false)}
+                onSave={() => saveInfoMutation.mutate()}
+                testId="info"
+              >
                 {!editingInfo ? (
-                  <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark">Nome</dt>
-                      <dd className="text-sm text-neutral-darkest mt-0.5">{profile?.fullName || "—"}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark">Telefone</dt>
-                      <dd className="text-sm text-neutral-darkest mt-0.5">{profile?.psychologist?.phone || "—"}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark">Nascimento</dt>
-                      <dd className="text-sm text-neutral-darkest mt-0.5">{formatDate(profile?.birthDate)}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark">CRP</dt>
-                      <dd className="text-sm text-neutral-darkest mt-0.5">{profile?.psychologist?.crpNumber || "—"}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark flex items-center gap-1">
-                        E-mail
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Lock className="w-3 h-3 text-neutral-dark/60 cursor-default" />
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="max-w-[200px] text-xs">
-                              Este campo só pode ser editado pelo administrador.
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      </dt>
-                      <dd className="text-sm text-neutral-darkest mt-0.5">{profile?.email || "—"}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-dark flex items-center gap-1">
-                        Entrada na Clínica
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Lock className="w-3 h-3 text-neutral-dark/60 cursor-default" />
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="max-w-[200px] text-xs">
-                              Este campo só pode ser editado pelo administrador.
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      </dt>
-                      <dd className="text-sm text-neutral-darkest mt-0.5">
-                        {formatDate(profile?.psychologist?.startedAtClinic)}
-                      </dd>
-                    </div>
+                  <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+                    <InfoRow icon={UserIcon} label="Nome">{profile?.fullName || "—"}</InfoRow>
+                    <InfoRow icon={Calendar} label="Nascimento">{formatDate(profile?.birthDate)}</InfoRow>
+                    {psych && <InfoRow icon={Phone} label="Telefone">{psych.phone || "—"}</InfoRow>}
+                    {psych && <InfoRow icon={FileText} label="CRP">{psych.crpNumber || "—"}</InfoRow>}
+                    <InfoRow icon={Mail} label="E-mail" locked>{profile?.email || "—"}</InfoRow>
+                    {psych && <InfoRow icon={Home} label="Entrada na clínica" locked>{formatDate(psych.startedAtClinic)}</InfoRow>}
                   </dl>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
-                      <Label className="text-xs font-semibold text-neutral-dark">Nome Completo</Label>
-                      <Input
-                        value={draftInfo.fullName}
-                        onChange={(e) => setDraftInfo((d) => ({ ...d, fullName: e.target.value }))}
-                        className="mt-1"
-                        data-testid="input-fullName"
-                      />
+                      <label className={fieldLabel} htmlFor="pf-name">Nome completo</label>
+                      <IconField icon={UserIcon}><Input id="pf-name" value={draftInfo.fullName} onChange={setDraft("fullName")} data-testid="input-fullName" /></IconField>
                     </div>
                     <div>
-                      <Label className="text-xs font-semibold text-neutral-dark">Telefone / WhatsApp</Label>
-                      <Input
-                        value={draftInfo.phone}
-                        onChange={(e) => setDraftInfo((d) => ({ ...d, phone: e.target.value }))}
-                        placeholder="(11) 91234-5678"
-                        className="mt-1"
-                        data-testid="input-phone"
-                      />
+                      <label className={fieldLabel} htmlFor="pf-birth">Data de nascimento</label>
+                      <IconField icon={Calendar}><Input id="pf-birth" type="date" value={draftInfo.birthDate} onChange={setDraft("birthDate")} data-testid="input-birthDate" /></IconField>
                     </div>
+                    {psych && (
+                      <>
+                        <div>
+                          <label className={fieldLabel} htmlFor="pf-phone">Telefone / WhatsApp</label>
+                          <IconField icon={Phone}><Input id="pf-phone" value={draftInfo.phone} onChange={setDraft("phone")} placeholder="(11) 91234-5678" data-testid="input-phone" /></IconField>
+                        </div>
+                        <div>
+                          <label className={fieldLabel} htmlFor="pf-crp">Número do CRP</label>
+                          <IconField icon={FileText}><Input id="pf-crp" value={draftInfo.crpNumber} onChange={setDraft("crpNumber")} placeholder="06/12345" data-testid="input-crpNumber" /></IconField>
+                        </div>
+                      </>
+                    )}
                     <div>
-                      <Label className="text-xs font-semibold text-neutral-dark">Data de Nascimento</Label>
-                      <Input
-                        type="date"
-                        value={draftInfo.birthDate}
-                        onChange={(e) => setDraftInfo((d) => ({ ...d, birthDate: e.target.value }))}
-                        className="mt-1"
-                        data-testid="input-birthDate"
-                      />
+                      <span className={cn(fieldLabel, "flex items-center gap-1")}>E-mail <AdminOnlyHint /></span>
+                      <IconField icon={Mail}><Input value={profile?.email || ""} readOnly disabled className="bg-cp-hover text-cp-muted" data-testid="input-email-readonly" /></IconField>
                     </div>
-                    <div>
-                      <Label className="text-xs font-semibold text-neutral-dark">Número do CRP</Label>
-                      <Input
-                        value={draftInfo.crpNumber}
-                        onChange={(e) => setDraftInfo((d) => ({ ...d, crpNumber: e.target.value }))}
-                        placeholder="06/12345"
-                        className="mt-1"
-                        data-testid="input-crpNumber"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs font-semibold text-neutral-dark flex items-center gap-1">
-                        E-mail
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Lock className="w-3 h-3 text-neutral-dark/60 cursor-default" />
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="max-w-[200px] text-xs">
-                              Este campo só pode ser editado pelo administrador.
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      </Label>
-                      <Input
-                        value={profile?.email || ""}
-                        readOnly
-                        disabled
-                        className="mt-1 bg-neutral-lightest text-neutral-dark"
-                        data-testid="input-email-readonly"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs font-semibold text-neutral-dark flex items-center gap-1">
-                        Entrada na Clínica
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Lock className="w-3 h-3 text-neutral-dark/60 cursor-default" />
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="max-w-[200px] text-xs">
-                              Este campo só pode ser editado pelo administrador.
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      </Label>
-                      <Input
-                        value={profile?.psychologist?.startedAtClinic || ""}
-                        readOnly
-                        disabled
-                        type="date"
-                        className="mt-1 bg-neutral-lightest text-neutral-dark"
-                        data-testid="input-startedAtClinic-readonly"
-                      />
-                    </div>
+                    {psych && (
+                      <div>
+                        <span className={cn(fieldLabel, "flex items-center gap-1")}>Entrada na clínica <AdminOnlyHint /></span>
+                        <IconField icon={Home}><Input value={formatDate(psych.startedAtClinic)} readOnly disabled className="bg-cp-hover text-cp-muted" data-testid="input-startedAtClinic-readonly" /></IconField>
+                      </div>
+                    )}
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </Section>
 
-            {/* ── Section 2: Bio ───────────────────────────────────────── */}
-            <Card className="border-neutral-light shadow-sm">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-semibold text-neutral-darkest">Sobre mim</CardTitle>
+              {psych && (
+                <Section
+                  title="Sobre mim"
+                  icon={Info}
+                  editing={editingBio}
+                  saving={saveBioMutation.isPending}
+                  onEdit={openEditBio}
+                  onCancel={() => setEditingBio(false)}
+                  onSave={() => saveBioMutation.mutate()}
+                  testId="bio"
+                >
                   {!editingBio ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 text-xs text-primary hover:text-primary/80 gap-1"
-                      onClick={openEditBio}
-                      data-testid="button-edit-bio"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                      Editar
-                    </Button>
+                    <p className="whitespace-pre-wrap text-[15px] text-cp-ink">
+                      {psych.bio || <span className="italic text-cp-muted">Nenhuma bio cadastrada. Clique em Editar para adicionar.</span>}
+                    </p>
                   ) : (
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => setEditingBio(false)}
-                        data-testid="button-cancel-bio"
-                      >
-                        <X className="w-3.5 h-3.5 mr-1" />
-                        Cancelar
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="h-7 text-xs gap-1"
-                        disabled={saveBioMutation.isPending}
-                        onClick={() => saveBioMutation.mutate()}
-                        data-testid="button-save-bio"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        {saveBioMutation.isPending ? "Salvando..." : "Salvar"}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                {!editingBio ? (
-                  <p className="text-sm text-neutral-darkest whitespace-pre-wrap">
-                    {profile?.psychologist?.bio || (
-                      <span className="text-neutral-dark italic">Nenhuma bio cadastrada. Clique em Editar para adicionar.</span>
-                    )}
-                  </p>
-                ) : (
-                  <div className="space-y-1">
-                    <Textarea
+                    <CharCountTextarea
+                      max={500}
                       value={draftBio}
-                      onChange={(e) => setDraftBio(e.target.value.slice(0, 500))}
+                      onChange={(e) => setDraftBio(e.target.value)}
                       placeholder="Fale sobre sua trajetória, abordagem terapêutica e o que motiva seu trabalho..."
-                      rows={5}
-                      className="resize-none text-sm"
+                      className="min-h-[140px] text-sm"
                       data-testid="textarea-bio"
                       autoFocus
                     />
-                    <p className={cn(
-                      "text-right text-xs",
-                      draftBio.length >= 480 ? "text-amber-600" : "text-neutral-dark"
-                    )}>
-                      {draftBio.length}/500 caracteres
-                    </p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* ── Section 3: Áreas de Atuação ──────────────────────────── */}
-            <Card className="border-neutral-light shadow-sm">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-semibold text-neutral-darkest">Áreas de Atuação</CardTitle>
-                  {!editingSpecs ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 text-xs text-primary hover:text-primary/80 gap-1"
-                      onClick={openEditSpecs}
-                      data-testid="button-edit-specs"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                      Editar
-                    </Button>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => setEditingSpecs(false)}
-                        data-testid="button-cancel-specs"
-                      >
-                        <X className="w-3.5 h-3.5 mr-1" />
-                        Cancelar
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="h-7 text-xs gap-1"
-                        disabled={saveSpecsMutation.isPending}
-                        onClick={() => saveSpecsMutation.mutate()}
-                        data-testid="button-save-specs"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        {saveSpecsMutation.isPending ? "Salvando..." : "Salvar"}
-                      </Button>
-                    </div>
                   )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                {!editingSpecs ? (
-                  <SpecializationChipSelector
-                    selectedIds={profile?.specializations.map((s) => s.id) ?? []}
-                    onChange={() => {}}
-                    readonly
-                  />
-                ) : (
-                  <SpecializationChipSelector
-                    selectedIds={draftSpecIds}
-                    onChange={setDraftSpecIds}
-                  />
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        )}
-      </main>
+                </Section>
+              )}
+
+              {psych && (
+                <Section
+                  title="Áreas de Atuação"
+                  icon={Leaf}
+                  editing={editingSpecs}
+                  saving={saveSpecsMutation.isPending}
+                  onEdit={openEditSpecs}
+                  onCancel={() => setEditingSpecs(false)}
+                  onSave={() => saveSpecsMutation.mutate()}
+                  testId="specs"
+                >
+                  {!editingSpecs ? (
+                    <SpecializationChipSelector selectedIds={profile?.specializations.map((s) => s.id) ?? []} onChange={() => {}} readonly />
+                  ) : (
+                    <SpecializationChipSelector selectedIds={draftSpecIds} onChange={setDraftSpecIds} />
+                  )}
+                </Section>
+              )}
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 }

@@ -136,7 +136,7 @@ export default function Sidebar() {
       name: "Meu Perfil",
       icon: <UserCircle className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />,
       href: "/perfil",
-      roles: ["psychologist"],
+      roles: ["admin", "psychologist", "receptionist"],
     },
     {
       name: "Configurações",

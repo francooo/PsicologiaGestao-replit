@@ -56,6 +56,20 @@ router.get('/status', async (req, res) => {
   res.json({ authenticated: isAuthenticated });
 });
 
+// Desconectar o Google Calendar do usuário logado
+router.delete('/auth', async (req, res) => {
+  if (!req.isAuthenticated()) {
+    return res.status(401).json({ error: 'Usuário não autenticado' });
+  }
+  try {
+    await googleCalendarService.disconnectUser(req.user.id);
+    res.json({ authenticated: false });
+  } catch (error) {
+    console.error('Erro ao desconectar Google Calendar:', error);
+    res.status(500).json({ error: 'Não foi possível desconectar o Google Calendar' });
+  }
+});
+
 // Sincronizar um agendamento com o Google Calendar
 router.post('/sync/:appointmentId', async (req, res) => {
   if (!req.isAuthenticated()) {
