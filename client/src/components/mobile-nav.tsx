@@ -49,8 +49,8 @@ export default function MobileNav() {
     {
       name: "Psicólogas",
       icon: <Users className="w-5 h-5" />,
-      href: "/psychologists",
-      allowedRoles: ["admin", "receptionist"]
+      href: "/admin/psicologas",
+      allowedRoles: ["admin"]
     },
     {
       name: "Reservas",

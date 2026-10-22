@@ -16,9 +16,28 @@ import {
   Info,
   Leaf,
   Home,
+  Plus,
+  Trash2,
+  Filter,
+  Tag,
+  Loader2,
+  Save,
 } from "lucide-react";
 import { StatusBadge } from "@/components/cp/StatusBadge";
-import { cpButton } from "@/components/cp/PageHeader";
+import { PageHeader, cpButton } from "@/components/cp/PageHeader";
+import { IconField, ModalHeader } from "@/components/cp/fields";
+import { NewPsychologistDialog } from "@/components/admin/NewPsychologistDialog";
+import MobileNav from "@/components/mobile-nav";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -103,49 +122,32 @@ function monthsText(dateStr: string | null | undefined): string {
 function PsychCard({ p, onClick }: { p: Psychologist; onClick: () => void }) {
   const isActive = p.user.status === "active";
   return (
-    <div
+    <button
+      type="button"
       className={cn(
-        "bg-white rounded-xl border border-neutral-light shadow-sm hover:shadow-md transition-shadow p-4 flex flex-col gap-3 cursor-pointer",
+        "flex w-full cursor-pointer flex-col gap-3 rounded-2xl border border-cp-divider bg-white p-5 text-left shadow-[0_10px_40px_-20px_rgba(36,54,71,0.18)] transition-shadow hover:shadow-[0_14px_44px_-18px_rgba(36,54,71,0.28)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cp-action",
         !isActive && "opacity-60"
       )}
       onClick={onClick}
       data-testid={`card-psychologist-${p.id}`}
     >
-      <div className="flex items-start gap-3">
-        <Avatar className="w-12 h-12 border border-primary/30 flex-shrink-0">
+      <div className="flex w-full items-start gap-3">
+        <Avatar className="h-12 w-12 flex-shrink-0">
           <AvatarImage src={p.user.profileImage || undefined} />
-          <AvatarFallback className="bg-primary text-white font-bold">
+          <AvatarFallback className="bg-cp-action font-bold text-white">
             {p.user.fullName.charAt(0)}
           </AvatarFallback>
         </Avatar>
-        <div className="flex-1 min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="font-semibold text-neutral-darkest text-sm truncate">{p.user.fullName}</h3>
-            <Badge
-              variant="outline"
-              className={cn(
-                "text-[10px] border flex-shrink-0",
-                isActive
-                  ? "border-green-300 text-green-700 bg-green-50"
-                  : "border-neutral-light text-neutral-dark bg-neutral-lightest"
-              )}
-            >
-              {isActive ? "Ativa" : "Inativa"}
-            </Badge>
+            <h3 className="truncate text-[15px] font-semibold text-cp-ink">{p.user.fullName}</h3>
+            <StatusBadge label={isActive ? "Ativa" : "Inativa"} tone={isActive ? "success" : "neutral"} className="flex-shrink-0" />
           </div>
-          {p.crpNumber && (
-            <p className="text-xs text-neutral-dark mt-0.5">CRP {p.crpNumber}</p>
-          )}
-          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
-            {p.age && (
-              <span className="text-xs text-neutral-dark">{p.age} anos</span>
-            )}
-            {p.phone && (
-              <span className="text-xs text-neutral-dark truncate">{p.phone}</span>
-            )}
-            {p.startedAtClinic && (
-              <span className="text-xs text-neutral-dark">desde {formatDate(p.startedAtClinic)}</span>
-            )}
+          {p.crpNumber && <p className="mt-0.5 text-xs text-cp-muted">CRP {p.crpNumber}</p>}
+          <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-cp-muted">
+            {(p.age ?? 0) > 0 && <span>{p.age} anos</span>}
+            {p.phone && <span className="truncate">{p.phone}</span>}
+            {p.startedAtClinic && <span>desde {formatDate(p.startedAtClinic)}</span>}
           </div>
         </div>
       </div>
@@ -154,15 +156,12 @@ function PsychCard({ p, onClick }: { p: Psychologist; onClick: () => void }) {
       {p.specializations.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {p.specializations.slice(0, 3).map((s) => (
-            <span
-              key={s.id}
-              className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary border border-primary/20"
-            >
+            <span key={s.id} className="rounded-full bg-cp-sage-soft px-2.5 py-0.5 text-[11px] font-medium text-cp-sage-ink">
               {s.name}
             </span>
           ))}
           {p.specializations.length > 3 && (
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-neutral-lightest text-neutral-dark border border-neutral-light">
+            <span className="rounded-full bg-cp-hover px-2.5 py-0.5 text-[11px] font-medium text-cp-muted">
               +{p.specializations.length - 3} mais
             </span>
           )}
@@ -170,23 +169,23 @@ function PsychCard({ p, onClick }: { p: Psychologist; onClick: () => void }) {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-2 border-t border-neutral-light pt-2 mt-1">
+      <div className="mt-1 grid w-full grid-cols-3 gap-2 border-t border-cp-divider pt-3">
         <div className="text-center">
-          <p className="text-base font-bold text-neutral-darkest">{p.activePatientsCount}</p>
-          <p className="text-[10px] text-neutral-dark leading-tight">Pacientes</p>
+          <p className="text-base font-bold text-cp-ink">{p.activePatientsCount}</p>
+          <p className="text-[11px] leading-tight text-cp-muted">Pacientes</p>
         </div>
-        <div className="text-center border-x border-neutral-light">
-          <p className="text-base font-bold text-neutral-darkest">{p.sessionsCount}</p>
-          <p className="text-[10px] text-neutral-dark leading-tight">Sessões</p>
+        <div className="border-x border-cp-divider text-center">
+          <p className="text-base font-bold text-cp-ink">{p.sessionsCount}</p>
+          <p className="text-[11px] leading-tight text-cp-muted">Sessões</p>
         </div>
         <div className="text-center">
-          <p className="text-base font-bold text-neutral-darkest">
+          <p className="text-base font-bold text-cp-ink">
             {p.monthsAtClinic !== null ? monthsText(p.startedAtClinic) : "—"}
           </p>
-          <p className="text-[10px] text-neutral-dark leading-tight">Na Clínica</p>
+          <p className="text-[11px] leading-tight text-cp-muted">Na Clínica</p>
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -202,6 +201,8 @@ export default function AdminPsicologasPage() {
   const [editingPsych, setEditingPsych] = useState<Psychologist | null>(null);
   const [editForm, setEditForm] = useState<EditFormState | null>(null);
   const [editSpecIds, setEditSpecIds] = useState<number[]>([]);
+  const [isNewOpen, setIsNewOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const { data: psychologists = [], isLoading } = useQuery<Psychologist[]>({
     queryKey: ["/api/admin/psychologists"],
@@ -256,6 +257,19 @@ export default function AdminPsicologasPage() {
     onError: () => toast({ title: "Erro ao alterar status", variant: "destructive" }),
   });
 
+  // Removes the psychologist profile (the login stays, as on the old /psychologists page)
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/psychologists/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/psychologists"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/psychologists"] });
+      setConfirmDelete(false);
+      setEditingPsych(null);
+      toast({ title: "Psicóloga removida." });
+    },
+    onError: () => toast({ title: "Erro ao remover psicóloga", variant: "destructive" }),
+  });
+
   const filtered = psychologists.filter((p) => {
     const matchSearch =
       !search ||
@@ -276,81 +290,80 @@ export default function AdminPsicologasPage() {
   });
 
   return (
-    <div className="flex min-h-screen bg-neutral-lightest">
+    <div className="flex h-screen bg-cp-bg">
       <Sidebar />
-      <main className="flex-1 md:ml-64 p-6">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-neutral-darkest">Psicólogas</h1>
-          <p className="text-sm text-neutral-dark mt-1">
-            Gerencie os perfis profissionais, áreas de atuação e status das psicólogas.
-          </p>
-        </div>
+      <div className="ml-0 flex-1 overflow-y-auto overflow-x-hidden pt-16 md:ml-64 md:pt-0">
+      <MobileNav />
+      <main className="p-4 pb-20 sm:px-7 sm:py-6">
+        <PageHeader
+          className="mb-6"
+          title="Psicólogas"
+          icon={Users}
+          subtitle="Gerencie os perfis profissionais, áreas de atuação e status das psicólogas."
+          phrase
+          actions={
+            <button type="button" className={cpButton.primary} onClick={() => setIsNewOpen(true)} data-testid="button-new-psych">
+              <Plus className="h-4 w-4" />
+              Nova Psicóloga
+            </button>
+          }
+        />
+        <NewPsychologistDialog open={isNewOpen} onOpenChange={setIsNewOpen} existingPsychUserIds={psychologists.map((p) => p.userId)} />
 
         {/* Filters */}
-        <div className="flex flex-wrap gap-3 mb-6">
-          <div className="relative flex-1 min-w-[200px] max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-dark" />
-            <Input
-              placeholder="Buscar por nome, e-mail ou CRP..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-              data-testid="input-psych-search"
-            />
+        <div className="mb-5 rounded-2xl border border-cp-divider bg-white p-4 shadow-[0_10px_40px_-20px_rgba(36,54,71,0.18)] sm:p-5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_180px_220px]">
+            <IconField icon={Search}>
+              <Input
+                placeholder="Buscar por nome, e-mail ou CRP..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                data-testid="input-psych-search"
+              />
+            </IconField>
+            <IconField icon={Filter}>
+              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+                <SelectTrigger data-testid="select-status-filter" aria-label="Status"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  <SelectItem value="active">Ativas</SelectItem>
+                  <SelectItem value="inactive">Inativas</SelectItem>
+                </SelectContent>
+              </Select>
+            </IconField>
+            <IconField icon={Tag}>
+              <Select value={specFilter === "all" ? "all" : String(specFilter)} onValueChange={(v) => setSpecFilter(v === "all" ? "all" : parseInt(v))}>
+                <SelectTrigger data-testid="select-spec-filter" aria-label="Área de atuação"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas as áreas</SelectItem>
+                  {allAreaOptions.map((a) => (
+                    <SelectItem key={a.id} value={String(a.id)}>{a.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </IconField>
           </div>
-          <Select
-            value={statusFilter}
-            onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}
-          >
-            <SelectTrigger className="w-36" data-testid="select-status-filter">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas</SelectItem>
-              <SelectItem value="active">Ativas</SelectItem>
-              <SelectItem value="inactive">Inativas</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={specFilter === "all" ? "all" : String(specFilter)}
-            onValueChange={(v) => setSpecFilter(v === "all" ? "all" : parseInt(v))}
-          >
-            <SelectTrigger className="w-48" data-testid="select-spec-filter">
-              <SelectValue placeholder="Área de Atuação" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas as áreas</SelectItem>
-              {allAreaOptions.map((a) => (
-                <SelectItem key={a.id} value={String(a.id)}>
-                  {a.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
 
         {/* Summary */}
-        <div className="flex items-center gap-2 mb-4">
-          <span className="text-sm text-neutral-dark">
+        <div className="mb-4 flex items-center gap-2">
+          <span className="text-sm text-cp-muted">
             {filtered.length} psicóloga{filtered.length !== 1 ? "s" : ""}
           </span>
-          <span className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
-            {psychologists.filter((p) => p.user.status === "active").length} ativas
-          </span>
+          <StatusBadge label={`${psychologists.filter((p) => p.user.status === "active").length} ativas`} tone="success" />
         </div>
 
         {/* Cards Grid */}
         {isLoading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3].map((n) => (
-              <Skeleton key={n} className="h-52 rounded-xl" />
+              <Skeleton key={n} className="h-56 rounded-2xl" />
             ))}
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-neutral-dark">
-            <Users className="w-12 h-12 mb-3 opacity-30" />
-            <p className="text-sm">Nenhuma psicóloga encontrada.</p>
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-cp-divider bg-white py-20 text-center">
+            <Users className="mb-3 h-10 w-10 text-cp-sage" />
+            <p className="text-sm font-medium text-cp-ink">Nenhuma psicóloga encontrada.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -494,48 +507,33 @@ export default function AdminPsicologasPage() {
 
         {/* ── Editar Modal ─────────────────────────────────────────── */}
         <Dialog open={!!editingPsych} onOpenChange={(open) => !open && setEditingPsych(null)}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-3">
-                <Avatar className="w-10 h-10 border border-primary/30">
-                  <AvatarImage src={editingPsych?.user.profileImage || undefined} />
-                  <AvatarFallback className="bg-primary text-white font-bold text-sm">
-                    {editingPsych?.user.fullName.charAt(0)}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="text-base font-semibold">Editar: {editingPsych?.user.fullName}</p>
-                  {editingPsych?.crpNumber && (
-                    <p className="text-xs text-neutral-dark font-normal">CRP {editingPsych.crpNumber}</p>
-                  )}
-                </div>
-              </DialogTitle>
-            </DialogHeader>
+          <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto rounded-2xl">
+            <ModalHeader icon={Edit} title={`Editar: ${editingPsych?.user.fullName ?? ""}`} description={editingPsych?.crpNumber ? `CRP ${editingPsych.crpNumber}` : "Atualize o perfil profissional."} />
 
             {editForm && editingPsych && (
-              <div className="space-y-5 py-2">
+              <div className="space-y-5 py-2 [&_input]:h-11 [&_input]:rounded-xl [&_input]:border-cp-border [&_input:focus-visible]:ring-cp-action [&_textarea]:rounded-xl [&_textarea]:border-cp-border [&_textarea:focus-visible]:ring-cp-action">
                 {/* Stats */}
                 <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-neutral-lightest rounded-lg border border-neutral-light p-3 text-center">
-                    <p className="text-lg font-bold text-neutral-darkest">{editingPsych.activePatientsCount}</p>
-                    <p className="text-[11px] text-neutral-dark">Pacientes Ativos</p>
+                  <div className="rounded-xl bg-cp-hover p-3 text-center">
+                    <p className="text-lg font-bold text-cp-ink">{editingPsych.activePatientsCount}</p>
+                    <p className="text-[11px] text-cp-muted">Pacientes Ativos</p>
                   </div>
-                  <div className="bg-neutral-lightest rounded-lg border border-neutral-light p-3 text-center">
-                    <p className="text-lg font-bold text-neutral-darkest">{editingPsych.sessionsCount}</p>
-                    <p className="text-[11px] text-neutral-dark">Sessões Totais</p>
+                  <div className="rounded-xl bg-cp-hover p-3 text-center">
+                    <p className="text-lg font-bold text-cp-ink">{editingPsych.sessionsCount}</p>
+                    <p className="text-[11px] text-cp-muted">Sessões Totais</p>
                   </div>
-                  <div className="bg-neutral-lightest rounded-lg border border-neutral-light p-3 text-center">
-                    <p className="text-lg font-bold text-neutral-darkest">
+                  <div className="rounded-xl bg-cp-hover p-3 text-center">
+                    <p className="text-lg font-bold text-cp-ink">
                       {editingPsych.monthsAtClinic !== null ? monthsText(editingPsych.startedAtClinic) : "—"}
                     </p>
-                    <p className="text-[11px] text-neutral-dark">Na Clínica</p>
+                    <p className="text-[11px] text-cp-muted">Na Clínica</p>
                   </div>
                 </div>
 
                 {/* Fields */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <Label className="text-xs font-semibold text-neutral-dark">Nome Completo</Label>
+                    <Label className="text-[13px] font-semibold text-cp-ink">Nome Completo</Label>
                     <Input
                       value={editForm.fullName}
                       onChange={(e) => setEditForm((f) => f ? { ...f, fullName: e.target.value } : f)}
@@ -545,12 +543,12 @@ export default function AdminPsicologasPage() {
                   </div>
 
                   <div>
-                    <Label className="text-xs font-semibold text-neutral-dark flex items-center gap-1">
+                    <Label className="flex items-center gap-1 text-[13px] font-semibold text-cp-ink">
                       E-mail
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <Lock className="w-3 h-3 text-primary/70 cursor-default" />
+                            <Lock className="h-3 w-3 cursor-default text-cp-muted" />
                           </TooltipTrigger>
                           <TooltipContent side="top" className="max-w-[200px] text-xs">
                             Este campo só pode ser editado pelo administrador.
@@ -567,7 +565,7 @@ export default function AdminPsicologasPage() {
                   </div>
 
                   <div>
-                    <Label className="text-xs font-semibold text-neutral-dark">Telefone</Label>
+                    <Label className="text-[13px] font-semibold text-cp-ink">Telefone</Label>
                     <Input
                       value={editForm.phone}
                       onChange={(e) => setEditForm((f) => f ? { ...f, phone: e.target.value } : f)}
@@ -578,7 +576,7 @@ export default function AdminPsicologasPage() {
                   </div>
 
                   <div>
-                    <Label className="text-xs font-semibold text-neutral-dark">Data de Nascimento</Label>
+                    <Label className="text-[13px] font-semibold text-cp-ink">Data de Nascimento</Label>
                     <Input
                       type="date"
                       value={editForm.birthDate}
@@ -589,7 +587,7 @@ export default function AdminPsicologasPage() {
                   </div>
 
                   <div>
-                    <Label className="text-xs font-semibold text-neutral-dark">Número do CRP</Label>
+                    <Label className="text-[13px] font-semibold text-cp-ink">Número do CRP</Label>
                     <Input
                       value={editForm.crpNumber}
                       onChange={(e) => setEditForm((f) => f ? { ...f, crpNumber: e.target.value } : f)}
@@ -600,12 +598,12 @@ export default function AdminPsicologasPage() {
                   </div>
 
                   <div>
-                    <Label className="text-xs font-semibold text-neutral-dark flex items-center gap-1">
+                    <Label className="flex items-center gap-1 text-[13px] font-semibold text-cp-ink">
                       Entrada na Clínica
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <Lock className="w-3 h-3 text-primary/70 cursor-default" />
+                            <Lock className="h-3 w-3 cursor-default text-cp-muted" />
                           </TooltipTrigger>
                           <TooltipContent side="top" className="max-w-[200px] text-xs">
                             Este campo só pode ser editado pelo administrador.
@@ -625,7 +623,7 @@ export default function AdminPsicologasPage() {
 
                 {/* Bio */}
                 <div>
-                  <Label className="text-xs font-semibold text-neutral-dark">Sobre / Bio</Label>
+                  <Label className="text-[13px] font-semibold text-cp-ink">Sobre / Bio</Label>
                   <Textarea
                     value={editForm.bio}
                     onChange={(e) => setEditForm((f) => f ? { ...f, bio: e.target.value } : f)}
@@ -637,7 +635,7 @@ export default function AdminPsicologasPage() {
 
                 {/* Specializations */}
                 <div>
-                  <Label className="text-xs font-semibold text-neutral-dark block mb-2">Áreas de Atuação</Label>
+                  <Label className="mb-2 block text-[13px] font-semibold text-cp-ink">Áreas de Atuação</Label>
                   <SpecializationChipSelector
                     selectedIds={editSpecIds}
                     onChange={setEditSpecIds}
@@ -645,13 +643,13 @@ export default function AdminPsicologasPage() {
                 </div>
 
                 {/* Admin-only: Status toggle */}
-                <div className="border-t border-neutral-light pt-4">
+                <div className="rounded-xl bg-cp-hover p-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Lock className="w-4 h-4 text-primary/70 flex-shrink-0" />
+                      <Lock className="h-4 w-4 flex-shrink-0 text-cp-muted" />
                       <div>
-                        <p className="text-sm font-semibold text-neutral-darkest">Status da Psicóloga</p>
-                        <p className="text-xs text-neutral-dark">
+                        <p className="text-sm font-semibold text-cp-ink">Status da Psicóloga</p>
+                        <p className="text-xs text-cp-muted">
                           {editingPsych.user.status === "active"
                             ? "Psicóloga está ativa no sistema."
                             : "Psicóloga está inativa no sistema."}
@@ -665,8 +663,8 @@ export default function AdminPsicologasPage() {
                       className={cn(
                         "gap-1.5 text-xs",
                         editingPsych.user.status === "active"
-                          ? "border-red-300 text-red-600 hover:bg-red-50"
-                          : "border-green-300 text-green-700 hover:bg-green-50"
+                          ? "rounded-lg border-cp-danger/30 bg-white text-cp-danger hover:bg-cp-danger-soft"
+                          : "rounded-lg border-cp-success/30 bg-white text-cp-success hover:bg-cp-success-soft"
                       )}
                       disabled={toggleActiveMutation.isPending}
                       onClick={() => toggleActiveMutation.mutate(editingPsych.id)}
@@ -689,21 +687,46 @@ export default function AdminPsicologasPage() {
               </div>
             )}
 
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setEditingPsych(null)} data-testid="button-cancel-edit">
-                Cancelar
-              </Button>
-              <Button
-                onClick={() => saveMutation.mutate()}
-                disabled={saveMutation.isPending}
-                data-testid="button-save-psych"
-              >
-                {saveMutation.isPending ? "Salvando..." : "Salvar Alterações"}
-              </Button>
+            <DialogFooter className="flex-wrap gap-3 pt-2 sm:justify-between">
+              <button type="button" className={cn(cpButton.secondary, "border-cp-danger/30 text-cp-danger hover:bg-cp-danger-soft")} onClick={() => setConfirmDelete(true)} data-testid="button-delete-psych">
+                <Trash2 className="h-4 w-4" />
+                Excluir
+              </button>
+              <div className="flex gap-3">
+                <button type="button" className={cpButton.subtle} onClick={() => setEditingPsych(null)} data-testid="button-cancel-edit">
+                  Cancelar
+                </button>
+                <button type="button" className={cpButton.primary} onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} data-testid="button-save-psych">
+                  {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  {saveMutation.isPending ? "Salvando..." : "Salvar Alterações"}
+                </button>
+              </div>
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        <AlertDialog open={confirmDelete} onOpenChange={(o) => { if (!deleteMutation.isPending) setConfirmDelete(o); }}>
+          <AlertDialogContent className="rounded-2xl">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-cp-ink">Excluir {editingPsych?.user.fullName}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                O perfil profissional é removido da clínica. O acesso (login) da pessoa continua existindo. Esta ação não pode ser desfeita.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel className="rounded-xl" disabled={deleteMutation.isPending}>Voltar</AlertDialogCancel>
+              <AlertDialogAction
+                className="rounded-xl bg-cp-danger hover:bg-cp-danger/90"
+                disabled={deleteMutation.isPending}
+                onClick={(e) => { e.preventDefault(); if (editingPsych) deleteMutation.mutate(editingPsych.id); }}
+              >
+                {deleteMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Excluir
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </main>
+      </div>
     </div>
   );
 }
