@@ -66,7 +66,14 @@ import {
   Play,
   Square,
   FileText,
+  Search,
+  User as UserIcon,
 } from "lucide-react";
+import { PageHeader, cpButton } from "@/components/cp/PageHeader";
+import { CharCountTextarea, IconField, InfoBanner, ModalHeader } from "@/components/cp/fields";
+import { MetricCard } from "@/components/cp/MetricCard";
+import { StatusBadge } from "@/components/cp/StatusBadge";
+import { meetingStatus, statusOf } from "@/components/cp/status";
 import { format, isToday, startOfWeek, endOfWeek, startOfDay, endOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
@@ -99,31 +106,6 @@ interface Meeting {
   patientPhone?: string;
   patientPhotoUrl?: string;
 }
-
-// ─── Status config ─────────────────────────────────────────────────────────────
-
-const statusConfig = {
-  scheduled: {
-    label: "Agendada",
-    className: "bg-blue-100 text-blue-700",
-    pulse: false,
-  },
-  active: {
-    label: "Em andamento",
-    className: "bg-green-100 text-green-700",
-    pulse: true,
-  },
-  ended: {
-    label: "Realizada",
-    className: "bg-gray-100 text-gray-500",
-    pulse: false,
-  },
-  cancelled: {
-    label: "Cancelada",
-    className: "bg-red-100 text-red-600",
-    pulse: false,
-  },
-} as const;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -170,20 +152,20 @@ function ActiveSessionBanner({
   }, [meeting.startedAt]);
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-50 md:left-64 bg-green-600 text-white px-4 py-2.5 flex items-center justify-between shadow-lg">
+    <div className="fixed top-0 left-0 right-0 z-50 md:left-64 bg-cp-success text-white px-4 py-2.5 flex items-center justify-between shadow-lg">
       <div className="flex items-center gap-3">
         <span className="flex items-center gap-1.5 font-medium text-sm">
           <span className="w-2 h-2 rounded-full bg-white animate-pulse inline-block" />
           Sessão em andamento com {meeting.patientName || meeting.patientFullName}
         </span>
-        <span className="text-green-200 text-sm font-mono">⏱ {formatCronômetro(elapsed)}</span>
+        <span className="text-white/80 text-sm font-mono">⏱ {formatCronômetro(elapsed)}</span>
       </div>
       <div className="flex items-center gap-2">
         {meeting.meetLink && (
           <Button
             size="sm"
             variant="outline"
-            className="h-7 text-xs border-green-300 text-green-900 bg-white hover:bg-green-50"
+            className="h-7 text-xs border-white/60 text-cp-ink bg-white hover:bg-cp-success-soft"
             onClick={onEnterMeet}
           >
             <ExternalLink className="h-3 w-3 mr-1" />
@@ -223,7 +205,7 @@ function MeetingCard({
   onCancel: (m: Meeting) => void;
   onEnterMeet: (m: Meeting) => void;
 }) {
-  const status = statusConfig[meeting.status] ?? statusConfig.scheduled;
+  const status = statusOf(meetingStatus, meeting.status);
   const patientName = meeting.patientFullName || meeting.patientName || "Paciente";
   const patientInitial = patientName.charAt(0).toUpperCase();
   const scheduledDate = new Date(meeting.scheduledAt);
@@ -232,9 +214,9 @@ function MeetingCard({
   return (
     <div
       className={cn(
-        "bg-white rounded-xl shadow-sm border border-neutral-100 p-4",
-        meeting.isToday && "border-l-4 border-l-teal-500",
-        meeting.status === "active" && "ring-2 ring-green-300"
+        "rounded-2xl border border-cp-divider bg-white p-5 shadow-[0_10px_40px_-20px_rgba(36,54,71,0.18)]",
+        meeting.isToday && "border-l-4 border-l-cp-action",
+        meeting.status === "active" && "ring-2 ring-cp-sage"
       )}
       data-testid={`card-meeting-${meeting.id}`}
     >
@@ -242,59 +224,50 @@ function MeetingCard({
         <div className="flex items-center gap-3 min-w-0">
           <Avatar className="w-10 h-10 shrink-0">
             <AvatarImage src={meeting.patientPhotoUrl || undefined} />
-            <AvatarFallback className="bg-teal-100 text-teal-700 font-semibold">
+            <AvatarFallback className="bg-cp-action-soft text-cp-action font-semibold">
               {patientInitial}
             </AvatarFallback>
           </Avatar>
           <div className="min-w-0">
-            <p className="font-semibold text-slate-800 text-sm truncate">{patientName}</p>
+            <p className="truncate text-[15px] font-semibold text-cp-ink">{patientName}</p>
             {meeting.patientEmail && (
-              <p className="text-xs text-slate-400 truncate">{meeting.patientEmail}</p>
+              <p className="truncate text-xs text-cp-muted">{meeting.patientEmail}</p>
             )}
           </div>
         </div>
-        <span
-          className={cn(
-            "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium shrink-0",
-            status.className
-          )}
-        >
-          {status.pulse && (
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-          )}
-          {status.label}
-        </span>
+        <StatusBadge label={status.label} tone={status.tone} className={cn("shrink-0", meeting.status === "active" && "animate-pulse")} />
       </div>
 
       <div className="mt-3 space-y-1">
-        <p className="text-sm text-slate-700 font-medium">{meeting.title}</p>
-        <p className="text-xs text-slate-500 flex items-center gap-1.5">
-          <CalendarDays className="h-3.5 w-3.5 text-teal-500" />
+        <p className="text-sm font-medium text-cp-ink">{meeting.title}</p>
+        <p className="flex items-center gap-1.5 text-xs text-cp-muted">
+          <CalendarDays className="h-3.5 w-3.5 text-cp-action" />
           {format(scheduledDate, "EEEE, dd MMM • HH:mm", { locale: ptBR })} —{" "}
           {formatDuration(meeting.durationMinutes)}
         </p>
         {meeting.meetLink && (
           <div className="flex items-center gap-1.5">
-            <Video className="h-3.5 w-3.5 text-teal-500 shrink-0" />
+            <Video className="h-3.5 w-3.5 shrink-0 text-cp-action" />
             <a
               href={meeting.meetLink}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-teal-600 hover:underline truncate max-w-[240px]"
+              className="max-w-[240px] truncate text-xs text-cp-action hover:underline"
             >
               {meeting.meetLink}
             </a>
             <button
               onClick={() => copyToClipboard(meeting.meetLink!, toast)}
-              className="text-slate-400 hover:text-teal-600"
+              className="text-cp-subtle hover:text-cp-action"
+              aria-label="Copiar link do Meet"
             >
               <Copy className="h-3 w-3" />
             </button>
           </div>
         )}
         {meeting.linkSentAt && (
-          <p className="text-xs text-slate-400 flex items-center gap-1">
-            <Check className="h-3 w-3 text-green-500" />
+          <p className="flex items-center gap-1 text-xs text-cp-muted">
+            <Check className="h-3 w-3 text-cp-success" />
             Link enviado em {format(new Date(meeting.linkSentAt), "dd/MM HH:mm")}
           </p>
         )}
@@ -306,7 +279,7 @@ function MeetingCard({
           <>
             <Button
               size="sm"
-              className="h-7 text-xs bg-teal-600 hover:bg-teal-700"
+              className="h-8 rounded-lg bg-cp-action text-xs hover:bg-cp-action-hover"
               onClick={() => onStart(meeting)}
               data-testid={`button-start-meeting-${meeting.id}`}
             >
@@ -317,7 +290,7 @@ function MeetingCard({
               <Button
                 size="sm"
                 variant="outline"
-                className="h-7 text-xs"
+                className="h-8 rounded-lg border-cp-border text-xs text-cp-ink"
                 onClick={() => onSendLink(meeting)}
                 disabled={!meeting.patientEmail}
                 data-testid={`button-send-link-${meeting.id}`}
@@ -344,7 +317,7 @@ function MeetingCard({
             {meeting.meetLink && (
               <Button
                 size="sm"
-                className="h-7 text-xs bg-green-600 hover:bg-green-700"
+                className="h-8 rounded-lg bg-cp-success text-xs hover:bg-cp-success/90"
                 onClick={() => onEnterMeet(meeting)}
                 data-testid={`button-enter-meet-${meeting.id}`}
               >
@@ -370,7 +343,7 @@ function MeetingCard({
             <Button
               size="sm"
               variant="outline"
-              className="h-7 text-xs"
+              className="h-8 rounded-lg border-cp-border text-xs text-cp-ink"
               onClick={() => onViewNotes(meeting)}
               data-testid={`button-view-notes-${meeting.id}`}
             >
@@ -388,17 +361,17 @@ function MeetingCard({
                 Reenviar Link
               </Button>
             )}
-            {meeting.actualDuration && (
-              <span className="text-xs text-slate-400 flex items-center gap-1 ml-auto">
+            {(meeting.actualDuration ?? 0) > 0 && (
+              <span className="ml-auto flex items-center gap-1 text-xs text-cp-muted">
                 <Clock className="h-3 w-3" />
-                Duração real: {formatDuration(meeting.actualDuration)}
+                Duração real: {formatDuration(meeting.actualDuration!)}
               </span>
             )}
           </>
         )}
 
         {meeting.status === "cancelled" && (
-          <span className="text-xs text-slate-400 italic">Sessão cancelada</span>
+          <span className="text-xs italic text-cp-subtle">Sessão cancelada</span>
         )}
       </div>
     </div>
@@ -663,7 +636,7 @@ export default function Meetings() {
   ];
 
   return (
-    <div className="flex h-screen bg-[#f7f8fa]">
+    <div className="flex h-screen bg-cp-bg">
       <Sidebar />
 
       {/* Active session banner */}
@@ -684,70 +657,37 @@ export default function Meetings() {
         <MobileNav />
 
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-slate-200 flex-shrink-0">
-          <div>
-            <h1 className="text-[17px] font-bold text-slate-800 flex items-center gap-2">
-              <Video className="h-5 w-5 text-teal-600" />
-              Reuniões
-            </h1>
-            <p className="text-[11px] text-slate-400 mt-0.5">Gerencie suas sessões online via Google Meet</p>
-          </div>
-          <Button
-            className="bg-teal-600 hover:bg-teal-700 h-9 text-sm"
-            onClick={() => setIsCreateOpen(true)}
-            data-testid="button-new-meeting"
-          >
-            <Plus className="h-4 w-4 mr-1.5" />
-            Nova Reunião
-          </Button>
+        <div className="flex-shrink-0 px-4 pt-6 pb-2 sm:px-7">
+          <PageHeader
+            title="Reuniões"
+            icon={Video}
+            subtitle="Gerencie suas sessões online via Google Meet"
+            phrase
+            actions={
+              <button type="button" className={cpButton.primary} onClick={() => setIsCreateOpen(true)} data-testid="button-new-meeting">
+                <Plus className="h-4 w-4" />
+                Nova Reunião
+              </button>
+            }
+          />
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-7">
           {/* Summary cards */}
-          <div className="grid grid-cols-3 gap-4 mb-5">
-            <div className="bg-white rounded-xl shadow-sm border border-neutral-100 p-4">
-              <div className="flex items-center gap-2 text-sm text-slate-500 mb-1">
-                <CalendarDays className="h-4 w-4 text-teal-500" />
-                Hoje
-              </div>
-              <p className="text-2xl font-bold text-slate-800">{todayCount}</p>
-              <p className="text-xs text-slate-400">sessões</p>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border border-neutral-100 p-4">
-              <div className="flex items-center gap-2 text-sm text-slate-500 mb-1">
-                <Users className="h-4 w-4 text-teal-500" />
-                Esta semana
-              </div>
-              <p className="text-2xl font-bold text-slate-800">{weekCount}</p>
-              <p className="text-xs text-slate-400">sessões</p>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border border-neutral-100 p-4">
-              <div className="flex items-center gap-2 text-sm text-slate-500 mb-1">
-                <CheckCircle2 className="h-4 w-4 text-teal-500" />
-                Total
-              </div>
-              <p className="text-2xl font-bold text-slate-800">{doneCount}</p>
-              <p className="text-xs text-slate-400">realizadas</p>
-            </div>
+          <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <MetricCard icon={<CalendarDays className="h-6 w-6 text-cp-sage-ink" />} tint="bg-cp-sage-soft" label="Hoje" value={todayCount} sub="sessões" />
+            <MetricCard icon={<Users className="h-6 w-6 text-cp-lavender-ink" />} tint="bg-cp-lavender-soft" label="Esta semana" value={weekCount} sub="sessões" />
+            <MetricCard icon={<CheckCircle2 className="h-6 w-6 text-cp-sand-ink" />} tint="bg-cp-sand-soft" label="Total" value={doneCount} sub="realizadas" />
           </div>
 
           {/* Google Calendar not connected warning */}
           {googleCalStatus !== undefined && !googleConnected && (
-            <div className="mb-4 flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
-              <AlertCircle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-amber-800">Google Calendar não conectado</p>
-                <p className="text-xs text-amber-700 mt-0.5">
-                  Sem a integração com o Google Calendar, não é possível gerar links do Google Meet nem enviar e-mails de convite para as pacientes.
-                </p>
-                <Link
-                  href="/profile"
-                  className="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-amber-800 underline underline-offset-2 hover:text-amber-900"
-                >
-                  Conectar Google Calendar no Meu Perfil →
-                </Link>
-              </div>
-            </div>
+            <InfoBanner variant="warning" title="Google Calendar não conectado" className="mb-4">
+              Sem a integração com o Google Calendar, não é possível gerar links do Google Meet nem enviar e-mails de convite para as pacientes.{" "}
+              <Link href="/profile" className="font-semibold text-cp-warning underline underline-offset-2">
+                Conectar Google Calendar no Meu Perfil →
+              </Link>
+            </InfoBanner>
           )}
 
           {/* Filters */}
@@ -758,10 +698,10 @@ export default function Meetings() {
                   key={tab.key}
                   onClick={() => setFilterStatus(tab.key)}
                   className={cn(
-                    "px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
+                    "rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors",
                     filterStatus === tab.key
-                      ? "bg-teal-600 text-white"
-                      : "bg-white border border-slate-200 text-slate-600 hover:border-teal-400"
+                      ? "bg-cp-action text-white"
+                      : "border border-cp-border bg-white text-cp-muted hover:text-cp-ink"
                   )}
                   data-testid={`filter-tab-${tab.key}`}
                 >
@@ -769,25 +709,27 @@ export default function Meetings() {
                 </button>
               ))}
             </div>
-            <Input
-              placeholder="🔍 Buscar paciente..."
-              value={searchPatient}
-              onChange={(e) => setSearchPatient(e.target.value)}
-              className="h-8 text-sm max-w-[200px]"
-              data-testid="input-search-patient"
-            />
+            <IconField icon={Search} className="w-full sm:w-[240px]">
+              <Input
+                placeholder="Buscar paciente..."
+                value={searchPatient}
+                onChange={(e) => setSearchPatient(e.target.value)}
+                className="bg-white text-sm"
+                data-testid="input-search-patient"
+              />
+            </IconField>
           </div>
 
           {/* Meetings list */}
           {isLoading ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-6 w-6 animate-spin text-teal-500" />
+              <Loader2 className="h-6 w-6 animate-spin text-cp-action" />
             </div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <Video className="h-10 w-10 text-slate-200 mb-3" />
-              <p className="text-sm font-medium text-slate-500">Nenhuma reunião encontrada</p>
-              <p className="text-xs text-slate-400 mt-1">Crie uma nova reunião para começar</p>
+              <Video className="mb-3 h-10 w-10 text-cp-sage" />
+              <p className="text-sm font-medium text-cp-ink">Nenhuma reunião encontrada</p>
+              <p className="mt-1 text-xs text-cp-muted">Crie uma nova reunião para começar</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -810,32 +752,30 @@ export default function Meetings() {
 
       {/* ── Create Meeting Modal ─────────────────────────────────────────────── */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Video className="h-5 w-5 text-teal-600" />
-              Nova Reunião
-            </DialogTitle>
-          </DialogHeader>
+        <DialogContent className="max-h-[92vh] max-w-lg overflow-y-auto rounded-2xl">
+          <ModalHeader icon={Video} title="Nova Reunião" description="Agende uma nova sessão com seu paciente." />
 
           <div className="space-y-4 py-2">
             {/* Patient selector */}
             <div>
-              <label className="text-sm font-medium text-slate-700 mb-1.5 block">
-                Paciente <span className="text-red-500">*</span>
+              <label className="mb-1.5 block text-[13px] font-semibold text-cp-ink">
+                Paciente <span className="text-cp-danger">*</span>
               </label>
               <Popover open={patientSearchOpen} onOpenChange={setPatientSearchOpen}>
+                <IconField icon={UserIcon}>
                 <PopoverTrigger asChild>
                   <button
-                    className="w-full flex items-center justify-between border rounded-md px-3 py-2 text-sm bg-white hover:border-teal-400 transition-colors"
+                    type="button"
+                    className="flex w-full items-center justify-between border bg-white px-3 text-sm transition-colors hover:border-cp-sage"
                     data-testid="button-select-patient"
                   >
-                    <span className={selectedPatient ? "text-slate-800" : "text-slate-400"}>
+                    <span className={selectedPatient ? "text-cp-ink" : "text-cp-subtle"}>
                       {selectedPatient ? selectedPatient.fullName : "Buscar paciente..."}
                     </span>
-                    <ChevronDown className="h-4 w-4 text-slate-400" />
+                    <ChevronDown className="h-4 w-4 text-cp-subtle" />
                   </button>
                 </PopoverTrigger>
+                </IconField>
                 <PopoverContent className="w-[340px] p-0" align="start">
                   <Command>
                     <CommandInput
@@ -869,7 +809,7 @@ export default function Meetings() {
                 </PopoverContent>
               </Popover>
               {selectedPatient && !selectedPatient.email && (
-                <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                <p className="mt-1 flex items-center gap-1 text-xs text-cp-warning">
                   <AlertCircle className="h-3 w-3" />
                   Esta paciente não possui e-mail cadastrado. Compartilhe o link manualmente.
                 </p>
@@ -878,30 +818,35 @@ export default function Meetings() {
 
             {/* Title */}
             <div>
-              <label className="text-sm font-medium text-slate-700 mb-1.5 block">Título da sessão</label>
+              <label className="mb-1.5 block text-[13px] font-semibold text-cp-ink">Título da sessão</label>
+              <IconField icon={FileText}>
               <Input
                 value={createForm.title}
                 onChange={(e) => setCreateForm((f) => ({ ...f, title: e.target.value }))}
                 placeholder={selectedPatient ? `Sessão com ${selectedPatient.fullName}` : "Título da sessão"}
                 data-testid="input-meeting-title"
               />
+              </IconField>
             </div>
 
             {/* Date/time + Duration */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-sm font-medium text-slate-700 mb-1.5 block">
-                  Data e horário <span className="text-red-500">*</span>
+                <label className="mb-1.5 block text-[13px] font-semibold text-cp-ink">
+                  Data e horário <span className="text-cp-danger">*</span>
                 </label>
+                <IconField icon={CalendarDays}>
                 <Input
                   type="datetime-local"
                   value={createForm.scheduledAt}
                   onChange={(e) => setCreateForm((f) => ({ ...f, scheduledAt: e.target.value }))}
                   data-testid="input-meeting-datetime"
                 />
+                </IconField>
               </div>
               <div>
-                <label className="text-sm font-medium text-slate-700 mb-1.5 block">Duração</label>
+                <label className="mb-1.5 block text-[13px] font-semibold text-cp-ink">Duração</label>
+                <IconField icon={Clock}>
                 <Select
                   value={createForm.durationMinutes}
                   onValueChange={(v) => setCreateForm((f) => ({ ...f, durationMinutes: v }))}
@@ -917,30 +862,33 @@ export default function Meetings() {
                     <SelectItem value="90">90 min</SelectItem>
                   </SelectContent>
                 </Select>
+                </IconField>
               </div>
             </div>
 
             {/* Description */}
             <div>
-              <label className="text-sm font-medium text-slate-700 mb-1.5 block">Descrição / pauta (opcional)</label>
-              <Textarea
+              <label className="mb-1.5 block text-[13px] font-semibold text-cp-ink">Descrição / pauta (opcional)</label>
+              <CharCountTextarea
+                max={500}
                 value={createForm.description}
                 onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
                 placeholder="Assuntos a abordar..."
-                rows={2}
                 data-testid="input-meeting-description"
               />
             </div>
 
             {/* Send link toggle */}
             <div className={cn(
-              "rounded-lg border p-3 space-y-1.5",
-              !googleConnected ? "border-amber-200 bg-amber-50" : "border-slate-200"
+              "space-y-1.5 rounded-xl border p-3",
+              !googleConnected ? "border-cp-warning/25 bg-cp-warning-soft" : "border-cp-sage/40 bg-cp-sage-soft/60"
             )}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Send className={cn("h-4 w-4", !googleConnected ? "text-amber-500" : "text-teal-500")} />
-                  <span className="text-sm font-medium text-slate-700">Enviar link para a paciente agora</span>
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white">
+                    <Send className={cn("h-4 w-4", !googleConnected ? "text-cp-warning" : "text-cp-sage-ink")} />
+                  </span>
+                  <span className="text-sm font-medium text-cp-ink">Enviar link para o paciente agora</span>
                 </div>
                 <button
                   type="button"
@@ -949,8 +897,8 @@ export default function Meetings() {
                   className={cn(
                     "relative inline-flex h-5 w-10 shrink-0 rounded-full border-2 border-transparent transition-colors",
                     createForm.sendLinkNow && selectedPatient?.email && googleConnected
-                      ? "bg-teal-600"
-                      : "bg-slate-200",
+                      ? "bg-cp-action"
+                      : "bg-cp-border",
                     (!selectedPatient?.email || !googleConnected) && "opacity-40 cursor-not-allowed"
                   )}
                   data-testid="toggle-send-link"
@@ -966,16 +914,16 @@ export default function Meetings() {
                 </button>
               </div>
               {!googleConnected ? (
-                <p className="text-xs text-amber-700 ml-6 flex items-center gap-1">
+                <p className="ml-10 flex items-center gap-1 text-xs text-cp-warning">
                   <AlertCircle className="h-3 w-3 shrink-0" />
                   Conecte o Google Calendar para enviar o link por e-mail automaticamente.
                 </p>
               ) : selectedPatient?.email ? (
-                <p className="text-xs text-slate-400 ml-6">
+                <p className="ml-10 text-xs text-cp-muted">
                   e-mail: {selectedPatient.email} (qualquer e-mail funciona, não precisa ser Gmail)
                 </p>
               ) : selectedPatient ? (
-                <p className="text-xs text-amber-600 ml-6 flex items-center gap-1">
+                <p className="ml-10 flex items-center gap-1 text-xs text-cp-warning">
                   <AlertCircle className="h-3 w-3 shrink-0" />
                   Esta paciente não tem e-mail cadastrado. Cadastre o e-mail no perfil da paciente para enviar o link.
                 </p>
@@ -984,43 +932,35 @@ export default function Meetings() {
 
             {/* Google Calendar notice */}
             {googleConnected ? (
-              <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-lg p-3">
-                <CheckCircle2 className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
-                <p className="text-xs text-blue-700">
-                  Um evento será criado no seu Google Calendar e um link do Google Meet será gerado automaticamente.
-                  O link abrirá no Google Meet quando a sessão for iniciada.
-                </p>
-              </div>
+              <InfoBanner variant="info">
+                Um evento será criado no seu Google Calendar e um link do Google Meet será gerado automaticamente.
+                O link abrirá no Google Meet quando a sessão for iniciada.
+              </InfoBanner>
             ) : (
-              <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                <AlertCircle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-xs text-amber-800 font-medium">Google Calendar não conectado</p>
-                  <p className="text-xs text-amber-700 mt-0.5">
-                    A reunião será criada sem link do Meet. Para gerar links e enviar convites automaticamente,
-                    conecte sua conta em{" "}
-                    <Link href="/profile" className="underline font-semibold" onClick={() => setIsCreateOpen(false)}>
-                      Meu Perfil
-                    </Link>.
-                  </p>
-                </div>
-              </div>
+              <InfoBanner variant="warning" title="Google Calendar não conectado">
+                A reunião será criada sem link do Meet. Para gerar links e enviar convites automaticamente,
+                conecte sua conta em{" "}
+                <Link href="/profile" className="font-semibold underline" onClick={() => setIsCreateOpen(false)}>
+                  Meu Perfil
+                </Link>.
+              </InfoBanner>
             )}
           </div>
 
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setIsCreateOpen(false)}>
+          <DialogFooter className="flex-row justify-between gap-3 sm:justify-between">
+            <button type="button" className={cpButton.subtle} onClick={() => setIsCreateOpen(false)}>
               Cancelar
-            </Button>
-            <Button
-              className="bg-teal-600 hover:bg-teal-700"
+            </button>
+            <button
+              type="button"
+              className={cpButton.primary}
               onClick={handleCreate}
               disabled={isCreating || !selectedPatient}
               data-testid="button-create-meeting-submit"
             >
-              {isCreating ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Video className="h-4 w-4 mr-1" />}
+              {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />}
               Criar Reunião
-            </Button>
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1108,7 +1048,7 @@ export default function Meetings() {
               <>
                 <Button variant="outline" onClick={() => setEditingNotes(false)}>Cancelar</Button>
                 <Button
-                  className="bg-teal-600 hover:bg-teal-700"
+                  className="bg-cp-action hover:bg-cp-action-hover"
                   onClick={() => viewNotesMeeting && saveNotesMutation.mutate({ id: viewNotesMeeting.id, notes: notesText })}
                   disabled={saveNotesMutation.isPending}
                 >
