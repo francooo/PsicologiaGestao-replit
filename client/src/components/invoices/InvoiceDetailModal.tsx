@@ -8,7 +8,6 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -16,9 +15,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Download, ZoomIn, ZoomOut, Image as ImageIcon, FileText } from "lucide-react";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
+import { Download, ZoomIn, ZoomOut, Image as ImageIcon, FileText, Receipt, Ban } from "lucide-react";
+import { cpButton } from "@/components/cp/PageHeader";
+import { InvoiceStatusBadge, emissionDate, money, uploadDate } from "./invoice-ui";
 
 export interface InvoiceDetailRow {
   id: number;
@@ -70,13 +69,6 @@ export interface InvoiceDetailRow {
   [key: string]: unknown;
 }
 
-function formatCurrency(value: string | null): string {
-  if (value == null || value === "") return "—";
-  const n = parseFloat(value);
-  if (isNaN(n)) return "—";
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
-}
-
 function field(value: unknown): string {
   if (value == null || value === "") return "—";
   return String(value);
@@ -88,7 +80,6 @@ interface InvoiceDetailModalProps {
   invoice: InvoiceDetailRow | null;
   isAdmin: boolean;
   onDownload: (id: number) => void;
-  onEdit?: (id: number) => void;
   onCancel?: (id: number) => void;
   onStatusChange?: (id: number, status: string) => void;
 }
@@ -99,7 +90,6 @@ export function InvoiceDetailModal({
   invoice,
   isAdmin,
   onDownload,
-  onEdit,
   onCancel,
   onStatusChange,
 }: InvoiceDetailModalProps) {
@@ -143,67 +133,62 @@ export function InvoiceDetailModal({
 
   if (!invoice) return null;
 
-  const getStatusBadge = (s: string) => {
-    const map: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-      ativa: { label: "Ativa", variant: "default" },
-      pendente: { label: "Pendente", variant: "secondary" },
-      cancelada: { label: "Cancelada", variant: "destructive" },
-    };
-    const { label, variant } = map[s] ?? { label: s, variant: "outline" };
-    return <Badge variant={variant}>{label}</Badge>;
-  };
-
   const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
-    <div className="mb-4">
-      <h3 className="text-sm font-semibold text-neutral-dark mb-2">{title}</h3>
-      <div className="space-y-1 text-sm">{children}</div>
+    <div className="mb-3 rounded-xl border border-cp-divider bg-white p-4">
+      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-cp-muted">{title}</h3>
+      <dl className="space-y-1.5 text-sm">{children}</dl>
     </div>
   );
 
   const Row = ({ label, value }: { label: string; value: string }) =>
     value === "—" ? null : (
       <div className="flex gap-2">
-        <dt className="text-neutral-dark shrink-0 w-36">{label}</dt>
-        <dd className="break-words">{value}</dd>
+        <dt className="w-36 shrink-0 text-cp-muted">{label}</dt>
+        <dd className="break-words text-cp-ink">{value}</dd>
       </div>
     );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            Nota Fiscal Nº {invoice.numeroNota ?? invoice.id}
-            {invoice.serie != null && invoice.serie !== "" && (
-              <span className="text-muted-foreground font-normal">Série {invoice.serie}</span>
-            )}
-            {getStatusBadge(invoice.status)}
-          </DialogTitle>
-          <p className="text-sm text-muted-foreground">
-            Emissão: {invoice.dataEmissao ? format(new Date(invoice.dataEmissao), "dd/MM/yyyy", { locale: ptBR }) : "—"}
-            {invoice.dataUpload && ` · Registrada em ${format(new Date(invoice.dataUpload), "dd/MM/yyyy HH:mm", { locale: ptBR })}`}
-            {isAdmin && invoice.user?.fullName && ` · ${invoice.user.fullName}`}
-          </p>
+      <DialogContent className="flex max-h-[92vh] max-w-2xl flex-col overflow-hidden rounded-2xl bg-cp-bg">
+        <DialogHeader className="flex flex-row items-start gap-3 space-y-0 text-left">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-cp-sage-soft text-cp-sage-ink">
+            <Receipt className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <DialogTitle className="flex flex-wrap items-center gap-2 text-[20px] font-bold text-cp-ink">
+              Nota Fiscal Nº {invoice.numeroNota ?? invoice.id}
+              {invoice.serie != null && invoice.serie !== "" && (
+                <span className="text-base font-normal text-cp-muted">Série {invoice.serie}</span>
+              )}
+              <InvoiceStatusBadge status={invoice.status} />
+            </DialogTitle>
+            <p className="text-sm text-cp-muted">
+              Emissão: {emissionDate(invoice.dataEmissao)}
+              {invoice.dataUpload && ` · Registrada em ${uploadDate(invoice.dataUpload)}`}
+              {isAdmin && invoice.user?.fullName && ` · ${invoice.user.fullName}`}
+            </p>
+          </div>
         </DialogHeader>
 
         <Tabs defaultValue="dados" className="flex-1 overflow-hidden flex flex-col min-h-0">
-          <TabsList>
-            <TabsTrigger value="dados" className="gap-1">
+          <TabsList className="h-auto justify-start gap-1 rounded-xl bg-white p-1">
+            <TabsTrigger value="dados" className="gap-1.5 rounded-lg data-[state=active]:bg-cp-sage-soft data-[state=active]:text-cp-sage-ink data-[state=active]:shadow-none">
               <FileText className="w-4 h-4" />
               Dados da Nota
             </TabsTrigger>
-            <TabsTrigger value="imagem" className="gap-1">
+            <TabsTrigger value="imagem" className="gap-1.5 rounded-lg data-[state=active]:bg-cp-sage-soft data-[state=active]:text-cp-sage-ink data-[state=active]:shadow-none">
               <ImageIcon className="w-4 h-4" />
               Imagem Original
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="dados" className="flex-1 overflow-y-auto mt-3 pr-2 space-y-2">
+          <TabsContent value="dados" className="rounded-xl focus-visible:ring-1 focus-visible:ring-cp-action/40 focus-visible:ring-offset-0 flex-1 overflow-y-auto mt-3 pr-2 space-y-2">
             <Section title="Identificação">
               <Row label="Chave NF-e" value={field(invoice.chaveNfe)} />
               <Row label="Número" value={field(invoice.numeroNota)} />
               <Row label="Série" value={field(invoice.serie)} />
-              <Row label="Data emissão" value={invoice.dataEmissao ? format(new Date(invoice.dataEmissao), "dd/MM/yyyy", { locale: ptBR }) : "—"} />
+              <Row label="Data emissão" value={emissionDate(invoice.dataEmissao)} />
               <Row label="Cód. verificação" value={field(invoice.codigoVerificacao)} />
               <Row label="Protocolo" value={field(invoice.protocoloAutorizacao)} />
             </Section>
@@ -236,39 +221,39 @@ export function InvoiceDetailModal({
               <Row label="CNAE" value={field(invoice.codigoCnae)} />
             </Section>
             <Section title="Tributos e valores">
-              <Row label="Valor serviços" value={formatCurrency(invoice.valorServicos ?? null)} />
-              <Row label="Deduções" value={formatCurrency(invoice.valorDeducoes ?? null)} />
-              <Row label="Base de cálculo" value={formatCurrency(invoice.baseCalculo ?? null)} />
-              <Row label="Valor ISS" value={formatCurrency(invoice.valorIss ?? null)} />
-              <Row label="PIS" value={formatCurrency(invoice.valorPis ?? null)} />
-              <Row label="COFINS" value={formatCurrency(invoice.valorCofins ?? null)} />
-              <Row label="INSS" value={formatCurrency(invoice.valorInss ?? null)} />
-              <Row label="IR" value={formatCurrency(invoice.valorIr ?? null)} />
-              <Row label="CSLL" value={formatCurrency(invoice.valorCsll ?? null)} />
-              <Row label="Valor líquido" value={formatCurrency(invoice.valorLiquido)} />
+              <Row label="Valor serviços" value={money(invoice.valorServicos ?? null)} />
+              <Row label="Deduções" value={money(invoice.valorDeducoes ?? null)} />
+              <Row label="Base de cálculo" value={money(invoice.baseCalculo ?? null)} />
+              <Row label="Valor ISS" value={money(invoice.valorIss ?? null)} />
+              <Row label="PIS" value={money(invoice.valorPis ?? null)} />
+              <Row label="COFINS" value={money(invoice.valorCofins ?? null)} />
+              <Row label="INSS" value={money(invoice.valorInss ?? null)} />
+              <Row label="IR" value={money(invoice.valorIr ?? null)} />
+              <Row label="CSLL" value={money(invoice.valorCsll ?? null)} />
+              <Row label="Valor líquido" value={money(invoice.valorLiquido)} />
             </Section>
             {field(invoice.observacoes) !== "—" && (
               <Section title="Observações">
-                <p className="whitespace-pre-wrap">{invoice.observacoes}</p>
+                <p className="whitespace-pre-wrap text-cp-ink">{invoice.observacoes}</p>
               </Section>
             )}
           </TabsContent>
 
-          <TabsContent value="imagem" className="flex-1 overflow-hidden mt-3 min-h-[200px]">
+          <TabsContent value="imagem" className="rounded-xl focus-visible:ring-1 focus-visible:ring-cp-action/40 focus-visible:ring-offset-0 flex-1 overflow-hidden mt-3 min-h-[200px]">
             <div className="flex flex-col h-full">
               <div className="flex gap-2 mb-2">
-                <Button variant="outline" size="sm" onClick={() => setZoom((z) => Math.min(2, z + 0.25))}>
+                <Button variant="outline" size="sm" className="rounded-lg border-cp-border" onClick={() => setZoom((z) => Math.min(2, z + 0.25))}>
                   <ZoomIn className="w-4 h-4" />
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))}>
+                <Button variant="outline" size="sm" className="rounded-lg border-cp-border" onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))}>
                   <ZoomOut className="w-4 h-4" />
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => onDownload(invoice.id)}>
+                <Button variant="outline" size="sm" className="rounded-lg border-cp-border" onClick={() => onDownload(invoice.id)}>
                   <Download className="w-4 h-4 mr-1" />
                   Baixar
                 </Button>
               </div>
-              <div className="flex-1 overflow-auto bg-neutral-100 dark:bg-neutral-800 rounded-lg p-4 flex items-center justify-center min-h-[240px]">
+              <div className="flex-1 overflow-auto rounded-xl border border-dashed border-cp-border bg-white p-4 flex items-center justify-center min-h-[240px]">
                 {imageUrl ? (
                   <img
                     src={imageUrl}
@@ -277,48 +262,46 @@ export function InvoiceDetailModal({
                     style={{ transform: `scale(${zoom})` }}
                   />
                 ) : invoice.imagePath ? (
-                  <p className="text-sm text-muted-foreground">Carregando imagem…</p>
+                  <p className="text-sm text-cp-muted">Carregando imagem…</p>
                 ) : (
-                  <p className="text-sm text-muted-foreground">Imagem não disponível.</p>
+                  <p className="text-sm text-cp-muted">Imagem não disponível.</p>
                 )}
               </div>
             </div>
           </TabsContent>
         </Tabs>
 
-        <DialogFooter className="border-t pt-4 flex-wrap gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="flex-wrap gap-2 border-t border-cp-divider pt-4 sm:justify-between">
+          <button type="button" className={cpButton.secondary} onClick={() => onOpenChange(false)}>
             Fechar
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => onDownload(invoice.id)}>
-            <Download className="w-4 h-4 mr-1" />
-            Baixar imagem
-          </Button>
-          {!isAdmin && onEdit && (
-            <Button size="sm" onClick={() => onEdit(invoice.id)}>
-              Editar
-            </Button>
-          )}
-          {!isAdmin && onCancel && invoice.status !== "cancelada" && (
-            <Button size="sm" variant="destructive" onClick={() => onCancel(invoice.id)}>
-              Cancelar Nota
-            </Button>
-          )}
-          {isAdmin && onStatusChange && (
-            <Select
-              value={invoice.status}
-              onValueChange={(value) => onStatusChange(invoice.id, value)}
-            >
-              <SelectTrigger className="w-36">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ativa">Ativa</SelectItem>
-                <SelectItem value="pendente">Pendente</SelectItem>
-                <SelectItem value="cancelada">Cancelada</SelectItem>
-              </SelectContent>
-            </Select>
-          )}
+          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className={cpButton.secondary} onClick={() => onDownload(invoice.id)}>
+              <Download className="h-4 w-4" />
+              Baixar imagem
+            </button>
+            {!isAdmin && onCancel && invoice.status !== "cancelada" && (
+              <button type="button" className={`${cpButton.secondary} border-cp-danger/30 text-cp-danger hover:bg-cp-danger-soft`} onClick={() => onCancel(invoice.id)}>
+                <Ban className="h-4 w-4" />
+                Cancelar Nota
+              </button>
+            )}
+            {isAdmin && onStatusChange && (
+              <Select
+                value={invoice.status}
+                onValueChange={(value) => onStatusChange(invoice.id, value)}
+              >
+                <SelectTrigger className="h-11 w-40 rounded-xl border-cp-border" aria-label="Alterar status">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ativa">Ativa</SelectItem>
+                  <SelectItem value="pendente">Pendente</SelectItem>
+                  <SelectItem value="cancelada">Cancelada</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

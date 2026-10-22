@@ -4,21 +4,29 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import Sidebar from "@/components/sidebar";
 import MobileNav from "@/components/mobile-nav";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { Sheet } from "@/components/ui/sheet";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Sheet, SheetTrigger } from "@/components/ui/sheet";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { InvoiceRegisterDrawer } from "@/components/invoices/InvoiceRegisterDrawer";
 import { InvoiceDetailModal, type InvoiceDetailRow } from "@/components/invoices/InvoiceDetailModal";
+import {
+  INVOICE_STATUS_OPTIONS,
+  InvoiceTable,
+  Pagination,
+  cpCard,
+  emissionDate,
+  uploadDate,
+  useDebouncedValue,
+} from "@/components/invoices/invoice-ui";
 import {
   Select,
   SelectContent,
@@ -26,18 +34,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Upload,
-  Download,
-  Trash2,
-  FileText,
-  Loader2,
-  AlertCircle,
-  DollarSign,
-  Receipt,
-} from "lucide-react";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
+import { Upload, FileText, Receipt, DollarSign, Wallet, Search, Calendar, FileDown, Filter, Loader2 } from "lucide-react";
+import { PageHeader, cpButton } from "@/components/cp/PageHeader";
+import { MetricCard } from "@/components/cp/MetricCard";
+import { IconField } from "@/components/cp/fields";
+import { downloadCsv, formatBRL } from "@/lib/money";
+import { cn } from "@/lib/utils";
 
 export interface InvoiceRow {
   id: number;
@@ -69,25 +71,9 @@ interface SummaryResponse {
 }
 
 const PAGE_SIZE = 20;
-const STATUS_OPTIONS = [
-  { value: "all", label: "Todos" },
-  { value: "ativa", label: "Ativa" },
-  { value: "pendente", label: "Pendente" },
-  { value: "cancelada", label: "Cancelada" },
-];
+const fieldLabel = "mb-1.5 block text-[13px] font-semibold text-cp-ink";
 
-function formatChaveNfe(chave: string | null): string {
-  if (!chave) return "—";
-  if (chave.length <= 20) return chave;
-  return `${chave.slice(0, 8)}...${chave.slice(-8)}`;
-}
-
-function formatCurrency(value: string | null): string {
-  if (value == null || value === "") return "—";
-  const n = parseFloat(value);
-  if (isNaN(n)) return "—";
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
-}
+type PendingAction = { kind: "delete" | "cancel"; id: number } | null;
 
 export default function Invoices() {
   const { toast } = useToast();
@@ -97,26 +83,27 @@ export default function Invoices() {
   const [dataEmissaoTo, setDataEmissaoTo] = useState("");
   const [status, setStatus] = useState("all");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search.trim());
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
+  const [pending, setPending] = useState<PendingAction>(null);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const filterParams = useMemo(() => {
+    const p = new URLSearchParams();
+    if (dataEmissaoFrom) p.set("data_emissao_from", dataEmissaoFrom);
+    if (dataEmissaoTo) p.set("data_emissao_to", dataEmissaoTo);
+    if (status && status !== "all") p.set("status", status);
+    return p;
+  }, [dataEmissaoFrom, dataEmissaoTo, status]);
 
   const queryParams = useMemo(() => {
-    const p = new URLSearchParams();
+    const p = new URLSearchParams(filterParams);
     p.set("limit", String(PAGE_SIZE));
     p.set("offset", String(page * PAGE_SIZE));
-    if (dataEmissaoFrom) p.set("data_emissao_from", dataEmissaoFrom);
-    if (dataEmissaoTo) p.set("data_emissao_to", dataEmissaoTo);
-    if (status && status !== "all") p.set("status", status);
-    if (search.trim()) p.set("search", search.trim());
+    if (debouncedSearch) p.set("search", debouncedSearch);
     return p.toString();
-  }, [page, dataEmissaoFrom, dataEmissaoTo, status, search]);
-
-  const summaryParams = useMemo(() => {
-    const p = new URLSearchParams();
-    if (dataEmissaoFrom) p.set("data_emissao_from", dataEmissaoFrom);
-    if (dataEmissaoTo) p.set("data_emissao_to", dataEmissaoTo);
-    if (status && status !== "all") p.set("status", status);
-    return p.toString();
-  }, [dataEmissaoFrom, dataEmissaoTo, status]);
+  }, [filterParams, page, debouncedSearch]);
+  const summaryParams = filterParams.toString();
 
   const { data, isLoading } = useQuery<InvoicesResponse>({
     queryKey: ["/api/invoices", queryParams],
@@ -136,265 +123,171 @@ export default function Invoices() {
     },
   });
 
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/invoices/summary"] });
+  };
+
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => apiRequest("DELETE", `/api/invoices/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/invoices/summary"] });
+      refresh();
       toast({ title: "Sucesso", description: "Nota fiscal excluída com sucesso." });
       setSelectedInvoiceId(null);
+      setPending(null);
     },
-    onError: (e: Error) => {
-      toast({ title: "Erro", description: e.message, variant: "destructive" });
-    },
+    onError: (e: Error) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
   });
 
   const statusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: number; status: string }) =>
       apiRequest("PATCH", `/api/invoices/${id}/status`, { status }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/invoices"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/invoices/summary"] });
+      refresh();
       toast({ title: "Sucesso", description: "Status atualizado." });
+      setPending(null);
     },
-    onError: (e: Error) => {
-      toast({ title: "Erro", description: e.message, variant: "destructive" });
-    },
+    onError: (e: Error) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
   });
 
   const invoices = data?.invoices ?? [];
   const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const handleDownload = (id: number) => {
     window.open(`/api/invoices/${id}/download`, "_blank");
   };
 
-  const handleDelete = (id: number) => {
-    if (confirm("Tem certeza que deseja excluir esta nota fiscal?")) deleteMutation.mutate(id);
-  };
-
-  const handleCancelNote = (id: number) => {
-    if (confirm("Tem certeza que deseja cancelar esta nota fiscal?")) statusMutation.mutate({ id, status: "cancelada" });
-  };
-
-  const handleExportCsv = () => {
-    const headers = ["Chave NF-e", "Número", "Série", "Data Emissão", "Tomador", "Valor Líquido", "Status", "Registrada em"];
-    const rows = invoices.map((inv) => [
-      inv.chaveNfe ?? "",
-      inv.numeroNota ?? "",
-      inv.serie ?? "",
-      inv.dataEmissao ?? "",
-      inv.tomadorNome ?? "",
-      inv.valorLiquido ?? "",
-      inv.status ?? "",
-      inv.dataUpload ? format(new Date(inv.dataUpload), "dd/MM/yyyy HH:mm", { locale: ptBR }) : "",
-    ]);
-    const csv = [headers.join(";"), ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(";"))].join("\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "minhas-notas-fiscais.csv";
-    a.click();
-    URL.revokeObjectURL(a.href);
-    toast({ title: "Exportado", description: "CSV baixado com sucesso." });
-  };
-
-  const getStatusBadge = (s: string) => {
-    const map: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-      ativa: { label: "Ativa", variant: "default" },
-      pendente: { label: "Pendente", variant: "secondary" },
-      cancelada: { label: "Cancelada", variant: "destructive" },
-    };
-    const { label, variant } = map[s] ?? { label: s, variant: "outline" };
-    return <Badge variant={variant}>{label}</Badge>;
+  // Exports every page of the current filter (the API caps each page at 100)
+  const handleExportCsv = async () => {
+    setIsExporting(true);
+    try {
+      const all: InvoiceRow[] = [];
+      for (let offset = 0; ; offset += 100) {
+        const p = new URLSearchParams(filterParams);
+        p.set("limit", "100");
+        p.set("offset", String(offset));
+        if (debouncedSearch) p.set("search", debouncedSearch);
+        const res = await fetch(`/api/invoices?${p}`, { credentials: "include" });
+        if (!res.ok) throw new Error("Erro ao exportar");
+        const page: InvoicesResponse = await res.json();
+        all.push(...page.invoices);
+        if (all.length >= page.total || page.invoices.length === 0) break;
+      }
+      downloadCsv(
+        "minhas-notas-fiscais.csv",
+        ["Chave NF-e", "Número", "Série", "Data Emissão", "Tomador", "Valor Líquido", "Status", "Registrada em"],
+        all.map((inv) => [
+          inv.chaveNfe ?? "",
+          inv.numeroNota ?? "",
+          inv.serie ?? "",
+          emissionDate(inv.dataEmissao),
+          inv.tomadorNome ?? "",
+          inv.valorLiquido ? Number(inv.valorLiquido).toFixed(2).replace(".", ",") : "",
+          inv.status ?? "",
+          uploadDate(inv.dataUpload),
+        ]),
+      );
+      toast({ title: "Exportado", description: `${all.length} nota(s) no CSV.` });
+    } catch (e) {
+      toast({ title: "Erro", description: e instanceof Error ? e.message : "Falha ao exportar", variant: "destructive" });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const selectedInvoice = selectedInvoiceId != null ? invoices.find((i) => i.id === selectedInvoiceId) : null;
+  const resetPage = () => setPage(0);
 
   return (
-    <div className="flex h-screen bg-neutral-lightest">
+    <div className="flex h-screen bg-cp-bg">
       <Sidebar />
-      <div className="flex-1 overflow-x-hidden ml-0 md:ml-64 pt-16 md:pt-0">
+      <div className="ml-0 flex-1 overflow-x-hidden pt-16 md:ml-64 md:pt-0">
         <MobileNav />
-        <main className="p-4 md:p-6 pb-20 md:pb-6">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-            <div>
-              <h1 className="text-2xl font-bold text-neutral-darkest" data-testid="text-page-title">
-                Minhas Notas Fiscais
-              </h1>
-              <p className="text-neutral-dark">Registre e gerencie suas notas fiscais de serviços</p>
-            </div>
-            <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-              <SheetTrigger asChild>
-                <Button data-testid="button-register-invoice">
-                  <Upload className="w-4 h-4 mr-2" />
+        <main className="p-4 pb-20 sm:px-7 sm:py-6">
+          <PageHeader
+            className="mb-6"
+            title="Minhas Notas Fiscais"
+            subtitle="Registre e gerencie suas notas fiscais de serviços"
+            phrase
+            actions={
+              <>
+                <button type="button" className={cpButton.secondary} onClick={handleExportCsv} disabled={total === 0 || isExporting}>
+                  {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+                  Exportar CSV
+                </button>
+                <button type="button" className={cpButton.primary} onClick={() => setDrawerOpen(true)} data-testid="button-register-invoice">
+                  <Upload className="h-4 w-4" />
                   Registrar Nota
-                </Button>
-              </SheetTrigger>
-              <InvoiceRegisterDrawer open={drawerOpen} onOpenChange={setDrawerOpen} />
-            </Sheet>
-          </div>
+                </button>
+              </>
+            }
+          />
+          <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+            <InvoiceRegisterDrawer open={drawerOpen} onOpenChange={setDrawerOpen} />
+          </Sheet>
 
           {/* Filtros */}
-          <div className="flex flex-wrap items-center gap-2 mb-4">
-            <Input
-              type="date"
-              placeholder="Data início"
-              className="w-40"
-              value={dataEmissaoFrom}
-              onChange={(e) => { setDataEmissaoFrom(e.target.value); setPage(0); }}
-            />
-            <Input
-              type="date"
-              placeholder="Data fim"
-              className="w-40"
-              value={dataEmissaoTo}
-              onChange={(e) => { setDataEmissaoTo(e.target.value); setPage(0); }}
-            />
-            <Select value={status} onValueChange={(v) => { setStatus(v); setPage(0); }}>
-              <SelectTrigger className="w-36">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUS_OPTIONS.map((o) => (
-                  <SelectItem key={o.value || "all"} value={o.value}>{o.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Input
-              placeholder="Buscar paciente/tomador"
-              className="w-48"
-              value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(0); }}
-            />
-            <Button variant="outline" size="sm" onClick={handleExportCsv} disabled={invoices.length === 0}>
-              Exportar CSV
-            </Button>
+          <div className={cn(cpCard, "mb-6 p-4 sm:p-5")}>
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <div>
+                <label className={fieldLabel} htmlFor="inv-from">Emissão de</label>
+                <IconField icon={Calendar}>
+                  <Input id="inv-from" type="date" value={dataEmissaoFrom} onChange={(e) => { setDataEmissaoFrom(e.target.value); resetPage(); }} />
+                </IconField>
+              </div>
+              <div>
+                <label className={fieldLabel} htmlFor="inv-to">Até</label>
+                <IconField icon={Calendar}>
+                  <Input id="inv-to" type="date" value={dataEmissaoTo} onChange={(e) => { setDataEmissaoTo(e.target.value); resetPage(); }} />
+                </IconField>
+              </div>
+              <div>
+                <span className={fieldLabel}>Status</span>
+                <IconField icon={Filter}>
+                  <Select value={status} onValueChange={(v) => { setStatus(v); resetPage(); }}>
+                    <SelectTrigger aria-label="Status"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {INVOICE_STATUS_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </IconField>
+              </div>
+              <div>
+                <label className={fieldLabel} htmlFor="inv-search">Buscar</label>
+                <IconField icon={Search}>
+                  <Input id="inv-search" placeholder="Paciente ou tomador" value={search} onChange={(e) => { setSearch(e.target.value); resetPage(); }} />
+                </IconField>
+              </div>
+            </div>
           </div>
 
-          {/* Cards resumo */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-neutral-dark">Total de Notas</p>
-                    <p className="text-2xl font-bold">{summary?.totalCount ?? 0}</p>
-                  </div>
-                  <Receipt className="w-8 h-8 text-primary" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-neutral-dark">Receita Bruta</p>
-                    <p className="text-2xl font-bold">{formatCurrency(summary?.sumValorServicos ?? null)}</p>
-                  </div>
-                  <DollarSign className="w-8 h-8 text-primary" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-neutral-dark">Receita Líquida</p>
-                    <p className="text-2xl font-bold">{formatCurrency(summary?.sumValorLiquido ?? null)}</p>
-                  </div>
-                  <FileText className="w-8 h-8 text-primary" />
-                </div>
-              </CardContent>
-            </Card>
+          {/* Resumo */}
+          <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+            <MetricCard icon={<Receipt className="h-6 w-6 text-cp-action" />} tint="bg-cp-action-soft" label="Total de notas" value={summary?.totalCount ?? 0} sub="no filtro atual" />
+            <MetricCard icon={<DollarSign className="h-6 w-6 text-cp-sage-ink" />} tint="bg-cp-sage-soft" label="Receita bruta" value={formatBRL(summary?.sumValorServicos ?? 0)} sub="valor dos serviços" />
+            <MetricCard icon={<Wallet className="h-6 w-6 text-cp-lavender-ink" />} tint="bg-cp-lavender-soft" label="Receita líquida" value={formatBRL(summary?.sumValorLiquido ?? 0)} sub="após deduções" />
           </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="w-5 h-5" />
-                Listagem
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                </div>
-              ) : !invoices.length ? (
-                <div className="text-center py-8 text-neutral-dark">
-                  <AlertCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                  <p>Nenhuma nota fiscal registrada.</p>
-                  <p className="text-sm mt-2">Clique em &quot;Registrar Nota&quot; para começar.</p>
-                </div>
-              ) : (
+          <div className={cn(cpCard, "p-4 sm:p-6")}>
+            <h3 className="mb-4 flex items-center gap-2 text-[20px] font-semibold text-cp-ink">
+              <FileText className="h-5 w-5 text-cp-muted" />
+              Notas registradas
+            </h3>
+            <InvoiceTable
+              rows={invoices}
+              isLoading={isLoading}
+              onOpen={setSelectedInvoiceId}
+              onDownload={handleDownload}
+              onDelete={(id) => setPending({ kind: "delete", id })}
+              empty={
                 <>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Chave NF-e</TableHead>
-                        <TableHead>Nº / Série</TableHead>
-                        <TableHead>Data Emissão</TableHead>
-                        <TableHead>Paciente / Tomador</TableHead>
-                        <TableHead>Valor Líquido</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Registrada em</TableHead>
-                        <TableHead className="text-right">Ações</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {invoices.map((inv) => (
-                        <TableRow
-                          key={inv.id}
-                          className="cursor-pointer"
-                          onClick={() => setSelectedInvoiceId(inv.id)}
-                          data-testid={`row-invoice-${inv.id}`}
-                        >
-                          <TableCell className="font-mono text-xs" title={inv.chaveNfe ?? undefined}>
-                            {formatChaveNfe(inv.chaveNfe)}
-                          </TableCell>
-                          <TableCell>{inv.numeroNota ?? "—"} {inv.serie ? `/ ${inv.serie}` : ""}</TableCell>
-                          <TableCell>{inv.dataEmissao ? format(new Date(inv.dataEmissao), "dd/MM/yyyy", { locale: ptBR }) : "—"}</TableCell>
-                          <TableCell className="max-w-[180px] truncate" title={inv.tomadorNome ?? undefined}>
-                            {inv.tomadorNome ?? "—"}
-                          </TableCell>
-                          <TableCell>{formatCurrency(inv.valorLiquido)}</TableCell>
-                          <TableCell>{getStatusBadge(inv.status)}</TableCell>
-                          <TableCell>{inv.dataUpload ? format(new Date(inv.dataUpload), "dd/MM/yyyy HH:mm", { locale: ptBR }) : "—"}</TableCell>
-                          <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center justify-end gap-1">
-                              <Button size="icon" variant="ghost" onClick={() => handleDownload(inv.id)} title="Baixar imagem">
-                                <Download className="w-4 h-4" />
-                              </Button>
-                              <Button size="icon" variant="ghost" onClick={() => handleDelete(inv.id)} title="Excluir" data-testid={`button-delete-${inv.id}`}>
-                                <Trash2 className="w-4 h-4 text-destructive" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                  {totalPages > 1 && (
-                    <div className="flex items-center justify-between mt-4">
-                      <p className="text-sm text-neutral-dark">
-                        Exibindo {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} de {total} notas
-                      </p>
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-                          Anterior
-                        </Button>
-                        <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage((p) => p + 1)}>
-                          Próxima
-                        </Button>
-                      </div>
-                    </div>
-                  )}
+                  <p className="text-sm font-medium text-cp-ink">Nenhuma nota fiscal encontrada</p>
+                  <p className="mt-1 text-xs text-cp-muted">Clique em "Registrar Nota" para começar.</p>
                 </>
-              )}
-            </CardContent>
-          </Card>
+              }
+            />
+            <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+          </div>
 
           <InvoiceDetailModal
             open={selectedInvoice != null}
@@ -402,9 +295,39 @@ export default function Invoices() {
             invoice={selectedInvoice as InvoiceDetailRow | null}
             isAdmin={false}
             onDownload={handleDownload}
-            onEdit={() => toast({ title: "Em breve", description: "Edição de nota fiscal em desenvolvimento." })}
-            onCancel={handleCancelNote}
+            onCancel={(id) => setPending({ kind: "cancel", id })}
           />
+
+          <AlertDialog open={pending !== null} onOpenChange={(o) => { if (!o) setPending(null); }}>
+            <AlertDialogContent className="rounded-2xl">
+              <AlertDialogHeader>
+                <AlertDialogTitle className="text-cp-ink">
+                  {pending?.kind === "delete" ? "Excluir nota fiscal?" : "Cancelar nota fiscal?"}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {pending?.kind === "delete"
+                    ? "A nota e a imagem serão removidas definitivamente."
+                    : "A nota ficará marcada como cancelada e deixa de contar no faturamento."}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="rounded-xl">Voltar</AlertDialogCancel>
+                <AlertDialogAction
+                  className="rounded-xl bg-cp-danger hover:bg-cp-danger/90"
+                  disabled={deleteMutation.isPending || statusMutation.isPending}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (!pending) return;
+                    if (pending.kind === "delete") deleteMutation.mutate(pending.id);
+                    else statusMutation.mutate({ id: pending.id, status: "cancelada" });
+                  }}
+                >
+                  {(deleteMutation.isPending || statusMutation.isPending) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {pending?.kind === "delete" ? "Excluir" : "Cancelar nota"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </main>
       </div>
     </div>

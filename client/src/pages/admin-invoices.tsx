@@ -4,19 +4,8 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import Sidebar from "@/components/sidebar";
 import MobileNav from "@/components/mobile-nav";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   Select,
   SelectContent,
@@ -25,19 +14,29 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Download,
   FileText,
   Loader2,
   Users,
   CheckCircle2,
-  XCircle,
-  Filter,
+  Clock,
   DollarSign,
   Receipt,
+  Wallet,
+  Search,
+  Calendar,
+  Filter,
+  User as UserIcon,
+  FileDown,
 } from "lucide-react";
 import { InvoiceDetailModal, type InvoiceDetailRow } from "@/components/invoices/InvoiceDetailModal";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
+import { INVOICE_STATUS_OPTIONS, InvoiceTable, Pagination, cpCard, useDebouncedValue } from "@/components/invoices/invoice-ui";
+import { PageHeader, cpButton } from "@/components/cp/PageHeader";
+import { MetricCard } from "@/components/cp/MetricCard";
+import { IconField } from "@/components/cp/fields";
+import { StatusBadge } from "@/components/cp/StatusBadge";
+import { roleName } from "@/components/cp/status";
+import { formatBRL } from "@/lib/money";
+import { cn } from "@/lib/utils";
 
 interface InvoiceWithUser {
   id: number;
@@ -65,10 +64,12 @@ interface SummaryAdminResponse {
   sumValorLiquido: string;
 }
 
+type StatusUser = { id: number; fullName: string; email: string; role: string };
+
 interface InvoiceStatusResponse {
   referenceMonth: string;
-  sent: { id: number; fullName: string; email: string; role: string }[];
-  pending: { id: number; fullName: string; email: string; role: string }[];
+  sent: StatusUser[];
+  pending: StatusUser[];
   totalUsers: number;
   totalSent: number;
   totalPending: number;
@@ -81,24 +82,45 @@ interface PsychologistOption {
 }
 
 const PAGE_SIZE = 20;
-const STATUS_OPTIONS = [
-  { value: "all", label: "Todos" },
-  { value: "ativa", label: "Ativa" },
-  { value: "pendente", label: "Pendente" },
-  { value: "cancelada", label: "Cancelada" },
-];
+const fieldLabel = "mb-1.5 block text-[13px] font-semibold text-cp-ink";
+const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+  .map((label, i) => ({ value: String(i + 1).padStart(2, "0"), label }));
 
-function formatChaveNfe(chave: string | null): string {
-  if (!chave) return "—";
-  if (chave.length <= 20) return chave;
-  return `${chave.slice(0, 8)}...${chave.slice(-8)}`;
-}
+// Same underline tabs as the patient record
+const tabTrigger = [
+  "relative flex items-center gap-2 rounded-xl px-4 py-2.5 text-[15px] font-medium transition-all",
+  "text-cp-ink hover:bg-cp-hover data-[state=active]:bg-cp-sage-soft data-[state=active]:text-cp-sage-ink data-[state=active]:shadow-none",
+  "after:absolute after:bottom-0 after:left-3 after:right-3 after:h-[3px] after:rounded-full after:bg-cp-sage-ink after:scale-x-0 data-[state=active]:after:scale-x-100 after:transition-transform",
+].join(" ");
 
-function formatCurrency(value: string | null): string {
-  if (value == null || value === "") return "—";
-  const n = parseFloat(value);
-  if (isNaN(n)) return "—";
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
+function UserList({ title, icon, users, tone, empty, testPrefix }: {
+  title: string;
+  icon: React.ReactNode;
+  users: StatusUser[];
+  tone: "success" | "warning";
+  empty: string;
+  testPrefix: string;
+}) {
+  return (
+    <div className={cn(cpCard, "p-4 sm:p-6")}>
+      <h3 className="mb-4 flex items-center gap-2 text-[18px] font-semibold text-cp-ink">{icon}{title} ({users.length})</h3>
+      {users.length === 0 ? (
+        <p className="py-6 text-center text-sm text-cp-muted">{empty}</p>
+      ) : (
+        <ul className="space-y-2">
+          {users.map((u) => (
+            <li key={u.id} className="flex items-center justify-between gap-3 rounded-xl bg-cp-hover px-3 py-2.5" data-testid={`${testPrefix}-${u.id}`}>
+              <div className="min-w-0">
+                <p className="truncate font-medium text-cp-ink">{u.fullName}</p>
+                <p className="truncate text-sm text-cp-muted">{u.email}</p>
+              </div>
+              <StatusBadge label={roleName(u.role)} tone={tone} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 export default function AdminInvoices() {
@@ -109,23 +131,12 @@ export default function AdminInvoices() {
   const [dataEmissaoTo, setDataEmissaoTo] = useState("");
   const [status, setStatus] = useState("all");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search.trim());
   const [statusMonth, setStatusMonth] = useState((new Date().getMonth() + 1).toString().padStart(2, "0"));
   const [statusYear, setStatusYear] = useState(new Date().getFullYear().toString());
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(null);
 
   const statusReferenceMonth = `${statusYear}-${statusMonth}`;
-
-  const queryParams = useMemo(() => {
-    const p = new URLSearchParams();
-    p.set("limit", String(PAGE_SIZE));
-    p.set("offset", String(page * PAGE_SIZE));
-    if (psychologistId && psychologistId !== "all") p.set("psychologist_id", psychologistId);
-    if (dataEmissaoFrom) p.set("data_emissao_from", dataEmissaoFrom);
-    if (dataEmissaoTo) p.set("data_emissao_to", dataEmissaoTo);
-    if (status && status !== "all") p.set("status", status);
-    if (search.trim()) p.set("search", search.trim());
-    return p.toString();
-  }, [page, psychologistId, dataEmissaoFrom, dataEmissaoTo, status, search]);
 
   const summaryParams = useMemo(() => {
     const p = new URLSearchParams();
@@ -135,6 +146,14 @@ export default function AdminInvoices() {
     if (status && status !== "all") p.set("status", status);
     return p.toString();
   }, [psychologistId, dataEmissaoFrom, dataEmissaoTo, status]);
+
+  const queryParams = useMemo(() => {
+    const p = new URLSearchParams(summaryParams);
+    p.set("limit", String(PAGE_SIZE));
+    p.set("offset", String(page * PAGE_SIZE));
+    if (debouncedSearch) p.set("search", debouncedSearch);
+    return p.toString();
+  }, [summaryParams, page, debouncedSearch]);
 
   const { data: psychologistsData } = useQuery<PsychologistOption[]>({
     queryKey: ["/api/psychologists"],
@@ -158,7 +177,7 @@ export default function AdminInvoices() {
     },
   });
 
-  const { data: invoiceStatus } = useQuery<InvoiceStatusResponse>({
+  const { data: invoiceStatus, isLoading: isLoadingStatus, isError: isStatusError } = useQuery<InvoiceStatusResponse>({
     queryKey: ["/api/admin/invoices/status", statusReferenceMonth],
     queryFn: async () => {
       const res = await fetch(`/api/admin/invoices/status?referenceMonth=${statusReferenceMonth}`, { credentials: "include" });
@@ -169,7 +188,6 @@ export default function AdminInvoices() {
 
   const invoices = data?.invoices ?? [];
   const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const psychologists = psychologistsData ?? [];
 
   const handleDownload = (id: number) => {
@@ -193,188 +211,114 @@ export default function AdminInvoices() {
     window.open(`/api/admin/invoices/export?${summaryParams}`, "_blank");
   };
 
-  const getStatusBadge = (s: string) => {
-    const map: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-      ativa: { label: "Ativa", variant: "default" },
-      pendente: { label: "Pendente", variant: "secondary" },
-      cancelada: { label: "Cancelada", variant: "destructive" },
-    };
-    const { label, variant } = map[s] ?? { label: s, variant: "outline" };
-    return <Badge variant={variant}>{label}</Badge>;
-  };
-
   const selectedInvoice = selectedInvoiceId != null ? invoices.find((i) => i.id === selectedInvoiceId) : null;
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: 5 }, (_, i) => currentYear - i);
-  const months = [
-    { value: "01", label: "Janeiro" }, { value: "02", label: "Fevereiro" }, { value: "03", label: "Março" },
-    { value: "04", label: "Abril" }, { value: "05", label: "Maio" }, { value: "06", label: "Junho" },
-    { value: "07", label: "Julho" }, { value: "08", label: "Agosto" }, { value: "09", label: "Setembro" },
-    { value: "10", label: "Outubro" }, { value: "11", label: "Novembro" }, { value: "12", label: "Dezembro" },
-  ];
+  const resetPage = () => setPage(0);
 
   return (
-    <div className="flex h-screen bg-neutral-lightest">
+    <div className="flex h-screen bg-cp-bg">
       <Sidebar />
-      <div className="flex-1 overflow-x-hidden ml-0 md:ml-64 pt-16 md:pt-0">
+      <div className="ml-0 flex-1 overflow-x-hidden pt-16 md:ml-64 md:pt-0">
         <MobileNav />
-        <main className="p-4 md:p-6 pb-20 md:pb-6">
-          <div className="mb-6">
-            <h1 className="text-2xl font-bold text-neutral-darkest" data-testid="text-page-title">
-              Notas Fiscais — Todas as Psicólogas
-            </h1>
-            <p className="text-neutral-dark">Visão consolidada das notas fiscais da clínica</p>
-          </div>
+        <main className="p-4 pb-20 sm:px-7 sm:py-6">
+          <PageHeader
+            className="mb-6"
+            title="Gestão de Notas"
+            subtitle="Visão consolidada das notas fiscais de todas as psicólogas"
+            phrase
+          />
 
-          <Tabs defaultValue="all" className="space-y-4">
-            <TabsList>
-              <TabsTrigger value="all" data-testid="tab-all-invoices">
-                <FileText className="w-4 h-4 mr-2" />
+          <Tabs defaultValue="all" className="space-y-6">
+            <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-2xl border border-cp-divider bg-white p-1.5 shadow-[0_10px_40px_-22px_rgba(36,54,71,0.2)]">
+              <TabsTrigger value="all" className={tabTrigger} data-testid="tab-all-invoices">
+                <FileText className="h-4 w-4" />
                 Todas as Notas
               </TabsTrigger>
-              <TabsTrigger value="status" data-testid="tab-status">
-                <Users className="w-4 h-4 mr-2" />
+              <TabsTrigger value="status" className={tabTrigger} data-testid="tab-status">
+                <Users className="h-4 w-4" />
                 Status por Mês
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="all">
-              <div className="flex flex-wrap items-center gap-2 mb-4">
-                <Filter className="w-4 h-4 text-neutral-dark" />
-                <Select value={psychologistId} onValueChange={(v) => { setPsychologistId(v); setPage(0); }}>
-                  <SelectTrigger className="w-48" data-testid="filter-psychologist">
-                    <SelectValue placeholder="Psicóloga" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas as psicólogas</SelectItem>
-                    {psychologists.map((p) => (
-                      <SelectItem key={p.id} value={String(p.userId)}>
-                        {p.user?.fullName ?? `Psicóloga ${p.id}`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Input type="date" className="w-40" placeholder="Data início" value={dataEmissaoFrom} onChange={(e) => { setDataEmissaoFrom(e.target.value); setPage(0); }} />
-                <Input type="date" className="w-40" placeholder="Data fim" value={dataEmissaoTo} onChange={(e) => { setDataEmissaoTo(e.target.value); setPage(0); }} />
-                <Select value={status} onValueChange={(v) => { setStatus(v); setPage(0); }}>
-                  <SelectTrigger className="w-36"><SelectValue placeholder="Status" /></SelectTrigger>
-                  <SelectContent>
-                    {STATUS_OPTIONS.map((o) => <SelectItem key={o.value || "all"} value={o.value}>{o.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Input placeholder="Buscar" className="w-40" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} />
-                <Button variant="outline" size="sm" onClick={handleExportCsv}>Exportar CSV</Button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-neutral-dark">Total de Notas</p>
-                        <p className="text-2xl font-bold">{summary?.totalCount ?? 0}</p>
-                      </div>
-                      <Receipt className="w-8 h-8 text-primary" />
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-neutral-dark">Faturamento Bruto</p>
-                        <p className="text-2xl font-bold">{formatCurrency(summary?.sumValorServicos ?? null)}</p>
-                      </div>
-                      <DollarSign className="w-8 h-8 text-primary" />
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-neutral-dark">Faturamento Líquido</p>
-                        <p className="text-2xl font-bold">{formatCurrency(summary?.sumValorLiquido ?? null)}</p>
-                      </div>
-                      <FileText className="w-8 h-8 text-primary" />
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <FileText className="w-5 h-5" />
-                    Notas Fiscais
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {isLoading ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                    </div>
-                  ) : !invoices.length ? (
-                    <div className="text-center py-8 text-neutral-dark">
-                      <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                      <p>Nenhuma nota fiscal encontrada.</p>
-                    </div>
-                  ) : (
-                    <>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Chave NF-e</TableHead>
-                            <TableHead>Nº / Série</TableHead>
-                            <TableHead>Data Emissão</TableHead>
-                            <TableHead>Psicóloga</TableHead>
-                            <TableHead>Paciente / Tomador</TableHead>
-                            <TableHead>Valor Líquido</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>Registrada em</TableHead>
-                            <TableHead className="text-right">Ações</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {invoices.map((inv) => (
-                            <TableRow
-                              key={inv.id}
-                              className="cursor-pointer"
-                              onClick={() => setSelectedInvoiceId(inv.id)}
-                              data-testid={`row-invoice-${inv.id}`}
-                            >
-                              <TableCell className="font-mono text-xs" title={inv.chaveNfe ?? undefined}>{formatChaveNfe(inv.chaveNfe)}</TableCell>
-                              <TableCell>{inv.numeroNota ?? "—"} {inv.serie ? `/ ${inv.serie}` : ""}</TableCell>
-                              <TableCell>{inv.dataEmissao ? format(new Date(inv.dataEmissao), "dd/MM/yyyy", { locale: ptBR }) : "—"}</TableCell>
-                              <TableCell className="font-medium">{inv.user?.fullName ?? "—"}</TableCell>
-                              <TableCell className="max-w-[140px] truncate" title={inv.tomadorNome ?? undefined}>{inv.tomadorNome ?? "—"}</TableCell>
-                              <TableCell>{formatCurrency(inv.valorLiquido)}</TableCell>
-                              <TableCell>{getStatusBadge(inv.status)}</TableCell>
-                              <TableCell>{inv.dataUpload ? format(new Date(inv.dataUpload), "dd/MM/yyyy HH:mm", { locale: ptBR }) : "—"}</TableCell>
-                              <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                                <Button size="icon" variant="ghost" onClick={() => handleDownload(inv.id)} title="Baixar" data-testid={`button-download-${inv.id}`}>
-                                  <Download className="w-4 h-4" />
-                                </Button>
-                              </TableCell>
-                            </TableRow>
+            <TabsContent value="all" className="mt-0 space-y-6">
+              <div className={cn(cpCard, "p-4 sm:p-5")}>
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+                  <div className="col-span-2 lg:col-span-1">
+                    <span className={fieldLabel}>Psicóloga</span>
+                    <IconField icon={UserIcon}>
+                      <Select value={psychologistId} onValueChange={(v) => { setPsychologistId(v); resetPage(); }}>
+                        <SelectTrigger data-testid="filter-psychologist" aria-label="Psicóloga"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Todas</SelectItem>
+                          {psychologists.map((p) => (
+                            <SelectItem key={p.id} value={String(p.userId)}>
+                              {p.user?.fullName ?? `Psicóloga ${p.id}`}
+                            </SelectItem>
                           ))}
-                        </TableBody>
-                      </Table>
-                      {totalPages > 1 && (
-                        <div className="flex items-center justify-between mt-4">
-                          <p className="text-sm text-neutral-dark">
-                            Exibindo {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} de {total} notas
-                          </p>
-                          <div className="flex gap-2">
-                            <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Anterior</Button>
-                            <Button variant="outline" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage((p) => p + 1)}>Próxima</Button>
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </CardContent>
-              </Card>
+                        </SelectContent>
+                      </Select>
+                    </IconField>
+                  </div>
+                  <div>
+                    <label className={fieldLabel} htmlFor="ai-from">Emissão de</label>
+                    <IconField icon={Calendar}>
+                      <Input id="ai-from" type="date" value={dataEmissaoFrom} onChange={(e) => { setDataEmissaoFrom(e.target.value); resetPage(); }} />
+                    </IconField>
+                  </div>
+                  <div>
+                    <label className={fieldLabel} htmlFor="ai-to">Até</label>
+                    <IconField icon={Calendar}>
+                      <Input id="ai-to" type="date" value={dataEmissaoTo} onChange={(e) => { setDataEmissaoTo(e.target.value); resetPage(); }} />
+                    </IconField>
+                  </div>
+                  <div>
+                    <span className={fieldLabel}>Status</span>
+                    <IconField icon={Filter}>
+                      <Select value={status} onValueChange={(v) => { setStatus(v); resetPage(); }}>
+                        <SelectTrigger aria-label="Status"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {INVOICE_STATUS_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </IconField>
+                  </div>
+                  <div>
+                    <label className={fieldLabel} htmlFor="ai-search">Buscar</label>
+                    <IconField icon={Search}>
+                      <Input id="ai-search" placeholder="Tomador, nº…" value={search} onChange={(e) => { setSearch(e.target.value); resetPage(); }} />
+                    </IconField>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <MetricCard icon={<Receipt className="h-6 w-6 text-cp-action" />} tint="bg-cp-action-soft" label="Total de notas" value={summary?.totalCount ?? 0} sub="no filtro atual" />
+                <MetricCard icon={<DollarSign className="h-6 w-6 text-cp-sage-ink" />} tint="bg-cp-sage-soft" label="Faturamento bruto" value={formatBRL(summary?.sumValorServicos ?? 0)} sub="valor dos serviços" />
+                <MetricCard icon={<Wallet className="h-6 w-6 text-cp-lavender-ink" />} tint="bg-cp-lavender-soft" label="Faturamento líquido" value={formatBRL(summary?.sumValorLiquido ?? 0)} sub="após deduções" />
+              </div>
+
+              <div className={cn(cpCard, "p-4 sm:p-6")}>
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="flex items-center gap-2 text-[20px] font-semibold text-cp-ink">
+                    <FileText className="h-5 w-5 text-cp-muted" />
+                    Notas fiscais
+                  </h3>
+                  <button type="button" className={cpButton.secondary} onClick={handleExportCsv}>
+                    <FileDown className="h-4 w-4" />
+                    Exportar CSV
+                  </button>
+                </div>
+                <InvoiceTable
+                  rows={invoices}
+                  isLoading={isLoading}
+                  showPsychologist
+                  onOpen={setSelectedInvoiceId}
+                  onDownload={handleDownload}
+                  empty={<p className="text-sm font-medium text-cp-ink">Nenhuma nota fiscal encontrada</p>}
+                />
+                <Pagination page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+              </div>
 
               <InvoiceDetailModal
                 open={selectedInvoice != null}
@@ -386,116 +330,57 @@ export default function AdminInvoices() {
               />
             </TabsContent>
 
-            <TabsContent value="status">
-              <Card className="mb-4">
-                <CardHeader>
-                  <CardTitle>Selecione o mês de referência</CardTitle>
-                  <div className="flex gap-2 mt-2">
-                    <Select value={statusMonth} onValueChange={setStatusMonth}>
-                      <SelectTrigger className="w-32" data-testid="status-month"><SelectValue placeholder="Mês" /></SelectTrigger>
-                      <SelectContent>
-                        {months.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+            <TabsContent value="status" className="mt-0 space-y-6">
+              <div className={cn(cpCard, "flex flex-wrap items-end gap-3 p-4 sm:p-5")}>
+                <div>
+                  <span className={fieldLabel}>Mês de referência</span>
+                  <div className="flex gap-2">
+                    <IconField icon={Calendar} className="w-44">
+                      <Select value={statusMonth} onValueChange={setStatusMonth}>
+                        <SelectTrigger data-testid="status-month" aria-label="Mês"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {MONTHS.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </IconField>
                     <Select value={statusYear} onValueChange={setStatusYear}>
-                      <SelectTrigger className="w-24" data-testid="status-year"><SelectValue placeholder="Ano" /></SelectTrigger>
+                      <SelectTrigger className="h-11 w-28 rounded-xl border-cp-border" data-testid="status-year" aria-label="Ano"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {years.map((y) => <SelectItem key={y} value={y.toString()}>{y}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
-                </CardHeader>
-              </Card>
+                </div>
+              </div>
 
-              {invoiceStatus && (
+              {isLoadingStatus ? (
+                <div className="flex justify-center py-12"><Loader2 className="h-7 w-7 animate-spin text-cp-action" /></div>
+              ) : isStatusError || !invoiceStatus ? (
+                <p className="py-12 text-center text-sm text-cp-muted">Não foi possível carregar o status deste mês.</p>
+              ) : (
                 <>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                    <Card>
-                      <CardContent className="pt-6">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-sm text-neutral-dark">Total de Usuários</p>
-                            <p className="text-2xl font-bold">{invoiceStatus.totalUsers}</p>
-                          </div>
-                          <Users className="w-8 h-8 text-primary" />
-                        </div>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="pt-6">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-sm text-neutral-dark">Já enviaram</p>
-                            <p className="text-2xl font-bold text-green-600">{invoiceStatus.totalSent}</p>
-                          </div>
-                          <CheckCircle2 className="w-8 h-8 text-green-600" />
-                        </div>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="pt-6">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-sm text-neutral-dark">Pendentes</p>
-                            <p className="text-2xl font-bold text-amber-600">{invoiceStatus.totalPending}</p>
-                          </div>
-                          <XCircle className="w-8 h-8 text-amber-600" />
-                        </div>
-                      </CardContent>
-                    </Card>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                    <MetricCard icon={<Users className="h-6 w-6 text-cp-action" />} tint="bg-cp-action-soft" label="Total de usuários" value={invoiceStatus.totalUsers} sub="que emitem nota" />
+                    <MetricCard icon={<CheckCircle2 className="h-6 w-6 text-cp-success" />} tint="bg-cp-sage-soft" label="Já enviaram" value={invoiceStatus.totalSent} sub="no mês" />
+                    <MetricCard icon={<Clock className="h-6 w-6 text-cp-warning" />} tint="bg-cp-warning-soft" label="Pendentes" value={invoiceStatus.totalPending} sub="ainda não enviaram" />
                   </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2 text-green-600">
-                          <CheckCircle2 className="w-5 h-5" />
-                          Já enviaram ({invoiceStatus.totalSent})
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {invoiceStatus.sent.length === 0 ? (
-                          <p className="text-neutral-dark text-center py-4">Nenhum usuário enviou nota para este mês.</p>
-                        ) : (
-                          <div className="space-y-2">
-                            {invoiceStatus.sent.map((user) => (
-                              <div key={user.id} className="flex items-center justify-between p-2 bg-green-50 dark:bg-green-900/20 rounded-md" data-testid={`user-sent-${user.id}`}>
-                                <div>
-                                  <p className="font-medium">{user.fullName}</p>
-                                  <p className="text-sm text-neutral-dark">{user.email}</p>
-                                </div>
-                                <Badge variant="outline" className="text-green-600 border-green-600">{user.role}</Badge>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2 text-amber-600">
-                          <XCircle className="w-5 h-5" />
-                          Ainda não enviaram ({invoiceStatus.totalPending})
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {invoiceStatus.pending.length === 0 ? (
-                          <p className="text-neutral-dark text-center py-4">Todos já enviaram.</p>
-                        ) : (
-                          <div className="space-y-2">
-                            {invoiceStatus.pending.map((user) => (
-                              <div key={user.id} className="flex items-center justify-between p-2 bg-amber-50 dark:bg-amber-900/20 rounded-md" data-testid={`user-pending-${user.id}`}>
-                                <div>
-                                  <p className="font-medium">{user.fullName}</p>
-                                  <p className="text-sm text-neutral-dark">{user.email}</p>
-                                </div>
-                                <Badge variant="outline" className="text-amber-600 border-amber-600">{user.role}</Badge>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    <UserList
+                      title="Já enviaram"
+                      icon={<CheckCircle2 className="h-5 w-5 text-cp-success" />}
+                      users={invoiceStatus.sent}
+                      tone="success"
+                      empty="Ninguém enviou nota para este mês ainda."
+                      testPrefix="user-sent"
+                    />
+                    <UserList
+                      title="Ainda não enviaram"
+                      icon={<Clock className="h-5 w-5 text-cp-warning" />}
+                      users={invoiceStatus.pending}
+                      tone="warning"
+                      empty="Todos já enviaram."
+                      testPrefix="user-pending"
+                    />
                   </div>
                 </>
               )}
