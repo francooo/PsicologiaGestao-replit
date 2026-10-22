@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
+import { useForm, type UseFormReturn } from "react-hook-form";
 import { z } from "zod";
 import { useAuth } from "@/hooks/use-auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -46,7 +46,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Plus, Wifi, AirVent, Users, SquareUser, Pencil } from "lucide-react";
+import { Loader2, Plus, Wifi, AirVent, Users, SquareUser, Pencil, DoorOpen, Maximize2, Link as LinkIcon, Save, CalendarCheck } from "lucide-react";
+import { PageHeader, cpButton } from "@/components/cp/PageHeader";
+import { CheckTile, IconField, ModalHeader } from "@/components/cp/fields";
+import { StatusBadge } from "@/components/cp/StatusBadge";
+import { toDateKey } from "@/lib/time";
+import { cn } from "@/lib/utils";
 
 // Room form schema
 const roomFormSchema = insertRoomSchema.extend({
@@ -60,6 +65,69 @@ const roomFormSchema = insertRoomSchema.extend({
 });
 
 type RoomFormValues = z.infer<typeof roomFormSchema>;
+
+const fieldLabel = "text-[13px] font-semibold text-cp-ink";
+
+/** Fields shared by "Nova Sala" and "Editar Sala" (mockups 14 / 16). */
+function RoomFields({ form }: { form: UseFormReturn<RoomFormValues> }) {
+  return (
+    <>
+      <FormField control={form.control} name="name" render={({ field }) => (
+        <FormItem>
+          <FormLabel className={fieldLabel}>Nome da Sala</FormLabel>
+          <IconField icon={DoorOpen}>
+            <FormControl><Input placeholder="Ex: Sala 01" {...field} /></FormControl>
+          </IconField>
+          <FormMessage />
+        </FormItem>
+      )} />
+
+      <div className="grid grid-cols-2 gap-4">
+        <FormField control={form.control} name="capacity" render={({ field }) => (
+          <FormItem>
+            <FormLabel className={fieldLabel}>Capacidade</FormLabel>
+            <IconField icon={Users}>
+              <FormControl><Input type="number" placeholder="Ex: 4" {...field} /></FormControl>
+            </IconField>
+            <FormMessage />
+          </FormItem>
+        )} />
+        <FormField control={form.control} name="squareMeters" render={({ field }) => (
+          <FormItem>
+            <FormLabel className={fieldLabel}>Área (m²)</FormLabel>
+            <IconField icon={Maximize2}>
+              <FormControl><Input type="number" placeholder="Ex: 15" {...field} /></FormControl>
+            </IconField>
+            <FormMessage />
+          </FormItem>
+        )} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <FormField control={form.control} name="hasWifi" render={({ field }) => (
+          <FormItem className="space-y-0">
+            <CheckTile icon={Wifi} label="Wi-Fi" checked={!!field.value} onCheckedChange={field.onChange} />
+          </FormItem>
+        )} />
+        <FormField control={form.control} name="hasAirConditioning" render={({ field }) => (
+          <FormItem className="space-y-0">
+            <CheckTile icon={AirVent} label="Ar-Condicionado" checked={!!field.value} onCheckedChange={field.onChange} />
+          </FormItem>
+        )} />
+      </div>
+
+      <FormField control={form.control} name="imageUrl" render={({ field }) => (
+        <FormItem>
+          <FormLabel className={fieldLabel}>URL da Imagem</FormLabel>
+          <IconField icon={LinkIcon}>
+            <FormControl><Input placeholder="https://exemplo.com/imagem.jpg" {...field} value={field.value ?? ""} /></FormControl>
+          </IconField>
+          <FormMessage />
+        </FormItem>
+      )} />
+    </>
+  );
+}
 
 // Room booking form schema
 const roomBookingFormSchema = insertRoomBookingSchema.extend({
@@ -75,15 +143,14 @@ type RoomBookingFormValues = z.infer<typeof roomBookingFormSchema>;
 
 export default function Rooms() {
   const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const { toast } = useToast();
   const [isNewRoomDialogOpen, setIsNewRoomDialogOpen] = useState(false);
   const [isBookingDialogOpen, setIsBookingDialogOpen] = useState(false);
   const [isEditRoomDialogOpen, setIsEditRoomDialogOpen] = useState(false);
   const [editingRoom, setEditingRoom] = useState<any>(null);
   const [selectedRoom, setSelectedRoom] = useState<number | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string>(
-    new Date().toISOString().split('T')[0]
-  );
+  const [selectedDate, setSelectedDate] = useState<string>(toDateKey(new Date()));
 
   // Fetch rooms
   const { data: rooms, isLoading: isLoadingRooms } = useQuery({
@@ -152,7 +219,7 @@ export default function Rooms() {
     defaultValues: {
       roomId: "",
       psychologistId: "",
-      date: new Date().toISOString().split('T')[0],
+      date: toDateKey(new Date()),
       startTime: "09:00",
       endTime: "10:00",
       purpose: "",
@@ -358,170 +425,63 @@ export default function Rooms() {
   const isLoading = isLoadingRooms || isLoadingPsychologists || isLoadingRoomBookings;
 
   return (
-    <div className="flex h-screen bg-neutral-lightest">
+    <div className="flex h-screen bg-cp-bg">
       <Sidebar />
 
       <div className="flex-1 overflow-x-hidden ml-0 md:ml-64 pt-16 md:pt-0">
         <MobileNav />
 
-        <main className="p-4 md:p-6 pb-20 md:pb-6">
+        <main className="p-4 pb-20 sm:px-7 sm:py-6">
           {/* Rooms Header */}
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
+          <div className="mb-6">
+            <PageHeader
+              title="Gestão de Salas"
+              subtitle="Controle e agendamento de salas"
+              phrase
+              actions={
+                <>
+                  <button type="button" className={cpButton.secondary} onClick={() => setIsBookingDialogOpen(true)}>
+                    <Plus className="h-4 w-4" />
+                    Reservar Sala
+                  </button>
+                  {isAdmin && (
+                    <button type="button" className={cpButton.primary} onClick={() => setIsNewRoomDialogOpen(true)} data-testid="button-add-room">
+                      <Plus className="h-4 w-4" />
+                      Adicionar Sala
+                    </button>
+                  )}
+                </>
+              }
+            />
             <div>
-              <h1 className="text-2xl font-bold text-neutral-darkest">Gestão de Salas</h1>
-              <p className="text-neutral-dark">Controle e agendamento de salas</p>
-            </div>
-            <div className="flex mt-4 md:mt-0 space-x-2">
-              <Button 
-                variant="outline" 
-                className="flex items-center"
-                onClick={() => setIsBookingDialogOpen(true)}
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Reservar Sala
-              </Button>
-
+              {isAdmin && (
               <Dialog open={isNewRoomDialogOpen} onOpenChange={setIsNewRoomDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button className="flex items-center">
-                    <Plus className="mr-2 h-4 w-4" />
-                    Adicionar Sala
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Nova Sala</DialogTitle>
-                    <DialogDescription>
-                      Preencha os detalhes para adicionar uma nova sala.
-                    </DialogDescription>
-                  </DialogHeader>
-
+                <DialogContent className="max-h-[92vh] max-w-lg overflow-y-auto rounded-2xl">
+                  <ModalHeader icon={DoorOpen} title="Nova Sala" description="Preencha os detalhes para adicionar uma nova sala." />
                   <Form {...roomForm}>
-                    <form onSubmit={roomForm.handleSubmit(onRoomSubmit)} className="space-y-4 mt-4">
-                      <FormField
-                        control={roomForm.control}
-                        name="name"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Nome da Sala</FormLabel>
-                            <FormControl>
-                              <Input placeholder="Ex: Sala 01" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <FormField
-                          control={roomForm.control}
-                          name="capacity"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Capacidade</FormLabel>
-                              <FormControl>
-                                <Input type="number" placeholder="Ex: 4" {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-
-                        <FormField
-                          control={roomForm.control}
-                          name="squareMeters"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Área (m²)</FormLabel>
-                              <FormControl>
-                                <Input type="number" placeholder="Ex: 15" {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <FormField
-                          control={roomForm.control}
-                          name="hasWifi"
-                          render={({ field }) => (
-                            <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
-                              <FormControl>
-                                <Checkbox
-                                  checked={field.value}
-                                  onCheckedChange={field.onChange}
-                                />
-                              </FormControl>
-                              <div className="space-y-1 leading-none">
-                                <FormLabel>Wi-Fi</FormLabel>
-                              </div>
-                            </FormItem>
-                          )}
-                        />
-
-                        <FormField
-                          control={roomForm.control}
-                          name="hasAirConditioning"
-                          render={({ field }) => (
-                            <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
-                              <FormControl>
-                                <Checkbox
-                                  checked={field.value}
-                                  onCheckedChange={field.onChange}
-                                />
-                              </FormControl>
-                              <div className="space-y-1 leading-none">
-                                <FormLabel>Ar-Condicionado</FormLabel>
-                              </div>
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-
-                      <FormField
-                        control={roomForm.control}
-                        name="imageUrl"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>URL da Imagem</FormLabel>
-                            <FormControl>
-                              <Input placeholder="https://exemplo.com/imagem.jpg" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <DialogFooter>
-                        <Button type="submit" disabled={createRoomMutation.isPending}>
-                          {createRoomMutation.isPending ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Criando...
-                            </>
-                          ) : (
-                            "Adicionar Sala"
-                          )}
-                        </Button>
+                    <form onSubmit={roomForm.handleSubmit(onRoomSubmit)} className="mt-2 space-y-4">
+                      <RoomFields form={roomForm} />
+                      <DialogFooter className="flex-row justify-between gap-3 pt-2 sm:justify-between">
+                        <button type="button" className={cpButton.subtle} onClick={() => setIsNewRoomDialogOpen(false)}>
+                          Cancelar
+                        </button>
+                        <button type="submit" className={cpButton.primary} disabled={createRoomMutation.isPending}>
+                          {createRoomMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                          {createRoomMutation.isPending ? "Criando..." : "Adicionar Sala"}
+                        </button>
                       </DialogFooter>
                     </form>
                   </Form>
                 </DialogContent>
               </Dialog>
+              )}
 
               <Dialog open={isBookingDialogOpen} onOpenChange={setIsBookingDialogOpen}>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Reservar Sala</DialogTitle>
-                    <DialogDescription>
-                      Preencha os detalhes para reservar uma sala.
-                    </DialogDescription>
-                  </DialogHeader>
+                <DialogContent className="max-h-[92vh] max-w-lg overflow-y-auto rounded-2xl">
+                  <ModalHeader icon={CalendarCheck} title="Reservar Sala" description="Preencha os detalhes para reservar uma sala." />
 
                   <Form {...bookingForm}>
-                    <form onSubmit={bookingForm.handleSubmit(onBookingSubmit)} className="space-y-4 mt-4">
+                    <form onSubmit={bookingForm.handleSubmit(onBookingSubmit)} className="mt-2 space-y-4 [&_input]:rounded-xl [&_input]:border-cp-border [&_input:focus-visible]:ring-cp-action [&_button[role=combobox]]:rounded-xl [&_button[role=combobox]]:border-cp-border [&_button[role=combobox]:focus]:ring-cp-action [&_textarea]:rounded-xl [&_textarea]:border-cp-border">
                       <FormField
                         control={bookingForm.control}
                         name="roomId"
@@ -584,7 +544,7 @@ export default function Rooms() {
                             ) : loggedPsychologist ? (
                               /* Não-admin: campo fixo com a psicóloga logada */
                               <FormControl>
-                                <div className="flex items-center border rounded-md p-2 bg-muted/50 h-10">
+                                <div className="flex h-11 items-center rounded-xl border border-cp-border bg-cp-hover px-3">
                                   <SquareUser className="mr-2 h-4 w-4 text-muted-foreground shrink-0" />
                                   <span className="text-sm" data-testid="text-locked-psychologist">
                                     {loggedPsychologist.user?.fullName || user?.fullName}
@@ -593,7 +553,7 @@ export default function Rooms() {
                               </FormControl>
                             ) : (
                               /* Psicóloga sem registro no sistema */
-                              <div className="text-amber-600 border border-amber-300 rounded-md p-3 bg-amber-50 text-sm">
+                              <div className="rounded-xl border border-cp-warning/25 bg-cp-warning-soft p-3 text-sm text-cp-ink">
                                 Seu registro de psicóloga não foi encontrado. Entre em contato com o administrador.
                               </div>
                             )}
@@ -664,17 +624,14 @@ export default function Rooms() {
                         )}
                       />
 
-                      <DialogFooter>
-                        <Button type="submit" disabled={createBookingMutation.isPending}>
-                          {createBookingMutation.isPending ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Reservando...
-                            </>
-                          ) : (
-                            "Reservar Sala"
-                          )}
-                        </Button>
+                      <DialogFooter className="flex-row justify-between gap-3 pt-2 sm:justify-between">
+                        <button type="button" className={cpButton.subtle} onClick={() => setIsBookingDialogOpen(false)}>
+                          Cancelar
+                        </button>
+                        <button type="submit" className={cpButton.primary} disabled={createBookingMutation.isPending}>
+                          {createBookingMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarCheck className="h-4 w-4" />}
+                          {createBookingMutation.isPending ? "Reservando..." : "Reservar Sala"}
+                        </button>
                       </DialogFooter>
                     </form>
                   </Form>
@@ -684,88 +641,36 @@ export default function Rooms() {
           </div>
 
           {/* Edit Room Dialog */}
+          {isAdmin && (
           <Dialog open={isEditRoomDialogOpen} onOpenChange={setIsEditRoomDialogOpen}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Editar Sala</DialogTitle>
-                <DialogDescription>Atualize as informações da sala.</DialogDescription>
-              </DialogHeader>
+            <DialogContent className="max-h-[92vh] max-w-lg overflow-y-auto rounded-2xl">
+              <ModalHeader icon={Pencil} title="Editar Sala" description="Atualize as informações da sala." />
               <Form {...editRoomForm}>
                 <form
                   onSubmit={editRoomForm.handleSubmit((data) =>
                     updateRoomMutation.mutate({ id: editingRoom?.id, data })
                   )}
-                  className="space-y-4 mt-4"
+                  className="mt-2 space-y-4"
                 >
-                  <FormField control={editRoomForm.control} name="name" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Nome da Sala</FormLabel>
-                      <FormControl><Input placeholder="Ex: Sala 01" {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <FormField control={editRoomForm.control} name="capacity" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Capacidade</FormLabel>
-                        <FormControl><Input type="number" placeholder="Ex: 4" {...field} /></FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                    <FormField control={editRoomForm.control} name="squareMeters" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Área (m²)</FormLabel>
-                        <FormControl><Input type="number" placeholder="Ex: 15" {...field} /></FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <FormField control={editRoomForm.control} name="hasWifi" render={({ field }) => (
-                      <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
-                        <FormControl>
-                          <Checkbox checked={field.value} onCheckedChange={field.onChange} />
-                        </FormControl>
-                        <div className="space-y-1 leading-none"><FormLabel>Wi-Fi</FormLabel></div>
-                      </FormItem>
-                    )} />
-                    <FormField control={editRoomForm.control} name="hasAirConditioning" render={({ field }) => (
-                      <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
-                        <FormControl>
-                          <Checkbox checked={field.value} onCheckedChange={field.onChange} />
-                        </FormControl>
-                        <div className="space-y-1 leading-none"><FormLabel>Ar-Condicionado</FormLabel></div>
-                      </FormItem>
-                    )} />
-                  </div>
-
-                  <FormField control={editRoomForm.control} name="imageUrl" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>URL da Imagem</FormLabel>
-                      <FormControl><Input placeholder="https://exemplo.com/imagem.jpg" {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-
-                  <DialogFooter>
-                    <Button type="submit" disabled={updateRoomMutation.isPending}>
-                      {updateRoomMutation.isPending ? (
-                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Salvando...</>
-                      ) : (
-                        "Salvar Alterações"
-                      )}
-                    </Button>
+                  <RoomFields form={editRoomForm} />
+                  <DialogFooter className="flex-row justify-between gap-3 pt-2 sm:justify-between">
+                    <button type="button" className={cpButton.subtle} onClick={() => setIsEditRoomDialogOpen(false)}>
+                      Cancelar
+                    </button>
+                    <button type="submit" className={cpButton.primary} disabled={updateRoomMutation.isPending}>
+                      {updateRoomMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                      {updateRoomMutation.isPending ? "Salvando..." : "Salvar Alterações"}
+                    </button>
                   </DialogFooter>
                 </form>
               </Form>
             </DialogContent>
           </Dialog>
+          )}
 
           {isLoading ? (
             <div className="flex justify-center items-center h-64">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <Loader2 className="h-8 w-8 animate-spin text-cp-action" />
             </div>
           ) : (
             <>
@@ -780,8 +685,8 @@ export default function Rooms() {
 
                     const isCurrentlyBooked = roomBookingsForThisRoom.some(booking => {
                       const now = new Date();
-                      const bookingDate = new Date(booking.date).toISOString().split('T')[0];
-                      const todayDate = now.toISOString().split('T')[0];
+                      const bookingDate = String(booking.date ?? '').slice(0, 10);
+                      const todayDate = toDateKey(now);
 
                       if (bookingDate !== todayDate) return false;
 
@@ -799,8 +704,8 @@ export default function Rooms() {
 
                     const nextBooking = roomBookingsForThisRoom
                       .filter(booking => {
-                        const bookingDate = new Date(booking.date).toISOString().split('T')[0];
-                        const todayDate = new Date().toISOString().split('T')[0];
+                        const bookingDate = String(booking.date ?? '').slice(0, 10);
+                        const todayDate = toDateKey(new Date());
                         if (bookingDate !== todayDate) return false;
 
                         const [startHour, startMinute] = booking.startTime.split(':').map(Number);
@@ -817,64 +722,59 @@ export default function Rooms() {
                       : 0;
 
                     return (
-                      <div key={room.id} className="bg-white rounded-lg shadow-sm overflow-hidden">
+                      <div key={room.id} className="overflow-hidden rounded-2xl border border-cp-divider bg-white p-3 shadow-[0_10px_40px_-20px_rgba(36,54,71,0.18)]">
                         <div className="relative">
-                          <img 
-                            src={room.imageUrl || "https://images.unsplash.com/photo-1497215728101-856f4ea42174?ixlib=rb-1.2.1&auto=format&fit=crop&w=600&q=80"} 
-                            alt={room.name} 
-                            className="w-full h-48 object-cover"
+                          <img
+                            src={room.imageUrl || "https://images.unsplash.com/photo-1497215728101-856f4ea42174?ixlib=rb-1.2.1&auto=format&fit=crop&w=600&q=80"}
+                            alt={room.name}
+                            className="h-44 w-full rounded-xl object-cover"
                           />
-                          <div className={`absolute top-3 right-3 bg-white bg-opacity-90 px-2 py-1 rounded-md text-sm font-medium ${
-                            isCurrentlyBooked ? 'text-error' : 'text-success'
-                          }`}>
-                            {isCurrentlyBooked ? 'Ocupada' : 'Disponível'}
-                          </div>
+                          <StatusBadge
+                            label={isCurrentlyBooked ? "Ocupada" : "Disponível"}
+                            tone={isCurrentlyBooked ? "danger" : "success"}
+                            className="absolute right-3 top-3 bg-white/95 shadow-sm"
+                          />
                         </div>
-                        <div className="p-5">
-                          <h3 className="text-lg font-semibold text-neutral-darkest">{room.name}</h3>
-                          <p className="text-neutral-dark text-sm mb-4">
-                            <span className="flex items-center gap-1">
+                        <div className="px-3 pb-2 pt-4">
+                          <h3 className="text-[20px] font-semibold text-cp-ink">{room.name}</h3>
+                          <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-[14px] text-cp-muted">
+                            <span className="flex items-center gap-2">
                               <Users className="h-4 w-4" />
                               {room.capacity} pessoas
                             </span>
-                            <span className="flex items-center gap-1 mt-1">
+                            <span />
+                            <span className="flex items-center gap-2">
                               <SquareUser className="h-4 w-4" />
                               {room.squareMeters}m²
                             </span>
-                          </p>
-                          <div className="flex justify-between items-center mb-4">
-                            <div className="text-sm text-neutral-dark">
-                              {room.hasWifi && (
-                                <span className="flex items-center text-success mr-1">
-                                  <Wifi className="h-4 w-4 mr-1" /> Wi-Fi
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-sm text-neutral-dark">
-                              {room.hasAirConditioning && (
-                                <span className="flex items-center text-success mr-1">
-                                  <AirVent className="h-4 w-4 mr-1" /> Ar-Condicionado
-                                </span>
-                              )}
-                            </div>
+                            {room.hasAirConditioning ? (
+                              <span className="flex items-center gap-2 justify-self-end">
+                                <AirVent className="h-4 w-4" /> Ar-Condicionado
+                              </span>
+                            ) : <span />}
+                            {room.hasWifi && (
+                              <span className="flex items-center gap-2">
+                                <Wifi className="h-4 w-4" /> Wi-Fi
+                              </span>
+                            )}
                           </div>
-                          <div className="mt-2 text-sm text-neutral-dark">
+                          <div className="mt-4 text-[14px] text-cp-muted">
                             <p>
-                              {nextBooking 
-                                ? `Próxima reserva: ${nextBooking.startTime} - ${nextBooking.endTime}` 
+                              {nextBooking
+                                ? `Próxima reserva: ${nextBooking.startTime} - ${nextBooking.endTime}`
                                 : 'Sem reservas para hoje'}
                             </p>
-                            <div className="w-full bg-neutral-light rounded-full h-2 mt-2">
-                              <div 
-                                className={`${isCurrentlyBooked ? 'bg-error' : 'bg-success'} h-2 rounded-full`} 
+                            <div className="mt-2 h-1.5 w-full rounded-full bg-cp-divider">
+                              <div
+                                className={cn("h-1.5 rounded-full", isCurrentlyBooked ? "bg-cp-danger" : "bg-cp-sage")}
                                 style={{ width: `${occupancyRate}%` }}
                               ></div>
                             </div>
                           </div>
-                          <div className="flex gap-2 mt-4">
+                          <div className="mt-4 flex gap-2">
                             <button
                               data-testid={`button-reserve-room-${room.id}`}
-                              className="bg-primary hover:bg-primary-dark text-white px-4 py-2 rounded-md text-sm flex-1"
+                              className={cn(cpButton.primary, "flex-1")}
                               onClick={() => {
                                 setSelectedRoom(room.id);
                                 bookingForm.setValue('roomId', room.id.toString());
@@ -883,45 +783,50 @@ export default function Rooms() {
                             >
                               Reservar
                             </button>
-                            <button
-                              data-testid={`button-edit-room-${room.id}`}
-                              className="border border-neutral-300 hover:bg-neutral-100 text-neutral-dark px-3 py-2 rounded-md text-sm flex items-center gap-1"
-                              onClick={() => openEditDialog(room)}
-                            >
-                              <Pencil className="h-4 w-4" />
-                              Editar
-                            </button>
+                            {isAdmin && (
+                              <button
+                                data-testid={`button-edit-room-${room.id}`}
+                                className={cpButton.secondary}
+                                onClick={() => openEditDialog(room)}
+                              >
+                                <Pencil className="h-4 w-4" />
+                                Editar
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
                     );
                   })
                 ) : (
-                  <div className="col-span-full text-center py-12 text-neutral-dark">
-                    <h3 className="text-lg font-medium mb-2">Nenhuma sala cadastrada</h3>
-                    <p className="max-w-md mx-auto mb-6">
-                      Adicione salas para começar a gerenciar os espaços no consultório.
-                    </p>
-                    <Button
-                      onClick={() => setIsNewRoomDialogOpen(true)}
-                      className="flex items-center mx-auto"
-                    >
-                      <Plus className="mr-2 h-4 w-4" />
-                      Adicionar Sala
-                    </Button>
+                  <div className="col-span-full rounded-2xl border border-cp-divider bg-white py-12 text-center text-cp-muted">
+                    <DoorOpen className="mx-auto mb-3 h-10 w-10 text-cp-sage" />
+                    <h3 className="mb-2 text-lg font-medium text-cp-ink">Nenhuma sala cadastrada</h3>
+                    {isAdmin && (
+                      <>
+                        <p className="mx-auto mb-6 max-w-md">
+                          Adicione salas para começar a gerenciar os espaços no consultório.
+                        </p>
+                        <button type="button" onClick={() => setIsNewRoomDialogOpen(true)} className={cn(cpButton.primary, "mx-auto")}>
+                          <Plus className="h-4 w-4" />
+                          Adicionar Sala
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
 
               {/* Calendário de Reservas */}
-              <div className="bg-white rounded-lg shadow-sm p-6">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-semibold text-neutral-darkest">Calendário de Reservas</h3>
-                  <div className="flex items-center space-x-2">
-                    <label className="text-sm text-neutral-dark">Data:</label>
-                    <input 
-                      type="date" 
-                      className="border border-neutral-light rounded-md p-2 text-sm"
+              <div className="rounded-2xl border border-cp-divider bg-white p-4 shadow-[0_10px_40px_-20px_rgba(36,54,71,0.18)] sm:p-6">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-[20px] font-semibold text-cp-ink">Calendário de Reservas</h3>
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-cp-muted" htmlFor="rooms-date">Data:</label>
+                    <input
+                      id="rooms-date"
+                      type="date"
+                      className="h-10 rounded-xl border border-cp-border bg-white px-3 text-sm text-cp-ink focus:outline-none focus:ring-2 focus:ring-cp-action"
                       value={selectedDate}
                       onChange={(e) => setSelectedDate(e.target.value)}
                     />
@@ -930,33 +835,28 @@ export default function Rooms() {
 
                 <div className="overflow-x-auto">
                   <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-28">Horário</TableHead>
-                        {rooms?.map((room) => (
-                          <TableHead key={room.id} className="text-center">{room.name}</TableHead>
+                    <TableHeader className="[&_tr]:border-0">
+                      <TableRow className="bg-cp-sand-soft hover:bg-cp-sand-soft">
+                        <TableHead className="w-28 rounded-l-xl text-[14px] font-medium text-cp-ink">Horário</TableHead>
+                        {rooms?.map((room, i) => (
+                          <TableHead key={room.id} className={cn("text-[14px] font-medium text-cp-ink", i === rooms.length - 1 && "rounded-r-xl")}>{room.name}</TableHead>
                         ))}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {timeSlots.map((timeSlot) => (
-                        <TableRow key={timeSlot}>
-                          <TableCell className="font-medium">{timeSlot}</TableCell>
+                        <TableRow key={timeSlot} className="border-cp-divider hover:bg-cp-hover">
+                          <TableCell className="font-medium text-cp-ink">{timeSlot}</TableCell>
                           {rooms?.map((room) => {
                             const booked = isRoomBooked(room.id, timeSlot);
                             const bookingInfo = getBookingInfo(room.id, timeSlot);
 
                             return (
-                              <TableCell key={`${room.id}-${timeSlot}`} className="text-center">
-                                {booked ? (
-                                  <div className="inline-block px-2 py-1 rounded-full text-xs bg-error bg-opacity-10 text-error">
-                                    {bookingInfo?.psychologistName || 'Ocupada'}
-                                  </div>
-                                ) : (
-                                  <div className="inline-block px-2 py-1 rounded-full text-xs bg-success bg-opacity-10 text-success">
-                                    Disponível
-                                  </div>
-                                )}
+                              <TableCell key={`${room.id}-${timeSlot}`}>
+                                <span className={cn("inline-flex items-center gap-2 text-[14px]", booked ? "font-medium text-cp-lavender-ink" : "text-cp-muted")}>
+                                  <span className={cn("h-3 w-3 rounded-full", booked ? "bg-cp-lavender-ink" : "bg-cp-sage")} aria-hidden="true" />
+                                  {booked ? (bookingInfo?.psychologistName || 'Ocupada') : 'Disponível'}
+                                </span>
                               </TableCell>
                             );
                           })}

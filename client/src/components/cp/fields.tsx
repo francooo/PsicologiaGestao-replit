@@ -17,7 +17,7 @@ export function IconField({ icon: Icon, children, className }: { icon: IconType;
       className={cn(
         "relative [&>button]:pl-10 [&>input]:pl-10 [&>textarea]:pl-10 [&>button]:rounded-xl [&>input]:rounded-xl [&>button]:border-cp-border [&>input]:border-cp-border [&>button]:h-11 [&>input]:h-11",
         // Teal focus (spec 3.3) instead of the near-black shadcn ring
-        "[&>button]:focus:ring-cp-action [&>input]:focus-visible:ring-cp-action [&>textarea]:focus-visible:ring-cp-action",
+        "[&>button:focus]:ring-cp-action [&>input:focus-visible]:ring-cp-action [&>textarea:focus-visible]:ring-cp-action",
         className,
       )}
     >

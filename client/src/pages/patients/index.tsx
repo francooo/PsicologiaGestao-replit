@@ -141,7 +141,7 @@ export default function PatientsList() {
                             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl">
                                 <ModalHeader icon={UserPlus} title="Cadastrar Novo Paciente" description="Preencha os dados básicos; o restante pode ser completado no prontuário." />
                                 <Form {...form}>
-                                    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 [&_input]:h-11 [&_input]:rounded-xl [&_input]:border-cp-border [&_input]:focus-visible:ring-cp-action">
+                                    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 [&_input]:h-11 [&_input]:rounded-xl [&_input]:border-cp-border [&_input:focus-visible]:ring-cp-action">
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <FormField
                                                 control={form.control}
