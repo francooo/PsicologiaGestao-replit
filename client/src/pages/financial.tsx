@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
+import { useLocation } from "wouter";
 import { z } from "zod";
 import { useAuth } from "@/hooks/use-auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -11,23 +12,18 @@ import Sidebar from "@/components/sidebar";
 import MobileNav from "@/components/mobile-nav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { 
-  Form, 
-  FormControl, 
-  FormField, 
-  FormItem, 
-  FormLabel, 
-  FormMessage 
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage
 } from "@/components/ui/form";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -37,40 +33,45 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Card,
-  CardContent
-} from "@/components/ui/card";
-import { 
-  AreaChart, 
-  Area, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer 
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer
 } from 'recharts';
-import { 
-  Loader2, 
-  Plus, 
-  Minus, 
-  ArrowUp, 
-  ArrowDown, 
-  Filter, 
-  Calendar, 
-  CreditCard, 
-  User, 
-  DollarSign,
+import {
+  Loader2,
+  Plus,
+  Minus,
+  ArrowUpCircle,
+  ArrowDownCircle,
+  Wallet,
   BarChart3,
+  Calendar,
+  FileText,
+  DollarSign,
+  Tag,
+  User,
   Check,
   X,
+  Receipt,
 } from "lucide-react";
 import { format, subMonths, startOfMonth, endOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { PageHeader, cpButton } from "@/components/cp/PageHeader";
+import { MetricCard } from "@/components/cp/MetricCard";
+import { IconField, ModalHeader } from "@/components/cp/fields";
+import { chartColors } from "@/lib/chart-colors";
+import { expenseCategories, formatBRL, incomeCategories, parseAmount } from "@/lib/money";
+import { fromDateKey, toDateKey } from "@/lib/time";
+import { cn } from "@/lib/utils";
 
 // Transaction form schema
 const transactionFormSchema = insertTransactionSchema.extend({
   description: z.string().min(1, "Descrição é obrigatória"),
-  amount: z.string().min(1, "Valor é obrigatório").refine(val => !isNaN(parseFloat(val)), {
+  amount: z.string().min(1, "Valor é obrigatório").refine(val => !isNaN(parseAmount(val)), {
     message: "Valor deve ser um número válido"
   }),
   date: z.string().min(1, "Data é obrigatória"),
@@ -78,6 +79,47 @@ const transactionFormSchema = insertTransactionSchema.extend({
 });
 
 type TransactionFormValues = z.infer<typeof transactionFormSchema>;
+type TxType = "income" | "expense";
+
+const card = "rounded-2xl border border-cp-divider bg-white shadow-[0_10px_40px_-20px_rgba(36,54,71,0.18)]";
+const fieldLabel = "text-[13px] font-semibold text-cp-ink";
+const CHART_MONTHS = { "1M": 1, "3M": 3, "6M": 6, "1A": 12 } as const;
+type ChartPeriod = keyof typeof CHART_MONTHS;
+
+function useTransactions(startDate: string, endDate: string) {
+  return useQuery<any[]>({
+    queryKey: ['/api/transactions', { startDate, endDate }],
+    queryFn: async () => {
+      const res = await fetch(`/api/transactions?startDate=${startDate}&endDate=${endDate}`);
+      if (!res.ok) throw new Error('Failed to fetch transactions');
+      return res.json();
+    }
+  });
+}
+
+function totals(list: any[] | undefined) {
+  const income = (list ?? []).filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
+  const expenses = (list ?? []).filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+  return { income, expenses, profit: income - expenses };
+}
+
+/** "↑ 12% vs. mês anterior"; null when there is nothing to compare against. */
+function Change({ current, previous, lowerIsBetter = false }: { current: number; previous: number; lowerIsBetter?: boolean }) {
+  if (!previous) return <span className="text-cp-subtle">Sem dados do mês anterior</span>;
+  const pct = Math.round(((current - previous) / Math.abs(previous)) * 100);
+  const up = pct >= 0;
+  const good = lowerIsBetter ? !up : up;
+  return (
+    <span className={good ? "text-cp-success" : "text-cp-danger"}>
+      {up ? "↑" : "↓"} {Math.abs(pct)}% vs. mês anterior
+    </span>
+  );
+}
+
+const formatDate = (value: string) => {
+  const d = fromDateKey(value);
+  return d ? format(d, 'dd/MM/yyyy') : '—';
+};
 
 // ─── CategorySelectWithAdd ─────────────────────────────────────────────────────
 function CategorySelectWithAdd({
@@ -117,24 +159,26 @@ function CategorySelectWithAdd({
 
   return (
     <div className="space-y-2">
-      <Select onValueChange={handleValueChange} value={isAdding ? '' : (value || '')}>
-        <FormControl>
-          <SelectTrigger>
-            <SelectValue placeholder="Selecione uma categoria" />
-          </SelectTrigger>
-        </FormControl>
-        <SelectContent>
-          {allCategories.map((cat) => (
-            <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-          ))}
-          <SelectItem value="__new__">
-            <span className="flex items-center gap-1.5 text-primary font-medium">
-              <Plus className="h-3.5 w-3.5" />
-              Nova categoria...
-            </span>
-          </SelectItem>
-        </SelectContent>
-      </Select>
+      <IconField icon={Tag}>
+        <Select onValueChange={handleValueChange} value={isAdding ? '' : (value || '')}>
+          <FormControl>
+            <SelectTrigger>
+              <SelectValue placeholder="Selecione" />
+            </SelectTrigger>
+          </FormControl>
+          <SelectContent>
+            {allCategories.map((cat) => (
+              <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+            ))}
+            <SelectItem value="__new__">
+              <span className="flex items-center gap-1.5 font-medium text-cp-action">
+                <Plus className="h-3.5 w-3.5" />
+                Nova categoria...
+              </span>
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </IconField>
       {isAdding && (
         <div className="flex items-center gap-2">
           <Input
@@ -146,15 +190,16 @@ function CategorySelectWithAdd({
               if (e.key === 'Enter') { e.preventDefault(); handleConfirm(); }
               if (e.key === 'Escape') { setIsAdding(false); setNewCat(''); }
             }}
-            className="h-8 text-sm"
+            className="h-9 rounded-xl border-cp-border text-sm focus-visible:ring-cp-action"
           />
           <Button
             type="button"
             size="sm"
             variant="outline"
             onClick={handleConfirm}
-            className="h-8 w-8 p-0 shrink-0"
+            className="h-9 w-9 shrink-0 rounded-xl border-cp-border p-0"
             data-testid="button-confirm-new-category"
+            aria-label="Confirmar categoria"
           >
             <Check className="h-3.5 w-3.5" />
           </Button>
@@ -163,7 +208,8 @@ function CategorySelectWithAdd({
             size="sm"
             variant="ghost"
             onClick={() => { setIsAdding(false); setNewCat(''); }}
-            className="h-8 w-8 p-0 shrink-0"
+            className="h-9 w-9 shrink-0 p-0"
+            aria-label="Cancelar nova categoria"
           >
             <X className="h-3.5 w-3.5" />
           </Button>
@@ -173,59 +219,190 @@ function CategorySelectWithAdd({
   );
 }
 
-export default function Financial() {
+// ─── Nova Receita / Nova Despesa ───────────────────────────────────────────────
+function TransactionDialog({
+  type,
+  open,
+  onOpenChange,
+  users,
+}: {
+  type: TxType;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  users: any[] | undefined;
+}) {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [isNewIncomeDialogOpen, setIsNewIncomeDialogOpen] = useState(false);
-  const [isNewExpenseDialogOpen, setIsNewExpenseDialogOpen] = useState(false);
-  const [selectedTransaction, setSelectedTransaction] = useState<number | null>(null);
-  const [dateRange, setDateRange] = useState<{startDate: string, endDate: string}>(() => {
-    const today = new Date();
-    const startDate = startOfMonth(today);
-    const endDate = endOfMonth(today);
-    return {
-      startDate: format(startDate, 'yyyy-MM-dd'),
-      endDate: format(endDate, 'yyyy-MM-dd')
-    };
-  });
-  const [chartPeriod, setChartPeriod] = useState<'1M' | '3M' | '6M' | '1A'>('3M');
+  const isIncome = type === "income";
 
-  // Income categories
-  const incomeCategories = [
-    'Consulta',
-    'Avaliação',
-    'Sessão em Grupo',
-    'Workshop',
-    'Outro'
-  ];
-
-  // Expense categories
-  const expenseCategories = [
-    'Aluguel',
-    'Água',
-    'Luz',
-    'Internet',
-    'Material de Escritório',
-    'Limpeza',
-    'Manutenção',
-    'Salários',
-    'Marketing',
-    'Impostos',
-    'Outro'
-  ];
-
-  // Fetch transactions
-  const { data: transactions, isLoading } = useQuery({
-    queryKey: ['/api/transactions', dateRange],
-    queryFn: async () => {
-      const res = await fetch(`/api/transactions?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}`);
-      if (!res.ok) throw new Error('Failed to fetch transactions');
-      return res.json();
+  const form = useForm<TransactionFormValues>({
+    resolver: zodResolver(transactionFormSchema),
+    defaultValues: {
+      description: "",
+      amount: "",
+      type,
+      category: "",
+      date: toDateKey(),
+      responsibleId: user?.id || 0,
+      relatedAppointmentId: undefined
     }
   });
 
+  const mutation = useMutation({
+    mutationFn: async (data: TransactionFormValues) => {
+      const response = await apiRequest("POST", "/api/transactions", {
+        ...data,
+        amount: parseAmount(data.amount),
+        responsibleId: Number(data.responsibleId)
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/transactions'] });
+      toast({ title: "Transação criada", description: "A transação foi registrada com sucesso." });
+      onOpenChange(false);
+      form.reset({ ...form.formState.defaultValues, date: toDateKey() });
+    },
+    onError: (error) => {
+      toast({ title: "Erro", description: `Falha ao registrar transação: ${error.message}`, variant: "destructive" });
+    }
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-2xl">
+        <ModalHeader
+          icon={isIncome ? ArrowUpCircle : ArrowDownCircle}
+          tone={isIncome ? "sage" : "lavender"}
+          title={isIncome ? "Nova Receita" : "Nova Despesa"}
+          description={`Preencha os detalhes para registrar uma nova ${isIncome ? "receita" : "despesa"}.`}
+        />
+
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit((d) => mutation.mutate(d))} className="mt-2 space-y-4">
+            <FormField control={form.control} name="description" render={({ field }) => (
+              <FormItem>
+                <FormLabel className={fieldLabel}>Descrição <span className="text-cp-danger">*</span></FormLabel>
+                <IconField icon={FileText}>
+                  <FormControl>
+                    <Input placeholder={isIncome ? "Ex: Consulta - João da Silva" : "Ex: Pagamento Aluguel"} {...field} />
+                  </FormControl>
+                </IconField>
+                <FormMessage />
+              </FormItem>
+            )} />
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <FormField control={form.control} name="amount" render={({ field }) => (
+                <FormItem>
+                  <FormLabel className={fieldLabel}>Valor (R$) <span className="text-cp-danger">*</span></FormLabel>
+                  <IconField icon={DollarSign}>
+                    <FormControl>
+                      <Input inputMode="decimal" placeholder={isIncome ? "Ex: 200,00" : "Ex: 3500,00"} {...field} />
+                    </FormControl>
+                  </IconField>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="date" render={({ field }) => (
+                <FormItem>
+                  <FormLabel className={fieldLabel}>Data <span className="text-cp-danger">*</span></FormLabel>
+                  <IconField icon={Calendar}>
+                    <FormControl><Input type="date" {...field} /></FormControl>
+                  </IconField>
+                  <FormMessage />
+                </FormItem>
+              )} />
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <FormField control={form.control} name="category" render={({ field }) => (
+                <FormItem>
+                  <FormLabel className={fieldLabel}>Categoria <span className="text-cp-danger">*</span></FormLabel>
+                  <CategorySelectWithAdd
+                    baseCategories={isIncome ? incomeCategories : expenseCategories}
+                    value={field.value}
+                    onChange={field.onChange}
+                  />
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="responsibleId" render={({ field }) => (
+                <FormItem>
+                  <FormLabel className={fieldLabel}>Responsável</FormLabel>
+                  {user?.role === 'psychologist' ? (
+                    <div className="flex h-11 items-center gap-2 rounded-xl border border-cp-border bg-cp-hover px-3">
+                      <User className="h-4 w-4 text-cp-muted" />
+                      <span className="text-sm text-cp-ink">{user.fullName}</span>
+                    </div>
+                  ) : (
+                    <IconField icon={User}>
+                      <Select
+                        onValueChange={(value) => field.onChange(parseInt(value))}
+                        defaultValue={user?.id?.toString() || ""}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {users?.map((u) => (
+                            <SelectItem key={u.id} value={u.id.toString()}>
+                              {u.fullName}
+                            </SelectItem>
+                          )) || (
+                            <SelectItem value={user?.id?.toString() || ""}>
+                              {user?.fullName || "Usuário atual"}
+                            </SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </IconField>
+                  )}
+                  <FormMessage />
+                </FormItem>
+              )} />
+            </div>
+
+            <DialogFooter className="flex-row justify-between gap-3 pt-2 sm:justify-between">
+              <button type="button" className={cpButton.subtle} onClick={() => onOpenChange(false)}>
+                Cancelar
+              </button>
+              <button type="submit" className={cpButton.primary} disabled={mutation.isPending}>
+                {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : isIncome ? <Plus className="h-4 w-4" /> : <Minus className="h-4 w-4" />}
+                {mutation.isPending ? "Salvando..." : isIncome ? "Salvar Receita" : "Salvar Despesa"}
+              </button>
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export default function Financial() {
+  const { user } = useAuth();
+  const [, setLocation] = useLocation();
+  const [openDialog, setOpenDialog] = useState<TxType | null>(null);
+  const [dateRange, setDateRange] = useState<{ startDate: string, endDate: string }>(() => ({
+    startDate: toDateKey(startOfMonth(new Date())),
+    endDate: toDateKey(endOfMonth(new Date())),
+  }));
+  const [chartPeriod, setChartPeriod] = useState<ChartPeriod>('3M');
+
+  const today = new Date();
+  const lastMonth = subMonths(today, 1);
+  const chartStart = startOfMonth(subMonths(today, CHART_MONTHS[chartPeriod] - 1));
+
+  // Table, current month, previous month and chart period are separate ranges
+  const { data: transactions, isLoading } = useTransactions(dateRange.startDate, dateRange.endDate);
+  const { data: monthTx, isLoading: isLoadingMonth } = useTransactions(toDateKey(startOfMonth(today)), toDateKey(endOfMonth(today)));
+  const { data: prevTx } = useTransactions(toDateKey(startOfMonth(lastMonth)), toDateKey(endOfMonth(lastMonth)));
+  const { data: chartTx } = useTransactions(toDateKey(chartStart), toDateKey(endOfMonth(today)));
+
   // Fetch users for responsible dropdown
-  const { data: users, isLoading: isLoadingUsers } = useQuery({
+  const { data: users } = useQuery({
     queryKey: ['/api/users'],
     queryFn: async () => {
       try {
@@ -233,768 +410,202 @@ export default function Financial() {
         if (!res.ok) throw new Error('Failed to fetch users');
         return res.json();
       } catch (error) {
-        // If this endpoint doesn't exist, use the current user
+        // If this endpoint isn't available for this role, use the current user
         return [user];
       }
     }
   });
 
-  // Income form
-  const incomeForm = useForm<TransactionFormValues>({
-    resolver: zodResolver(transactionFormSchema),
-    defaultValues: {
-      description: "",
-      amount: "",
-      type: "income",
-      category: "",
-      date: new Date().toISOString().split('T')[0],
-      responsibleId: user?.id || 0,
-      relatedAppointmentId: undefined
-    }
+  const current = totals(monthTx);
+  const previous = totals(prevTx);
+
+  const chartData = Array.from({ length: CHART_MONTHS[chartPeriod] }, (_, idx) => {
+    const month = subMonths(today, CHART_MONTHS[chartPeriod] - 1 - idx);
+    const key = format(month, 'yyyy-MM');
+    const t = totals(chartTx?.filter(tx => String(tx.date).slice(0, 7) === key));
+    return { month: format(month, 'MMM', { locale: ptBR }), income: t.income, expenses: t.expenses };
   });
-
-  // Expense form
-  const expenseForm = useForm<TransactionFormValues>({
-    resolver: zodResolver(transactionFormSchema),
-    defaultValues: {
-      description: "",
-      amount: "",
-      type: "expense",
-      category: "",
-      date: new Date().toISOString().split('T')[0],
-      responsibleId: user?.id || 0,
-      relatedAppointmentId: undefined
-    }
-  });
-
-  // Create transaction mutation
-  const createTransactionMutation = useMutation({
-    mutationFn: async (data: TransactionFormValues) => {
-      const response = await apiRequest("POST", "/api/transactions", {
-        ...data,
-        amount: parseFloat(data.amount),
-        responsibleId: Number(data.responsibleId)
-      });
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/transactions'] });
-      toast({
-        title: "Transação criada",
-        description: "A transação foi registrada com sucesso.",
-        variant: "default",
-      });
-      setIsNewIncomeDialogOpen(false);
-      setIsNewExpenseDialogOpen(false);
-      incomeForm.reset();
-      expenseForm.reset();
-    },
-    onError: (error) => {
-      toast({
-        title: "Erro",
-        description: `Falha ao registrar transação: ${error.message}`,
-        variant: "destructive",
-      });
-    }
-  });
-
-  // Handle income form submission
-  const onIncomeSubmit = (data: TransactionFormValues) => {
-    createTransactionMutation.mutate(data);
-  };
-
-  // Handle expense form submission
-  const onExpenseSubmit = (data: TransactionFormValues) => {
-    createTransactionMutation.mutate(data);
-  };
-
-  // Calculate financial summary
-  const calculateFinancialSummary = () => {
-    if (!transactions || transactions.length === 0) {
-      return {
-        income: 0,
-        expenses: 0,
-        profit: 0,
-        formattedIncome: 'R$ 0,00',
-        formattedExpenses: 'R$ 0,00',
-        formattedProfit: 'R$ 0,00',
-        incomeChange: 0,
-        expenseChange: 0,
-        profitChange: 0
-      };
-    }
-    
-    // Calculate totals for current period
-    const income = transactions
-      .filter(t => t.type === 'income')
-      .reduce((sum, t) => sum + Number(t.amount), 0);
-      
-    const expenses = transactions
-      .filter(t => t.type === 'expense')
-      .reduce((sum, t) => sum + Number(t.amount), 0);
-      
-    const profit = income - expenses;
-    
-    // Format for display
-    const formatter = new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL'
-    });
-    
-    // Simulate month-over-month change for demo purposes
-    // In a real app, this would be calculated from historical data
-    const incomeChange = 8;
-    const expenseChange = -3;
-    const profitChange = 12;
-    
-    return {
-      income,
-      expenses,
-      profit,
-      formattedIncome: formatter.format(income),
-      formattedExpenses: formatter.format(expenses),
-      formattedProfit: formatter.format(profit),
-      incomeChange,
-      expenseChange,
-      profitChange
-    };
-  };
-
-  // Prepare chart data
-  const prepareChartData = () => {
-    // Define the number of months back to include in the chart
-    let monthsBack = 3;
-    switch (chartPeriod) {
-      case '1M': monthsBack = 1; break;
-      case '3M': monthsBack = 3; break;
-      case '6M': monthsBack = 6; break;
-      case '1A': monthsBack = 12; break;
-    }
-    
-    // Generate data for the past few months
-    const chartData = [];
-    const today = new Date();
-    
-    // Para cada mês no período selecionado
-    for (let i = monthsBack - 1; i >= 0; i--) {
-      const month = subMonths(today, i);
-      const monthName = format(month, 'MMM', { locale: ptBR });
-      
-      // Inicializa valores zerados
-      let income = 0;
-      let expenses = 0;
-      
-      // Se temos transações, calcular totais por mês
-      if (transactions && transactions.length > 0) {
-        const monthStart = startOfMonth(month);
-        const monthEnd = endOfMonth(month);
-        
-        // Filtra transações por mês
-        const monthTransactions = transactions.filter(t => {
-          const transactionDate = new Date(t.date);
-          return transactionDate >= monthStart && transactionDate <= monthEnd;
-        });
-        
-        // Calcula receitas e despesas
-        income = monthTransactions
-          .filter(t => t.type === 'income')
-          .reduce((sum, t) => sum + Number(t.amount), 0);
-          
-        expenses = monthTransactions
-          .filter(t => t.type === 'expense')
-          .reduce((sum, t) => sum + Number(t.amount), 0);
-      }
-      
-      chartData.push({
-        month: monthName,
-        income,
-        expenses
-      });
-    }
-    
-    return chartData;
-  };
-
-  // Calculate financial summary and chart data
-  const financialSummary = calculateFinancialSummary();
-  const chartData = prepareChartData();
-
-  // Format currency
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'BRL'
-    }).format(value);
-  };
-
-  // Format date
-  const formatDate = (dateString: string) => {
-    return format(new Date(dateString), 'dd/MM/yyyy');
-  };
-
-  // Loading state
-  const isPageLoading = isLoading || isLoadingUsers;
 
   return (
-    <div className="flex h-screen bg-neutral-lightest">
+    <div className="flex h-screen bg-cp-bg">
       <Sidebar />
-      
-      <div className="flex-1 overflow-x-hidden ml-0 md:ml-64 pt-16 md:pt-0">
+
+      <div className="ml-0 flex-1 overflow-x-hidden pt-16 md:ml-64 md:pt-0">
         <MobileNav />
-        
-        <main className="p-4 md:p-6 pb-20 md:pb-6">
-          {/* Financial Header */}
-          <div className="flex flex-col mb-6">
-            <div className="flex items-center justify-between mb-2">
+
+        <main className="p-4 pb-20 sm:px-7 sm:py-6">
+          <PageHeader
+            className="mb-6"
+            title="Financeiro"
+            subtitle="Gestão financeira do consultório"
+            phrase
+            actions={
+              <>
+                <button type="button" className={cpButton.secondary} onClick={() => setLocation('/cash-flow')}>
+                  <BarChart3 className="h-4 w-4" />
+                  Fluxo de Caixa
+                </button>
+                <button type="button" className={cpButton.secondary} onClick={() => setOpenDialog('expense')} data-testid="button-new-expense">
+                  <Minus className="h-4 w-4 text-cp-danger" />
+                  Nova Despesa
+                </button>
+                <button type="button" className={cpButton.primary} onClick={() => setOpenDialog('income')} data-testid="button-new-income">
+                  <Plus className="h-4 w-4" />
+                  Nova Receita
+                </button>
+              </>
+            }
+          />
+
+          <TransactionDialog type="income" open={openDialog === 'income'} onOpenChange={(v) => setOpenDialog(v ? 'income' : null)} users={users} />
+          <TransactionDialog type="expense" open={openDialog === 'expense'} onOpenChange={(v) => setOpenDialog(v ? 'expense' : null)} users={users} />
+
+          {/* Resumo do mês */}
+          <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+            <MetricCard
+              icon={<ArrowUpCircle className="h-6 w-6 text-cp-success" />}
+              tint="bg-cp-sage-soft"
+              label="Receitas do mês"
+              value={isLoadingMonth ? "…" : formatBRL(current.income)}
+              sub={<Change current={current.income} previous={previous.income} />}
+            />
+            <MetricCard
+              icon={<ArrowDownCircle className="h-6 w-6 text-cp-danger" />}
+              tint="bg-cp-danger-soft"
+              label="Despesas do mês"
+              value={isLoadingMonth ? "…" : formatBRL(current.expenses)}
+              sub={<Change current={current.expenses} previous={previous.expenses} lowerIsBetter />}
+            />
+            <MetricCard
+              icon={<Wallet className="h-6 w-6 text-cp-action" />}
+              tint="bg-cp-action-soft"
+              label="Lucro do mês"
+              value={isLoadingMonth ? "…" : formatBRL(current.profit)}
+              sub={<Change current={current.profit} previous={previous.profit} />}
+            />
+          </div>
+
+          {/* Gráfico de Evolução Financeira */}
+          <div className={cn(card, "mb-6 p-4 sm:p-6")}>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h1 className="text-2xl font-bold text-neutral-darkest">Financeiro</h1>
-                <p className="text-neutral-dark">Gestão financeira do consultório</p>
+                <h3 className="text-[20px] font-semibold text-cp-ink">Evolução Financeira</h3>
+                <div className="mt-1 flex items-center gap-4 text-xs text-cp-muted">
+                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: chartColors.income }} />Receitas</span>
+                  <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full" style={{ background: chartColors.expense }} />Despesas</span>
+                </div>
+              </div>
+              <div className="flex gap-1.5" role="group" aria-label="Período do gráfico">
+                {(Object.keys(CHART_MONTHS) as ChartPeriod[]).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setChartPeriod(p)}
+                    aria-pressed={chartPeriod === p}
+                    className={cn(
+                      "rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors",
+                      chartPeriod === p ? "bg-cp-action text-white" : "border border-cp-border bg-white text-cp-muted hover:text-cp-ink",
+                    )}
+                  >
+                    {p}
+                  </button>
+                ))}
               </div>
             </div>
-            
-            {/* Ações separadas em linha própria */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-2">
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => window.location.href = '/cash-flow'}
-                className="h-9 text-xs"
-              >
-                <BarChart3 className="mr-1.5 h-3.5 w-3.5" />
-                Fluxo de Caixa
-              </Button>
-              
-              <Dialog open={isNewIncomeDialogOpen} onOpenChange={setIsNewIncomeDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button 
-                    className="bg-green-600 hover:bg-green-700 h-9 text-xs"
-                    size="sm"
-                  >
-                    <Plus className="mr-1.5 h-3.5 w-3.5" />
-                    Nova Receita
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-h-[90vh] max-w-lg w-full overflow-y-auto sm:max-w-md"
-                  style={{ paddingBottom: '1.5rem' }}>
-                  <DialogHeader>
-                    <DialogTitle>Nova Receita</DialogTitle>
-                    <DialogDescription>
-                      Preencha os detalhes para registrar uma nova receita.
-                    </DialogDescription>
-                  </DialogHeader>
-                  
-                  <Form {...incomeForm}>
-                    <form onSubmit={incomeForm.handleSubmit(onIncomeSubmit)} className="space-y-4 mt-4">
-                      <FormField
-                        control={incomeForm.control}
-                        name="description"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Descrição</FormLabel>
-                            <FormControl>
-                              <Input placeholder="Ex: Consulta - João da Silva" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      
-                      <div className="grid grid-cols-2 gap-4">
-                        <FormField
-                          control={incomeForm.control}
-                          name="amount"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Valor</FormLabel>
-                              <FormControl>
-                                <Input type="text" placeholder="Ex: 200.00" {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        
-                        <FormField
-                          control={incomeForm.control}
-                          name="date"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Data</FormLabel>
-                              <FormControl>
-                                <Input type="date" {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-4">
-                        <FormField
-                          control={incomeForm.control}
-                          name="category"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Categoria</FormLabel>
-                              <CategorySelectWithAdd
-                                baseCategories={incomeCategories}
-                                value={field.value}
-                                onChange={field.onChange}
-                              />
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        
-                        <FormField
-                          control={incomeForm.control}
-                          name="responsibleId"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Responsável</FormLabel>
-                              {user?.role === 'psychologist' ? (
-                                <div className="flex items-center border rounded-md px-3 bg-muted/50 h-10">
-                                  <span className="text-sm">{user.fullName}</span>
-                                </div>
-                              ) : (
-                                <Select
-                                  onValueChange={(value) => field.onChange(parseInt(value))}
-                                  defaultValue={user?.id?.toString() || ""}
-                                >
-                                  <FormControl>
-                                    <SelectTrigger>
-                                      <SelectValue placeholder="Selecione um responsável" />
-                                    </SelectTrigger>
-                                  </FormControl>
-                                  <SelectContent>
-                                    {users?.map((u) => (
-                                      <SelectItem key={u.id} value={u.id.toString()}>
-                                        {u.fullName}
-                                      </SelectItem>
-                                    )) || (
-                                      <SelectItem value={user?.id?.toString() || ""}>
-                                        {user?.fullName || "Usuário atual"}
-                                      </SelectItem>
-                                    )}
-                                  </SelectContent>
-                                </Select>
-                              )}
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                      
-                      <DialogFooter className="mt-6 pt-4 border-t">
-                        <Button 
-                          type="submit" 
-                          className="bg-green-600 hover:bg-green-700 w-full"
-                          disabled={createTransactionMutation.isPending}
-                          size="lg"
-                        >
-                          {createTransactionMutation.isPending ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Salvando...
-                            </>
-                          ) : (
-                            "Salvar Receita"
-                          )}
-                        </Button>
-                      </DialogFooter>
-                    </form>
-                  </Form>
-                </DialogContent>
-              </Dialog>
-              
-              <Dialog open={isNewExpenseDialogOpen} onOpenChange={setIsNewExpenseDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button 
-                    className="bg-red-600 hover:bg-red-700 h-9 text-xs"
-                    size="sm"
-                  >
-                    <Minus className="mr-1.5 h-3.5 w-3.5" />
-                    Nova Despesa
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-h-[90vh] max-w-lg w-full overflow-y-auto sm:max-w-md"
-                  style={{ paddingBottom: '1.5rem' }}>
-                  <DialogHeader>
-                    <DialogTitle>Nova Despesa</DialogTitle>
-                    <DialogDescription>
-                      Preencha os detalhes para registrar uma nova despesa.
-                    </DialogDescription>
-                  </DialogHeader>
-                  
-                  <Form {...expenseForm}>
-                    <form onSubmit={expenseForm.handleSubmit(onExpenseSubmit)} className="space-y-4 mt-4">
-                      <FormField
-                        control={expenseForm.control}
-                        name="description"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Descrição</FormLabel>
-                            <FormControl>
-                              <Input placeholder="Ex: Pagamento Aluguel" {...field} />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      
-                      <div className="grid grid-cols-2 gap-4">
-                        <FormField
-                          control={expenseForm.control}
-                          name="amount"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Valor</FormLabel>
-                              <FormControl>
-                                <Input type="text" placeholder="Ex: 3500.00" {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        
-                        <FormField
-                          control={expenseForm.control}
-                          name="date"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Data</FormLabel>
-                              <FormControl>
-                                <Input type="date" {...field} />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-4">
-                        <FormField
-                          control={expenseForm.control}
-                          name="category"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Categoria</FormLabel>
-                              <CategorySelectWithAdd
-                                baseCategories={expenseCategories}
-                                value={field.value}
-                                onChange={field.onChange}
-                              />
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        
-                        <FormField
-                          control={expenseForm.control}
-                          name="responsibleId"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>Responsável</FormLabel>
-                              {user?.role === 'psychologist' ? (
-                                <div className="flex items-center border rounded-md px-3 bg-muted/50 h-10">
-                                  <span className="text-sm">{user.fullName}</span>
-                                </div>
-                              ) : (
-                                <Select
-                                  onValueChange={(value) => field.onChange(parseInt(value))}
-                                  defaultValue={user?.id?.toString() || ""}
-                                >
-                                  <FormControl>
-                                    <SelectTrigger>
-                                      <SelectValue placeholder="Selecione um responsável" />
-                                    </SelectTrigger>
-                                  </FormControl>
-                                  <SelectContent>
-                                    {users?.map((u) => (
-                                      <SelectItem key={u.id} value={u.id.toString()}>
-                                        {u.fullName}
-                                      </SelectItem>
-                                    )) || (
-                                      <SelectItem value={user?.id?.toString() || ""}>
-                                        {user?.fullName || "Usuário atual"}
-                                      </SelectItem>
-                                    )}
-                                  </SelectContent>
-                                </Select>
-                              )}
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                      
-                      <DialogFooter className="mt-6 pt-4 border-t">
-                        <Button 
-                          type="submit" 
-                          className="bg-red-600 hover:bg-red-700 w-full"
-                          disabled={createTransactionMutation.isPending}
-                          size="lg"
-                        >
-                          {createTransactionMutation.isPending ? (
-                            <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              Salvando...
-                            </>
-                          ) : (
-                            "Salvar Despesa"
-                          )}
-                        </Button>
-                      </DialogFooter>
-                    </form>
-                  </Form>
-                </DialogContent>
-              </Dialog>
+
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorIncome" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={chartColors.income} stopOpacity={0.35} />
+                      <stop offset="95%" stopColor={chartColors.income} stopOpacity={0.02} />
+                    </linearGradient>
+                    <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={chartColors.expense} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={chartColors.expense} stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={chartColors.grid} />
+                  <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: chartColors.axis, fontSize: 12 }} />
+                  <YAxis
+                    axisLine={false}
+                    tickLine={false}
+                    width={80}
+                    tick={{ fill: chartColors.axis, fontSize: 12 }}
+                    tickFormatter={(value) => `R$ ${Number(value).toLocaleString('pt-BR')}`}
+                  />
+                  <Tooltip
+                    formatter={(value) => [formatBRL(Number(value)), undefined]}
+                    labelFormatter={(label) => `Mês: ${label}`}
+                    contentStyle={{ borderRadius: 12, borderColor: chartColors.grid }}
+                  />
+                  <Area type="monotone" dataKey="income" stroke={chartColors.income} strokeWidth={2} fillOpacity={1} fill="url(#colorIncome)" name="Receitas" />
+                  <Area type="monotone" dataKey="expenses" stroke={chartColors.expense} strokeWidth={2} fillOpacity={1} fill="url(#colorExpenses)" name="Despesas" />
+                </AreaChart>
+              </ResponsiveContainer>
             </div>
           </div>
-          
-          {isPageLoading ? (
-            <div className="flex justify-center items-center h-64">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+
+          {/* Transações */}
+          <div className={cn(card, "p-4 sm:p-6")}>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-[20px] font-semibold text-cp-ink">Transações</h3>
+              <div className="flex flex-wrap items-center gap-2">
+                {([["De", "startDate"], ["Até", "endDate"]] as const).map(([label, key]) => (
+                  <label key={key} className="flex items-center gap-2 text-sm text-cp-muted">
+                    {label}:
+                    <input
+                      type="date"
+                      className="h-10 rounded-xl border border-cp-border bg-white px-3 text-sm text-cp-ink focus:outline-none focus:ring-2 focus:ring-cp-action"
+                      value={dateRange[key]}
+                      onChange={(e) => setDateRange({ ...dateRange, [key]: e.target.value })}
+                    />
+                  </label>
+                ))}
+              </div>
             </div>
-          ) : (
-            <>
-              {/* Resumo Financeiro */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
-                {/* Receitas */}
-                <Card className="border-l-4 border-success">
-                  <CardContent className="p-5">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <p className="text-neutral-dark text-sm">Receitas do Mês</p>
-                        <h3 className="text-2xl font-bold text-neutral-darkest">
-                          {financialSummary.formattedIncome}
-                        </h3>
-                      </div>
-                      <div className="rounded-full bg-success/10 p-3">
-                        <ArrowUp className="text-xl text-success" />
-                      </div>
-                    </div>
-                    <div className="mt-4 text-xs flex items-center text-success">
-                      <ArrowUp className="mr-1 h-3 w-3" />
-                      <span>{financialSummary.incomeChange}% acima do mês anterior</span>
-                    </div>
-                  </CardContent>
-                </Card>
-                
-                {/* Despesas */}
-                <Card className="border-l-4 border-error">
-                  <CardContent className="p-5">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <p className="text-neutral-dark text-sm">Despesas do Mês</p>
-                        <h3 className="text-2xl font-bold text-neutral-darkest">
-                          {financialSummary.formattedExpenses}
-                        </h3>
-                      </div>
-                      <div className="rounded-full bg-error/10 p-3">
-                        <ArrowDown className="text-xl text-error" />
-                      </div>
-                    </div>
-                    <div className="mt-4 text-xs flex items-center text-success">
-                      <ArrowDown className="mr-1 h-3 w-3" />
-                      <span>{Math.abs(financialSummary.expenseChange)}% abaixo do mês anterior</span>
-                    </div>
-                  </CardContent>
-                </Card>
-                
-                {/* Lucro */}
-                <Card className="border-l-4 border-primary">
-                  <CardContent className="p-5">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <p className="text-neutral-dark text-sm">Lucro do Mês</p>
-                        <h3 className="text-2xl font-bold text-neutral-darkest">
-                          {financialSummary.formattedProfit}
-                        </h3>
-                      </div>
-                      <div className="rounded-full bg-primary/10 p-3">
-                        <DollarSign className="text-xl text-primary" />
-                      </div>
-                    </div>
-                    <div className="mt-4 text-xs flex items-center text-success">
-                      <ArrowUp className="mr-1 h-3 w-3" />
-                      <span>{financialSummary.profitChange}% acima do mês anterior</span>
-                    </div>
-                  </CardContent>
-                </Card>
+
+            {isLoading ? (
+              <div className="flex h-40 items-center justify-center">
+                <Loader2 className="h-7 w-7 animate-spin text-cp-action" />
               </div>
-              
-              {/* Gráfico de Evolução Financeira */}
-              <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-semibold text-neutral-darkest">Evolução Financeira</h3>
-                  <div className="flex space-x-2">
-                    <button 
-                      className={`px-3 py-1 border rounded-md text-sm ${
-                        chartPeriod === '1M' 
-                          ? 'border-primary text-primary bg-primary bg-opacity-5' 
-                          : 'border-neutral-light text-neutral-dark hover:bg-neutral-lightest'
-                      }`}
-                      onClick={() => setChartPeriod('1M')}
-                    >
-                      1M
-                    </button>
-                    <button 
-                      className={`px-3 py-1 border rounded-md text-sm ${
-                        chartPeriod === '3M' 
-                          ? 'border-primary text-primary bg-primary bg-opacity-5' 
-                          : 'border-neutral-light text-neutral-dark hover:bg-neutral-lightest'
-                      }`}
-                      onClick={() => setChartPeriod('3M')}
-                    >
-                      3M
-                    </button>
-                    <button 
-                      className={`px-3 py-1 border rounded-md text-sm ${
-                        chartPeriod === '6M' 
-                          ? 'border-primary text-primary bg-primary bg-opacity-5' 
-                          : 'border-neutral-light text-neutral-dark hover:bg-neutral-lightest'
-                      }`}
-                      onClick={() => setChartPeriod('6M')}
-                    >
-                      6M
-                    </button>
-                    <button 
-                      className={`px-3 py-1 border rounded-md text-sm ${
-                        chartPeriod === '1A' 
-                          ? 'border-primary text-primary bg-primary bg-opacity-5' 
-                          : 'border-neutral-light text-neutral-dark hover:bg-neutral-lightest'
-                      }`}
-                      onClick={() => setChartPeriod('1A')}
-                    >
-                      1A
-                    </button>
-                  </div>
-                </div>
-                
-                <div className="h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart
-                      data={chartData}
-                      margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                    >
-                      <defs>
-                        <linearGradient id="colorIncome" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#4CAF50" stopOpacity={0.8}/>
-                          <stop offset="95%" stopColor="#4CAF50" stopOpacity={0.1}/>
-                        </linearGradient>
-                        <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#F44336" stopOpacity={0.8}/>
-                          <stop offset="95%" stopColor="#F44336" stopOpacity={0.1}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
-                      <XAxis dataKey="month" axisLine={false} tickLine={false} />
-                      <YAxis 
-                        axisLine={false} 
-                        tickLine={false} 
-                        tickFormatter={(value) => `R$ ${value.toLocaleString('pt-BR')}`}
-                      />
-                      <Tooltip
-                        formatter={(value) => [`R$ ${Number(value).toLocaleString('pt-BR')}`, undefined]}
-                        labelFormatter={(label) => `Mês: ${label}`}
-                      />
-                      <Area 
-                        type="monotone" 
-                        dataKey="income" 
-                        stroke="#4CAF50" 
-                        fillOpacity={1} 
-                        fill="url(#colorIncome)" 
-                        name="Receitas"
-                      />
-                      <Area 
-                        type="monotone" 
-                        dataKey="expenses" 
-                        stroke="#F44336" 
-                        fillOpacity={1} 
-                        fill="url(#colorExpenses)" 
-                        name="Despesas"
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-              
-              {/* Transações Recentes */}
-              <div className="bg-white rounded-lg shadow-sm p-6">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-lg font-semibold text-neutral-darkest">Transações Recentes</h3>
-                  
-                  <div className="flex items-center space-x-2">
-                    <div className="flex items-center space-x-2">
-                      <label className="text-sm text-neutral-dark">De:</label>
-                      <input 
-                        type="date" 
-                        className="border border-neutral-light rounded-md p-2 text-sm"
-                        value={dateRange.startDate}
-                        onChange={(e) => setDateRange({...dateRange, startDate: e.target.value})}
-                      />
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <label className="text-sm text-neutral-dark">Até:</label>
-                      <input 
-                        type="date" 
-                        className="border border-neutral-light rounded-md p-2 text-sm"
-                        value={dateRange.endDate}
-                        onChange={(e) => setDateRange({...dateRange, endDate: e.target.value})}
-                      />
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="overflow-x-auto">
-                  <table className="min-w-full">
-                    <thead>
-                      <tr className="border-b border-neutral-light">
-                        <th className="py-3 text-left text-xs font-semibold text-neutral-dark">Data</th>
-                        <th className="py-3 text-left text-xs font-semibold text-neutral-dark">Descrição</th>
-                        <th className="py-3 text-left text-xs font-semibold text-neutral-dark">Categoria</th>
-                        <th className="py-3 text-left text-xs font-semibold text-neutral-dark">Responsável</th>
-                        <th className="py-3 text-right text-xs font-semibold text-neutral-dark">Valor</th>
+            ) : transactions && transactions.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-separate border-spacing-y-1 text-sm">
+                  <thead>
+                    <tr className="bg-cp-sand-soft text-left text-[13px] text-cp-ink [&>th:first-child]:rounded-l-xl [&>th:last-child]:rounded-r-xl">
+                      <th className="px-4 py-3 font-medium">Data</th>
+                      <th className="px-4 py-3 font-medium">Descrição</th>
+                      <th className="px-4 py-3 font-medium">Categoria</th>
+                      <th className="px-4 py-3 font-medium">Responsável</th>
+                      <th className="px-4 py-3 text-right font-medium">Valor</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transactions.map((transaction) => (
+                      <tr key={transaction.id} className="transition-colors hover:bg-cp-hover [&>td:first-child]:rounded-l-xl [&>td:last-child]:rounded-r-xl">
+                        <td className="whitespace-nowrap px-4 py-3 font-medium text-cp-ink">{formatDate(transaction.date)}</td>
+                        <td className="px-4 py-3 text-cp-ink">{transaction.description}</td>
+                        <td className="px-4 py-3 text-cp-muted">{transaction.category}</td>
+                        <td className="px-4 py-3 text-cp-muted">{transaction.responsible?.fullName || "—"}</td>
+                        <td className={cn("whitespace-nowrap px-4 py-3 text-right font-semibold", transaction.type === 'income' ? 'text-cp-success' : 'text-cp-danger')}>
+                          {transaction.type === 'income' ? '+ ' : '− '}
+                          {formatBRL(transaction.amount)}
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {transactions && transactions.length > 0 ? (
-                        transactions.map((transaction) => (
-                          <tr key={transaction.id} className="border-b border-neutral-light hover:bg-neutral-lightest">
-                            <td className="py-3 text-sm font-medium text-neutral-darkest">
-                              {formatDate(transaction.date)}
-                            </td>
-                            <td className="py-3 text-sm text-neutral-darkest">
-                              {transaction.description}
-                            </td>
-                            <td className="py-3 text-sm text-neutral-darkest">
-                              {transaction.category}
-                            </td>
-                            <td className="py-3 text-sm text-neutral-darkest">
-                              {transaction.responsible?.fullName || "Admin"}
-                            </td>
-                            <td className={`py-3 text-sm font-medium text-right ${
-                              transaction.type === 'income' ? 'text-success' : 'text-error'
-                            }`}>
-                              {transaction.type === 'income' ? '+ ' : '- '}
-                              {formatCurrency(parseFloat(transaction.amount.toString()))}
-                            </td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={5} className="py-6 text-center text-neutral-dark">
-                            Nenhuma transação encontrada no período selecionado.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            </>
-          )}
+            ) : (
+              <div className="flex flex-col items-center py-12 text-center">
+                <Receipt className="mb-3 h-10 w-10 text-cp-sage" />
+                <p className="text-sm font-medium text-cp-ink">Nenhuma transação no período selecionado</p>
+                <p className="mt-1 text-xs text-cp-muted">Ajuste as datas ou registre uma nova receita ou despesa.</p>
+              </div>
+            )}
+          </div>
         </main>
       </div>
     </div>

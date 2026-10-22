@@ -5,6 +5,12 @@ export function formatBRL(value: number | string | null | undefined) {
   return brl.format(Number.isFinite(n) ? n : 0);
 }
 
+/** "1.234,56" | "1234,56" | "200.50" -> number (NaN if invalid). */
+export function parseAmount(raw: string) {
+  const v = raw.trim();
+  return parseFloat(v.includes(",") ? v.replace(/\./g, "").replace(",", ".") : v);
+}
+
 export const incomeCategories = ["Consulta", "Avaliação", "Sessão em Grupo", "Workshop", "Outro"];
 
 export const expenseCategories = [
