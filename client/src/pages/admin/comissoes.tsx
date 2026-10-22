@@ -1,16 +1,13 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import Sidebar from "@/components/sidebar";
+import MobileNav from "@/components/mobile-nav";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
@@ -21,26 +18,34 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   HandCoins,
   Plus,
   Eye,
   CheckCircle,
+  CheckCircle2,
   XCircle,
   Settings,
-  ChevronDown,
   Loader2,
+  Clock,
+  Users,
+  DoorOpen,
+  Calendar,
+  User as UserIcon,
+  Wallet,
+  Percent,
+  Calculator,
+  Ban,
+  Pencil,
 } from "lucide-react";
+import { PageHeader, cpButton } from "@/components/cp/PageHeader";
+import { MetricCard } from "@/components/cp/MetricCard";
+import { CharCountTextarea, IconField, InfoBanner, ModalHeader } from "@/components/cp/fields";
+import { StatusBadge } from "@/components/cp/StatusBadge";
+import { commissionStatus, statusOf } from "@/components/cp/status";
+import { formatBRL } from "@/lib/money";
+import { toDateKey } from "@/lib/time";
+import { cn } from "@/lib/utils";
 
 type Psychologist = { id: number; userId: number };
 type User = { id: number; fullName: string };
@@ -106,19 +111,34 @@ type PreviewData = {
   totalBookings: number;
 };
 
-function fmtBRL(val: string | number) {
-  const n = typeof val === "string" ? parseFloat(val) : val;
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n || 0);
-}
+const PAYMENT_METHODS: Record<string, string> = {
+  pix: "PIX",
+  transferencia: "Transferência Bancária",
+  dinheiro: "Dinheiro",
+  outro: "Outro",
+};
+
+const STATUS_FILTERS = [
+  { value: "all", label: "Todos" },
+  { value: "pending", label: "Pendente" },
+  { value: "paid", label: "Pago" },
+  { value: "cancelled", label: "Cancelado" },
+];
+
+const card = "rounded-2xl border border-cp-divider bg-white shadow-[0_10px_40px_-20px_rgba(36,54,71,0.18)]";
+const fieldLabel = "mb-1.5 block text-[13px] font-semibold text-cp-ink";
+const thRow = "bg-cp-sand-soft text-left text-[13px] text-cp-ink [&>th:first-child]:rounded-l-xl [&>th:last-child]:rounded-r-xl";
+const tdRow = "transition-colors hover:bg-cp-hover [&>td:first-child]:rounded-l-xl [&>td:last-child]:rounded-r-xl";
 
 function fmtDate(d: string | null) {
   if (!d) return "—";
-  const [y, m, day] = d.split("-");
+  const [y, m, day] = d.slice(0, 10).split("-");
   return `${day}/${m}/${y}`;
 }
 
+/** Local yyyy-MM (toISOString() is UTC and flips the month on the last evening of it). */
 function currentMonth() {
-  return new Date().toISOString().slice(0, 7);
+  return toDateKey().slice(0, 7);
 }
 
 function monthStart(m: string) {
@@ -131,12 +151,58 @@ function monthEnd(m: string) {
   return `${m}-${last.toString().padStart(2, "0")}`;
 }
 
-function statusBadge(status: string) {
-  if (status === "paid")
-    return <Badge className="bg-green-100 text-green-800 border-green-200" data-testid="badge-status-paid">Pago</Badge>;
-  if (status === "cancelled")
-    return <Badge className="bg-red-100 text-red-800 border-red-200" data-testid="badge-status-cancelled">Cancelado</Badge>;
-  return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200" data-testid="badge-status-pending">Pendente</Badge>;
+function CommissionBadge({ status }: { status: string }) {
+  const st = statusOf(commissionStatus, status === "paid" || status === "cancelled" ? status : "pending");
+  return (
+    <span data-testid={`badge-status-${status === "paid" || status === "cancelled" ? status : "pending"}`}>
+      <StatusBadge label={st.label} tone={st.tone} />
+    </span>
+  );
+}
+
+/** Psychologist / period / amount summary shown at the top of the pay and cancel dialogs. */
+function CommissionSummary({ c }: { c: Commission }) {
+  return (
+    <div className="rounded-xl bg-cp-hover p-4 text-sm">
+      <p className="font-semibold text-cp-ink">{c.psychologistName ?? `Psicóloga #${c.psychologistId}`}</p>
+      <p className="text-xs text-cp-muted">{fmtDate(c.periodStart)} – {fmtDate(c.periodEnd)}</p>
+      <p className="mt-1 text-lg font-bold text-cp-action">{formatBRL(c.totalRepasse)}</p>
+    </div>
+  );
+}
+
+function Info({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cp-muted">{label}</p>
+      <div className="mt-0.5 text-[15px] text-cp-ink">{children}</div>
+    </div>
+  );
+}
+
+function PsychSelect({ value, onChange, psychologists, disabled, testId }: {
+  value: string;
+  onChange: (v: string) => void;
+  psychologists: Array<{ id: number; user?: { fullName: string } }>;
+  disabled?: boolean;
+  testId: string;
+}) {
+  return (
+    <IconField icon={UserIcon}>
+      <Select value={value} onValueChange={onChange} disabled={disabled}>
+        <SelectTrigger data-testid={testId} aria-label="Psicóloga">
+          <SelectValue placeholder="Selecione..." />
+        </SelectTrigger>
+        <SelectContent>
+          {psychologists.map((p) => (
+            <SelectItem key={p.id} value={String(p.id)}>
+              {p.user?.fullName ?? `Psicóloga #${p.id}`}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </IconField>
+  );
 }
 
 export default function AdminComissoes() {
@@ -157,7 +223,7 @@ export default function AdminComissoes() {
   const [genPreview, setGenPreview] = useState<PreviewData | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
 
-  const [payDate, setPayDate] = useState(new Date().toISOString().split("T")[0]);
+  const [payDate, setPayDate] = useState(toDateKey());
   const [payMethod, setPayMethod] = useState("");
   const [payNotes, setPayNotes] = useState("");
 
@@ -195,7 +261,7 @@ export default function AdminComissoes() {
     },
   });
 
-  const { data: psychologists = [] } = useQuery<Array<{ id: number; userId: number; user?: { fullName: string } }>>({
+  const { data: psychologists = [] } = useQuery<PsychWithUser[]>({
     queryKey: ["/api/psychologists"],
   });
 
@@ -219,6 +285,11 @@ export default function AdminComissoes() {
     enabled: !!showDetail,
   });
 
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/commissions"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/commissions/dashboard"] });
+  };
+
   const generateMutation = useMutation({
     mutationFn: (data: { psychologistId: number; periodStart: string; periodEnd: string }) =>
       apiRequest("POST", "/api/admin/commissions/generate", data),
@@ -227,8 +298,7 @@ export default function AdminComissoes() {
       setShowGenerate(false);
       setGenPreview(null);
       setGenPsychId("");
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/commissions"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/commissions/dashboard"] });
+      refresh();
     },
     onError: async (err: any) => {
       const msg = err?.message || "Erro ao gerar comissionamento";
@@ -246,21 +316,25 @@ export default function AdminComissoes() {
     onSuccess: () => {
       toast({ title: "Pagamento registrado!" });
       setShowPay(null);
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/commissions"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/commissions/dashboard"] });
+      refresh();
     },
     onError: () => toast({ title: "Erro ao registrar pagamento", variant: "destructive" }),
   });
 
+  // The dialog stays open until the request finishes, so the spinner is actually visible
   const cancelMutation = useMutation({
     mutationFn: (id: number) => apiRequest("PATCH", `/api/admin/commissions/${id}/cancel`, {}),
     onSuccess: () => {
       toast({ title: "Comissionamento cancelado." });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/commissions"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/commissions/dashboard"] });
+      setShowCancel(null);
+      refresh();
     },
     onError: () => toast({ title: "Erro ao cancelar", variant: "destructive" }),
   });
+
+  const resetConfigForm = () => {
+    setCfgPsychId(""); setCfgType("percentual"); setCfgValue(""); setCfgFrom(monthStart(currentMonth())); setCfgUntil(""); setEditingCfgId(null);
+  };
 
   const createConfigMutation = useMutation({
     mutationFn: (data: any) => {
@@ -272,7 +346,7 @@ export default function AdminComissoes() {
     onSuccess: () => {
       toast({ title: editingCfgId ? "Configuração atualizada!" : "Configuração criada!" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/commission-configs"] });
-      setCfgPsychId(""); setCfgType("percentual"); setCfgValue(""); setCfgFrom(monthStart(currentMonth())); setCfgUntil(""); setEditingCfgId(null);
+      resetConfigForm();
     },
     onError: () => toast({ title: "Erro ao salvar configuração", variant: "destructive" }),
   });
@@ -285,18 +359,15 @@ export default function AdminComissoes() {
         `/api/admin/commissions/preview?psychologistId=${genPsychId}&periodStart=${genPeriodStart}&periodEnd=${genPeriodEnd}`,
         { credentials: "include" }
       );
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.message || "Erro ao carregar preview");
       setGenPreview(data);
-    } catch {
-      toast({ title: "Erro ao carregar preview", variant: "destructive" });
+    } catch (e) {
+      setGenPreview(null);
+      toast({ title: e instanceof Error ? e.message : "Erro ao carregar preview", variant: "destructive" });
     } finally {
       setLoadingPreview(false);
     }
-  }
-
-  function getPsychName(id: number) {
-    const p = psychologists.find((x) => x.id === id);
-    return p?.user?.fullName ?? `Psicóloga #${id}`;
   }
 
   function startEditConfig(cfg: PayoutConfig) {
@@ -309,298 +380,212 @@ export default function AdminComissoes() {
   }
 
   return (
-    <div className="flex h-screen bg-[#F8F9FB]">
+    <div className="flex h-screen bg-cp-bg">
       <Sidebar />
-      <main className="flex-1 ml-64 overflow-y-auto p-8">
-        <div className="max-w-6xl mx-auto">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-                <HandCoins className="w-6 h-6 text-primary" />
-                Comissões
-              </h1>
-              <p className="text-sm text-slate-500 mt-0.5">Gestão de repasses financeiros das psicólogas</p>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowConfig(true)}
-                data-testid="button-open-config"
-              >
-                <Settings className="w-4 h-4 mr-1.5" />
-                Configurar Repasses
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => setShowGenerate(true)}
-                data-testid="button-generate-commission"
-              >
-                <Plus className="w-4 h-4 mr-1.5" />
-                Gerar Comissionamento
-              </Button>
-            </div>
-          </div>
+      <div className="ml-0 flex-1 overflow-y-auto overflow-x-hidden pt-16 md:ml-64 md:pt-0">
+        <MobileNav />
+        <main className="p-4 pb-20 sm:px-7 sm:py-6">
+          <PageHeader
+            className="mb-6"
+            title="Comissões"
+            icon={HandCoins}
+            subtitle="Gestão de repasses financeiros das psicólogas"
+            phrase
+            actions={
+              <>
+                <button type="button" className={cpButton.secondary} onClick={() => setShowConfig(true)} data-testid="button-open-config">
+                  <Settings className="h-4 w-4" />
+                  Configurar Repasses
+                </button>
+                <button type="button" className={cpButton.primary} onClick={() => setShowGenerate(true)} data-testid="button-generate-commission">
+                  <Plus className="h-4 w-4" />
+                  Gerar Comissionamento
+                </button>
+              </>
+            }
+          />
 
           {/* KPI Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <Card className="border border-slate-200">
-              <CardContent className="pt-4 pb-3 px-4">
-                <p className="text-xs text-slate-500 mb-1">Total Pendente</p>
-                <p className="text-xl font-bold text-yellow-600" data-testid="kpi-pendente">
-                  {fmtBRL(dashboard?.totalPendente ?? "0")}
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="border border-slate-200">
-              <CardContent className="pt-4 pb-3 px-4">
-                <p className="text-xs text-slate-500 mb-1">Total Pago</p>
-                <p className="text-xl font-bold text-green-600" data-testid="kpi-pago">
-                  {fmtBRL(dashboard?.totalPago ?? "0")}
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="border border-slate-200">
-              <CardContent className="pt-4 pb-3 px-4">
-                <p className="text-xs text-slate-500 mb-1">Psicólogas</p>
-                <p className="text-xl font-bold text-slate-800" data-testid="kpi-psicologas">
-                  {dashboard?.numPsicologas ?? 0}
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="border border-slate-200">
-              <CardContent className="pt-4 pb-3 px-4">
-                <p className="text-xs text-slate-500 mb-1">Locações no Período</p>
-                <p className="text-xl font-bold text-slate-800" data-testid="kpi-locacoes">
-                  {dashboard?.numLocacoes ?? 0}
-                </p>
-              </CardContent>
-            </Card>
+          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <MetricCard icon={<Clock className="h-6 w-6 text-cp-warning" />} tint="bg-cp-warning-soft" label="Total pendente"
+              value={<span data-testid="kpi-pendente">{formatBRL(dashboard?.totalPendente ?? "0")}</span>} sub="a repassar" />
+            <MetricCard icon={<CheckCircle2 className="h-6 w-6 text-cp-success" />} tint="bg-cp-sage-soft" label="Total pago"
+              value={<span data-testid="kpi-pago">{formatBRL(dashboard?.totalPago ?? "0")}</span>} sub="no mês" />
+            <MetricCard icon={<Users className="h-6 w-6 text-cp-lavender-ink" />} tint="bg-cp-lavender-soft" label="Psicólogas"
+              value={<span data-testid="kpi-psicologas">{dashboard?.numPsicologas ?? 0}</span>} sub="com repasse" />
+            <MetricCard icon={<DoorOpen className="h-6 w-6 text-cp-sand-ink" />} tint="bg-cp-sand-soft" label="Locações"
+              value={<span data-testid="kpi-locacoes">{dashboard?.numLocacoes ?? 0}</span>} sub="no período" />
           </div>
 
           {/* Filters */}
-          <div className="flex flex-wrap gap-3 mb-4 items-center">
-            <div>
-              <Input
-                type="month"
-                value={month}
-                onChange={(e) => setMonth(e.target.value)}
-                className="w-44 text-sm"
-                data-testid="input-month-filter"
-              />
+          <div className={cn(card, "mb-6 flex flex-wrap items-end gap-3 p-4 sm:p-5")}>
+            <div className="w-full sm:w-48">
+              <label className={fieldLabel} htmlFor="cm-month">Mês</label>
+              <IconField icon={Calendar}>
+                <Input id="cm-month" type="month" value={month} onChange={(e) => setMonth(e.target.value)} data-testid="input-month-filter" />
+              </IconField>
             </div>
-            <Select value={filterPsych} onValueChange={setFilterPsych}>
-              <SelectTrigger className="w-52 text-sm" data-testid="select-psych-filter">
-                <SelectValue placeholder="Todas as psicólogas" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas as psicólogas</SelectItem>
-                {psychologists.map((p) => (
-                  <SelectItem key={p.id} value={String(p.id)} data-testid={`option-psych-${p.id}`}>
-                    {p.user?.fullName ?? `Psicóloga #${p.id}`}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <div className="flex gap-1" data-testid="status-filter-group">
-              {[
-                { value: "all", label: "Todos" },
-                { value: "pending", label: "Pendente" },
-                { value: "paid", label: "Pago" },
-                { value: "cancelled", label: "Cancelado" },
-              ].map((opt) => (
-                <Button
+            <div className="w-full sm:w-60">
+              <span className={fieldLabel}>Psicóloga</span>
+              <IconField icon={UserIcon}>
+                <Select value={filterPsych} onValueChange={setFilterPsych}>
+                  <SelectTrigger data-testid="select-psych-filter" aria-label="Psicóloga">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as psicólogas</SelectItem>
+                    {psychologists.map((p) => (
+                      <SelectItem key={p.id} value={String(p.id)} data-testid={`option-psych-${p.id}`}>
+                        {p.user?.fullName ?? `Psicóloga #${p.id}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </IconField>
+            </div>
+            <div className="flex flex-wrap gap-1.5 pb-1" role="group" aria-label="Status" data-testid="status-filter-group">
+              {STATUS_FILTERS.map((opt) => (
+                <button
                   key={opt.value}
-                  size="sm"
-                  variant={filterStatus === opt.value ? "default" : "outline"}
-                  className="h-9 text-xs"
+                  type="button"
+                  aria-pressed={filterStatus === opt.value}
+                  className={cn(
+                    "rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors",
+                    filterStatus === opt.value ? "bg-cp-action text-white" : "border border-cp-border bg-white text-cp-muted hover:text-cp-ink",
+                  )}
                   onClick={() => setFilterStatus(opt.value)}
                   data-testid={`status-btn-${opt.value}`}
                 >
                   {opt.label}
-                </Button>
+                </button>
               ))}
             </div>
           </div>
 
           {/* Table */}
-          <Card className="border border-slate-200">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-slate-50">
-                  <TableHead className="text-xs font-semibold text-slate-600">Psicóloga</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-600">Período</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-600 text-right">Locações</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-600 text-right">Valor Total</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-600 text-right">Repasse</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-600">Status</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-600">Dt. Pagamento</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-600 text-right">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loadingComm ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-center py-10 text-slate-400">
-                      <Loader2 className="w-5 h-5 animate-spin inline mr-2" />
-                      Carregando...
-                    </TableCell>
-                  </TableRow>
-                ) : commissions.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-center py-12 text-slate-400 text-sm">
-                      Nenhum comissionamento encontrado para o período selecionado.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  commissions.map((c) => (
-                    <TableRow key={c.id} data-testid={`row-commission-${c.id}`}>
-                      <TableCell className="font-medium text-sm text-slate-800">
-                        {c.psychologistName ?? `Psicóloga #${c.psychologistId}`}
-                      </TableCell>
-                      <TableCell className="text-sm text-slate-600">
-                        {fmtDate(c.periodStart)} – {fmtDate(c.periodEnd)}
-                      </TableCell>
-                      <TableCell className="text-sm text-right">{c.totalBookings}</TableCell>
-                      <TableCell className="text-sm text-right">{fmtBRL(c.totalRoomsValue)}</TableCell>
-                      <TableCell className="text-sm text-right font-semibold text-primary">
-                        {fmtBRL(c.totalRepasse)}
-                      </TableCell>
-                      <TableCell>{statusBadge(c.status)}</TableCell>
-                      <TableCell className="text-sm text-slate-600" data-testid={`text-paydate-${c.id}`}>
-                        {c.paymentDate ? fmtDate(c.paymentDate) : "—"}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1 justify-end">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 px-2"
-                            onClick={() => setShowDetail(c)}
-                            data-testid={`button-detail-${c.id}`}
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                          </Button>
-                          {c.status === "pending" && (
-                            <>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 px-2 text-green-600 hover:text-green-700"
-                                onClick={() => { setShowPay(c); setPayDate(new Date().toISOString().split("T")[0]); setPayMethod(""); setPayNotes(""); }}
-                                data-testid={`button-pay-${c.id}`}
-                              >
-                                <CheckCircle className="w-3.5 h-3.5" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 px-2 text-red-500 hover:text-red-600"
-                                onClick={() => setShowCancel(c)}
-                                data-testid={`button-cancel-${c.id}`}
-                              >
-                                <XCircle className="w-3.5 h-3.5" />
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </Card>
-        </div>
-      </main>
+          <div className={cn(card, "p-4 sm:p-6")}>
+            {loadingComm ? (
+              <div className="flex items-center justify-center py-12 text-cp-muted">
+                <Loader2 className="mr-2 h-5 w-5 animate-spin text-cp-action" />
+                Carregando...
+              </div>
+            ) : commissions.length === 0 ? (
+              <div className="flex flex-col items-center py-12 text-center">
+                <HandCoins className="mb-3 h-10 w-10 text-cp-sage" />
+                <p className="text-sm font-medium text-cp-ink">Nenhum comissionamento no período</p>
+                <p className="mt-1 text-xs text-cp-muted">Use "Gerar Comissionamento" para calcular os repasses do mês.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-separate border-spacing-y-1 text-sm">
+                  <thead>
+                    <tr className={thRow}>
+                      <th className="px-4 py-3 font-medium">Psicóloga</th>
+                      <th className="px-4 py-3 font-medium">Período</th>
+                      <th className="px-4 py-3 text-right font-medium">Locações</th>
+                      <th className="px-4 py-3 text-right font-medium">Valor total</th>
+                      <th className="px-4 py-3 text-right font-medium">Repasse</th>
+                      <th className="px-4 py-3 font-medium">Status</th>
+                      <th className="px-4 py-3 font-medium">Pagamento</th>
+                      <th className="px-4 py-3 text-right font-medium">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {commissions.map((c) => (
+                      <tr key={c.id} className={tdRow} data-testid={`row-commission-${c.id}`}>
+                        <td className="px-4 py-3 font-medium text-cp-ink">{c.psychologistName ?? `Psicóloga #${c.psychologistId}`}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-cp-muted">{fmtDate(c.periodStart)} – {fmtDate(c.periodEnd)}</td>
+                        <td className="px-4 py-3 text-right text-cp-ink">{c.totalBookings}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-right text-cp-ink">{formatBRL(c.totalRoomsValue)}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-right font-semibold text-cp-action">{formatBRL(c.totalRepasse)}</td>
+                        <td className="px-4 py-3"><CommissionBadge status={c.status} /></td>
+                        <td className="whitespace-nowrap px-4 py-3 text-cp-muted" data-testid={`text-paydate-${c.id}`}>{c.paymentDate ? fmtDate(c.paymentDate) : "—"}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex justify-end gap-1">
+                            <Button size="icon" variant="ghost" className="h-8 w-8 text-cp-muted hover:bg-cp-action-soft hover:text-cp-action" onClick={() => setShowDetail(c)} aria-label="Ver detalhes" data-testid={`button-detail-${c.id}`}>
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            {c.status === "pending" && (
+                              <>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8 text-cp-success hover:bg-cp-success-soft hover:text-cp-success"
+                                  onClick={() => { setShowPay(c); setPayDate(toDateKey()); setPayMethod(""); setPayNotes(""); }}
+                                  aria-label="Registrar pagamento"
+                                  data-testid={`button-pay-${c.id}`}
+                                >
+                                  <CheckCircle className="h-4 w-4" />
+                                </Button>
+                                <Button size="icon" variant="ghost" className="h-8 w-8 text-cp-danger hover:bg-cp-danger-soft hover:text-cp-danger" onClick={() => setShowCancel(c)} aria-label="Cancelar comissionamento" data-testid={`button-cancel-${c.id}`}>
+                                  <XCircle className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </main>
+      </div>
 
       {/* Generate Modal */}
       <Dialog open={showGenerate} onOpenChange={(o) => { setShowGenerate(o); if (!o) { setGenPreview(null); setGenPsychId(""); } }}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Gerar Comissionamento</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
+        <DialogContent className="max-h-[92vh] max-w-lg overflow-y-auto rounded-2xl">
+          <ModalHeader icon={Calculator} title="Gerar Comissionamento" description="Calcule o repasse das locações de sala no período." />
+          <div className="mt-2 space-y-4">
             <div>
-              <Label>Psicóloga</Label>
-              <Select value={genPsychId} onValueChange={setGenPsychId}>
-                <SelectTrigger data-testid="select-gen-psych">
-                  <SelectValue placeholder="Selecione..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {psychologists.map((p) => (
-                    <SelectItem key={p.id} value={String(p.id)}>
-                      {p.user?.fullName ?? `Psicóloga #${p.id}`}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <span className={fieldLabel}>Psicóloga <span className="text-cp-danger">*</span></span>
+              <PsychSelect value={genPsychId} onChange={setGenPsychId} psychologists={psychologists} testId="select-gen-psych" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <Label>Início do Período</Label>
-                <Input
-                  type="date"
-                  value={genPeriodStart}
-                  onChange={(e) => setGenPeriodStart(e.target.value)}
-                  data-testid="input-gen-period-start"
-                />
+                <label className={fieldLabel} htmlFor="gen-start">Início do período</label>
+                <IconField icon={Calendar}>
+                  <Input id="gen-start" type="date" value={genPeriodStart} onChange={(e) => setGenPeriodStart(e.target.value)} data-testid="input-gen-period-start" />
+                </IconField>
               </div>
               <div>
-                <Label>Fim do Período</Label>
-                <Input
-                  type="date"
-                  value={genPeriodEnd}
-                  onChange={(e) => setGenPeriodEnd(e.target.value)}
-                  data-testid="input-gen-period-end"
-                />
+                <label className={fieldLabel} htmlFor="gen-end">Fim do período</label>
+                <IconField icon={Calendar}>
+                  <Input id="gen-end" type="date" value={genPeriodEnd} onChange={(e) => setGenPeriodEnd(e.target.value)} data-testid="input-gen-period-end" />
+                </IconField>
               </div>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={loadPreview}
-              disabled={!genPsychId || loadingPreview}
-              data-testid="button-load-preview"
-            >
-              {loadingPreview && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
-              Calcular Preview
-            </Button>
+            <button type="button" className={cpButton.secondary} onClick={loadPreview} disabled={!genPsychId || loadingPreview} data-testid="button-load-preview">
+              {loadingPreview ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
+              Calcular prévia
+            </button>
 
             {genPreview && (
-              <div className="border border-slate-200 rounded-lg p-3 bg-slate-50 text-sm space-y-2">
-                <p className="font-semibold text-slate-700">Preview do Comissionamento</p>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Locações encontradas:</span>
-                  <span className="font-medium">{genPreview.totalBookings}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Valor total das locações:</span>
-                  <span className="font-medium">{fmtBRL(genPreview.totalRoomsValue)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Repasse calculado:</span>
-                  <span className="font-bold text-primary">{fmtBRL(genPreview.totalRepasse)}</span>
-                </div>
+              <div className="space-y-2 rounded-xl bg-cp-hover p-4 text-sm">
+                <p className="font-semibold text-cp-ink">Prévia do comissionamento</p>
+                <div className="flex justify-between"><span className="text-cp-muted">Locações encontradas</span><span className="font-medium text-cp-ink">{genPreview.totalBookings}</span></div>
+                <div className="flex justify-between"><span className="text-cp-muted">Valor total das locações</span><span className="font-medium text-cp-ink">{formatBRL(genPreview.totalRoomsValue)}</span></div>
+                <div className="flex justify-between"><span className="text-cp-muted">Repasse calculado</span><span className="font-bold text-cp-action">{formatBRL(genPreview.totalRepasse)}</span></div>
                 {genPreview.totalBookings > 0 && (
-                  <div className="mt-2 max-h-40 overflow-y-auto">
+                  <div className="mt-2 max-h-40 overflow-y-auto rounded-lg bg-white">
                     <table className="w-full text-xs">
                       <thead>
-                        <tr className="text-slate-500">
-                          <th className="text-left py-1">Data</th>
-                          <th className="text-left py-1">Sala</th>
-                          <th className="text-right py-1">Valor</th>
-                          <th className="text-right py-1">Repasse</th>
+                        <tr className="text-cp-muted">
+                          <th className="px-2 py-1.5 text-left font-medium">Data</th>
+                          <th className="px-2 py-1.5 text-left font-medium">Sala</th>
+                          <th className="px-2 py-1.5 text-right font-medium">Valor</th>
+                          <th className="px-2 py-1.5 text-right font-medium">Repasse</th>
                         </tr>
                       </thead>
                       <tbody>
                         {genPreview.items.map((item, i) => (
-                          <tr key={i} className="border-t border-slate-100">
-                            <td className="py-1">{fmtDate(item.bookingDate)}</td>
-                            <td className="py-1">{item.roomName ?? "—"}</td>
-                            <td className="py-1 text-right">{fmtBRL(item.bookingValue)}</td>
-                            <td className="py-1 text-right font-medium text-primary">{fmtBRL(item.repasseValue)}</td>
+                          <tr key={i} className="border-t border-cp-divider text-cp-ink">
+                            <td className="px-2 py-1.5">{fmtDate(item.bookingDate)}</td>
+                            <td className="px-2 py-1.5">{item.roomName ?? "—"}</td>
+                            <td className="px-2 py-1.5 text-right">{formatBRL(item.bookingValue)}</td>
+                            <td className="px-2 py-1.5 text-right font-medium text-cp-action">{formatBRL(item.repasseValue)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -610,9 +595,11 @@ export default function AdminComissoes() {
               </div>
             )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowGenerate(false)}>Cancelar</Button>
-            <Button
+          <DialogFooter className="flex-row justify-between gap-3 pt-2 sm:justify-between">
+            <button type="button" className={cpButton.subtle} onClick={() => setShowGenerate(false)}>Cancelar</button>
+            <button
+              type="button"
+              className={cpButton.primary}
               onClick={() => generateMutation.mutate({
                 psychologistId: parseInt(genPsychId),
                 periodStart: genPeriodStart,
@@ -621,64 +608,57 @@ export default function AdminComissoes() {
               disabled={!genPsychId || generateMutation.isPending}
               data-testid="button-confirm-generate"
             >
-              {generateMutation.isPending && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
-              Gerar Comissionamento
-            </Button>
+              {generateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              Gerar
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Pay Modal */}
       <Dialog open={!!showPay} onOpenChange={(o) => !o && setShowPay(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Registrar Pagamento</DialogTitle>
-          </DialogHeader>
+        <DialogContent className="max-h-[92vh] max-w-md overflow-y-auto rounded-2xl">
+          <ModalHeader icon={Wallet} title="Registrar Pagamento" description="Informe como e quando o repasse foi pago." />
           {showPay && (
-            <div className="space-y-4">
-              <div className="bg-slate-50 rounded-lg p-3 text-sm">
-                <p className="font-semibold text-slate-700">{showPay.psychologistName}</p>
-                <p className="text-slate-500 text-xs">{fmtDate(showPay.periodStart)} – {fmtDate(showPay.periodEnd)}</p>
-                <p className="text-primary font-bold mt-1">{fmtBRL(showPay.totalRepasse)}</p>
+            <div className="mt-2 space-y-4">
+              <CommissionSummary c={showPay} />
+              <div>
+                <label className={fieldLabel} htmlFor="pay-date">Data do pagamento <span className="text-cp-danger">*</span></label>
+                <IconField icon={Calendar}>
+                  <Input id="pay-date" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} data-testid="input-pay-date" />
+                </IconField>
               </div>
               <div>
-                <Label>Data do Pagamento</Label>
-                <Input
-                  type="date"
-                  value={payDate}
-                  onChange={(e) => setPayDate(e.target.value)}
-                  data-testid="input-pay-date"
-                />
+                <span className={fieldLabel}>Método de pagamento <span className="text-cp-danger">*</span></span>
+                <IconField icon={Wallet}>
+                  <Select value={payMethod} onValueChange={setPayMethod}>
+                    <SelectTrigger data-testid="select-pay-method" aria-label="Método de pagamento">
+                      <SelectValue placeholder="Selecione..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(PAYMENT_METHODS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </IconField>
               </div>
               <div>
-                <Label>Método de Pagamento</Label>
-                <Select value={payMethod} onValueChange={setPayMethod}>
-                  <SelectTrigger data-testid="select-pay-method">
-                    <SelectValue placeholder="Selecione..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pix">PIX</SelectItem>
-                    <SelectItem value="transferencia">Transferência Bancária</SelectItem>
-                    <SelectItem value="dinheiro">Dinheiro</SelectItem>
-                    <SelectItem value="outro">Outro</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Observações (opcional)</Label>
-                <Textarea
+                <label className={fieldLabel} htmlFor="pay-notes">Observações (opcional)</label>
+                <CharCountTextarea
+                  id="pay-notes"
+                  max={500}
                   value={payNotes}
                   onChange={(e) => setPayNotes(e.target.value)}
-                  rows={2}
                   placeholder="Ex.: comprovante enviado por e-mail"
                   data-testid="textarea-pay-notes"
                 />
               </div>
             </div>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowPay(null)}>Cancelar</Button>
-            <Button
+          <DialogFooter className="flex-row justify-between gap-3 pt-2 sm:justify-between">
+            <button type="button" className={cpButton.subtle} onClick={() => setShowPay(null)}>Cancelar</button>
+            <button
+              type="button"
+              className={cn(cpButton.primary, "bg-cp-success hover:bg-cp-success/90")}
               onClick={() => payMutation.mutate({
                 id: showPay!.id,
                 paymentDate: payDate,
@@ -686,219 +666,154 @@ export default function AdminComissoes() {
                 paymentNotes: payNotes,
               })}
               disabled={payMutation.isPending || !payDate || !payMethod}
-              className="bg-green-600 hover:bg-green-700 text-white"
               data-testid="button-confirm-pay"
             >
-              {payMutation.isPending && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
+              {payMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
               Confirmar Pagamento
-            </Button>
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Detail Modal */}
       <Dialog open={!!showDetail} onOpenChange={(o) => !o && setShowDetail(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Detalhes do Comissionamento</DialogTitle>
-          </DialogHeader>
+        <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto rounded-2xl">
+          <ModalHeader icon={Eye} title="Detalhes do Comissionamento" description={showDetail?.psychologistName ?? undefined} />
           {showDetail && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p className="text-xs text-slate-500">Psicóloga</p>
-                  <p className="font-semibold">{showDetail.psychologistName}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500">Status</p>
-                  {statusBadge(showDetail.status)}
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500">Período</p>
-                  <p className="font-medium">{fmtDate(showDetail.periodStart)} – {fmtDate(showDetail.periodEnd)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500">Repasse Total</p>
-                  <p className="font-bold text-primary">{fmtBRL(showDetail.totalRepasse)}</p>
-                </div>
+            <div className="mt-2 space-y-5">
+              <div className="grid grid-cols-2 gap-4 rounded-xl bg-cp-hover p-4">
+                <Info label="Psicóloga">{showDetail.psychologistName ?? `#${showDetail.psychologistId}`}</Info>
+                <Info label="Status"><CommissionBadge status={showDetail.status} /></Info>
+                <Info label="Período">{fmtDate(showDetail.periodStart)} – {fmtDate(showDetail.periodEnd)}</Info>
+                <Info label="Repasse total"><span className="font-bold text-cp-action">{formatBRL(showDetail.totalRepasse)}</span></Info>
                 {showDetail.status === "paid" && (
                   <>
-                    <div>
-                      <p className="text-xs text-slate-500">Data de Pagamento</p>
-                      <p className="font-medium">{fmtDate(showDetail.paymentDate)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-slate-500">Método</p>
-                      <p className="font-medium">{showDetail.paymentMethod ?? "—"}</p>
-                    </div>
+                    <Info label="Data de pagamento">{fmtDate(showDetail.paymentDate)}</Info>
+                    <Info label="Método">{showDetail.paymentMethod ? PAYMENT_METHODS[showDetail.paymentMethod] ?? showDetail.paymentMethod : "—"}</Info>
                     {showDetail.paymentNotes && (
-                      <div className="col-span-2">
-                        <p className="text-xs text-slate-500">Observações</p>
-                        <p className="text-sm">{showDetail.paymentNotes}</p>
-                      </div>
+                      <div className="col-span-2"><Info label="Observações">{showDetail.paymentNotes}</Info></div>
                     )}
                   </>
                 )}
               </div>
 
               <div>
-                <p className="text-xs font-semibold text-slate-600 mb-2 uppercase tracking-wider">Locações do Período</p>
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-cp-muted">Locações do período</p>
                 {loadingItems ? (
-                  <div className="text-center py-4 text-slate-400">
-                    <Loader2 className="w-4 h-4 animate-spin inline" />
-                  </div>
+                  <div className="py-4 text-center"><Loader2 className="inline h-4 w-4 animate-spin text-cp-action" /></div>
                 ) : detailItems.length === 0 ? (
-                  <p className="text-sm text-slate-400">Nenhuma locação registrada.</p>
+                  <p className="text-sm text-cp-muted">Nenhuma locação registrada.</p>
                 ) : (
-                  <div className="border border-slate-200 rounded-lg overflow-hidden">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="bg-slate-50">
-                          <TableHead className="text-xs">Data</TableHead>
-                          <TableHead className="text-xs">Sala</TableHead>
-                          <TableHead className="text-xs">Horário</TableHead>
-                          <TableHead className="text-xs text-right">Valor</TableHead>
-                          <TableHead className="text-xs text-right">Repasse</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full border-separate border-spacing-y-1 text-xs">
+                      <thead>
+                        <tr className={thRow}>
+                          <th className="px-3 py-2 font-medium">Data</th>
+                          <th className="px-3 py-2 font-medium">Sala</th>
+                          <th className="px-3 py-2 font-medium">Horário</th>
+                          <th className="px-3 py-2 text-right font-medium">Valor</th>
+                          <th className="px-3 py-2 text-right font-medium">Repasse</th>
+                        </tr>
+                      </thead>
+                      <tbody>
                         {detailItems.map((item) => (
-                          <TableRow key={item.id} data-testid={`row-item-${item.id}`}>
-                            <TableCell className="text-xs">{fmtDate(item.bookingDate)}</TableCell>
-                            <TableCell className="text-xs">{item.roomName ?? "—"}</TableCell>
-                            <TableCell className="text-xs">
-                              {item.startTime && item.endTime ? `${item.startTime.slice(0,5)} – ${item.endTime.slice(0,5)}` : "—"}
-                            </TableCell>
-                            <TableCell className="text-xs text-right">{fmtBRL(item.bookingValue)}</TableCell>
-                            <TableCell className="text-xs text-right font-semibold text-primary">{fmtBRL(item.repasseValue)}</TableCell>
-                          </TableRow>
+                          <tr key={item.id} className={cn(tdRow, "text-cp-ink")} data-testid={`row-item-${item.id}`}>
+                            <td className="px-3 py-2">{fmtDate(item.bookingDate)}</td>
+                            <td className="px-3 py-2">{item.roomName ?? "—"}</td>
+                            <td className="px-3 py-2">{item.startTime && item.endTime ? `${item.startTime.slice(0, 5)} – ${item.endTime.slice(0, 5)}` : "—"}</td>
+                            <td className="px-3 py-2 text-right">{formatBRL(item.bookingValue)}</td>
+                            <td className="px-3 py-2 text-right font-semibold text-cp-action">{formatBRL(item.repasseValue)}</td>
+                          </tr>
                         ))}
-                      </TableBody>
-                    </Table>
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>
             </div>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDetail(null)}>Fechar</Button>
+          <DialogFooter className="pt-2">
+            <button type="button" className={cpButton.secondary} onClick={() => setShowDetail(null)}>Fechar</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Cancel Confirmation Modal */}
-      <Dialog open={!!showCancel} onOpenChange={(o) => !o && setShowCancel(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Cancelar Comissionamento</DialogTitle>
-          </DialogHeader>
+      <Dialog open={!!showCancel} onOpenChange={(o) => { if (!o && !cancelMutation.isPending) setShowCancel(null); }}>
+        <DialogContent className="max-w-md rounded-2xl">
+          <ModalHeader icon={Ban} tone="lavender" title="Cancelar Comissionamento" description="Confirme o cancelamento deste repasse." />
           {showCancel && (
-            <div className="text-sm text-slate-600 space-y-2">
-              <p>Tem certeza que deseja cancelar o comissionamento de:</p>
-              <p className="font-semibold text-slate-800">{showCancel.psychologistName}</p>
-              <p className="text-slate-500">{fmtDate(showCancel.periodStart)} – {fmtDate(showCancel.periodEnd)}</p>
-              <p className="text-slate-500">Repasse: <span className="font-medium text-primary">{fmtBRL(showCancel.totalRepasse)}</span></p>
-              <p className="text-red-600 text-xs mt-2">Esta ação não pode ser desfeita.</p>
+            <div className="mt-2 space-y-3">
+              <CommissionSummary c={showCancel} />
+              <InfoBanner variant="warning" title="Esta ação não pode ser desfeita." />
             </div>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCancel(null)} data-testid="button-cancel-dismiss">Não, manter</Button>
-            <Button
-              variant="destructive"
-              onClick={() => { cancelMutation.mutate(showCancel!.id); setShowCancel(null); }}
+          <DialogFooter className="flex-row justify-between gap-3 pt-2 sm:justify-between">
+            <button type="button" className={cpButton.subtle} onClick={() => setShowCancel(null)} disabled={cancelMutation.isPending} data-testid="button-cancel-dismiss">Não, manter</button>
+            <button
+              type="button"
+              className={cn(cpButton.primary, "bg-cp-danger hover:bg-cp-danger/90")}
+              onClick={() => showCancel && cancelMutation.mutate(showCancel.id)}
               disabled={cancelMutation.isPending}
               data-testid="button-cancel-confirm"
             >
-              {cancelMutation.isPending && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
+              {cancelMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               Sim, cancelar
-            </Button>
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Config Modal */}
-      <Dialog open={showConfig} onOpenChange={(o) => { setShowConfig(o); if (!o) { setEditingCfgId(null); setCfgPsychId(""); setCfgValue(""); } }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Configurar Repasses</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-5">
-            {/* Form */}
-            <div className="border border-slate-200 rounded-lg p-4 space-y-3 bg-slate-50">
-              <p className="text-sm font-semibold text-slate-700">
-                {editingCfgId ? "Editar Configuração" : "Nova Configuração"}
-              </p>
-              <div className="grid grid-cols-2 gap-3">
+      <Dialog open={showConfig} onOpenChange={(o) => { setShowConfig(o); if (!o) resetConfigForm(); }}>
+        <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto rounded-2xl">
+          <ModalHeader icon={Settings} title="Configurar Repasses" description="Defina quanto cada psicóloga repassa pelas locações de sala." />
+          <div className="mt-2 space-y-5">
+            <div className="space-y-3 rounded-xl bg-cp-hover p-4">
+              <p className="text-sm font-semibold text-cp-ink">{editingCfgId ? "Editar configuração" : "Nova configuração"}</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <Label>Psicóloga</Label>
-                  <Select value={cfgPsychId} onValueChange={setCfgPsychId} disabled={!!editingCfgId}>
-                    <SelectTrigger data-testid="select-cfg-psych">
-                      <SelectValue placeholder="Selecione..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {psychologists.map((p) => (
-                        <SelectItem key={p.id} value={String(p.id)}>
-                          {p.user?.fullName ?? `Psicóloga #${p.id}`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <span className={fieldLabel}>Psicóloga</span>
+                  <PsychSelect value={cfgPsychId} onChange={setCfgPsychId} psychologists={psychologists} disabled={!!editingCfgId} testId="select-cfg-psych" />
                 </div>
                 <div>
-                  <Label>Tipo de Repasse</Label>
-                  <Select value={cfgType} onValueChange={(v) => setCfgType(v as "percentual" | "fixed")}>
-                    <SelectTrigger data-testid="select-cfg-type">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="percentual">Percentual (%)</SelectItem>
-                      <SelectItem value="fixed">Valor Fixo (R$)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <span className={fieldLabel}>Tipo de repasse</span>
+                  <IconField icon={Percent}>
+                    <Select value={cfgType} onValueChange={(v) => setCfgType(v as "percentual" | "fixed")}>
+                      <SelectTrigger data-testid="select-cfg-type" aria-label="Tipo de repasse"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="percentual">Percentual (%)</SelectItem>
+                        <SelectItem value="fixed">Valor fixo (R$)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </IconField>
                 </div>
                 <div>
-                  <Label>{cfgType === "percentual" ? "Percentual (%)" : "Valor (R$)"}</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={cfgValue}
-                    onChange={(e) => setCfgValue(e.target.value)}
-                    placeholder={cfgType === "percentual" ? "Ex: 40" : "Ex: 150.00"}
-                    data-testid="input-cfg-value"
-                  />
+                  <label className={fieldLabel} htmlFor="cfg-value">{cfgType === "percentual" ? "Percentual (%)" : "Valor (R$)"}</label>
+                  <IconField icon={cfgType === "percentual" ? Percent : Wallet}>
+                    <Input id="cfg-value" type="number" step="0.01" min="0" value={cfgValue} onChange={(e) => setCfgValue(e.target.value)} placeholder={cfgType === "percentual" ? "Ex: 40" : "Ex: 150.00"} data-testid="input-cfg-value" />
+                  </IconField>
                 </div>
                 <div>
-                  <Label>Válido a partir de</Label>
-                  <Input
-                    type="date"
-                    value={cfgFrom}
-                    onChange={(e) => setCfgFrom(e.target.value)}
-                    data-testid="input-cfg-from"
-                  />
+                  <label className={fieldLabel} htmlFor="cfg-from">Válido a partir de</label>
+                  <IconField icon={Calendar}>
+                    <Input id="cfg-from" type="date" value={cfgFrom} onChange={(e) => setCfgFrom(e.target.value)} data-testid="input-cfg-from" />
+                  </IconField>
                 </div>
                 <div>
-                  <Label>Válido até (opcional)</Label>
-                  <Input
-                    type="date"
-                    value={cfgUntil}
-                    onChange={(e) => setCfgUntil(e.target.value)}
-                    data-testid="input-cfg-until"
-                  />
+                  <label className={fieldLabel} htmlFor="cfg-until">Válido até (opcional)</label>
+                  <IconField icon={Calendar}>
+                    <Input id="cfg-until" type="date" value={cfgUntil} onChange={(e) => setCfgUntil(e.target.value)} data-testid="input-cfg-until" />
+                  </IconField>
                 </div>
               </div>
-              <div className="flex gap-2 justify-end">
+              <div className="flex justify-end gap-2">
                 {editingCfgId && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => { setEditingCfgId(null); setCfgPsychId(""); setCfgValue(""); }}
-                  >
-                    Cancelar
-                  </Button>
+                  <button type="button" className={cpButton.subtle} onClick={resetConfigForm}>Cancelar edição</button>
                 )}
-                <Button
-                  size="sm"
+                <button
+                  type="button"
+                  className={cpButton.primary}
                   onClick={() => createConfigMutation.mutate({
                     psychologistId: parseInt(cfgPsychId),
                     payoutType: cfgType,
@@ -909,61 +824,49 @@ export default function AdminComissoes() {
                   disabled={!cfgPsychId || !cfgValue || createConfigMutation.isPending}
                   data-testid="button-save-config"
                 >
-                  {createConfigMutation.isPending && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
+                  {createConfigMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
                   {editingCfgId ? "Salvar Alterações" : "Criar Configuração"}
-                </Button>
+                </button>
               </div>
             </div>
 
-            {/* Config list */}
             {configs.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Configurações Cadastradas</p>
-                <div className="border border-slate-200 rounded-lg overflow-hidden">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-slate-50">
-                        <TableHead className="text-xs">Psicóloga</TableHead>
-                        <TableHead className="text-xs">Tipo</TableHead>
-                        <TableHead className="text-xs text-right">Valor</TableHead>
-                        <TableHead className="text-xs">Vigência</TableHead>
-                        <TableHead className="text-xs"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-cp-muted">Configurações cadastradas</p>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full border-separate border-spacing-y-1 text-xs">
+                    <thead>
+                      <tr className={thRow}>
+                        <th className="px-3 py-2 font-medium">Psicóloga</th>
+                        <th className="px-3 py-2 font-medium">Tipo</th>
+                        <th className="px-3 py-2 text-right font-medium">Valor</th>
+                        <th className="px-3 py-2 font-medium">Vigência</th>
+                        <th className="px-3 py-2"><span className="sr-only">Ações</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
                       {configs.map((cfg) => (
-                        <TableRow key={cfg.id} data-testid={`row-config-${cfg.id}`}>
-                          <TableCell className="text-xs font-medium">{cfg.psychologistName ?? `#${cfg.psychologistId}`}</TableCell>
-                          <TableCell className="text-xs">
-                            {cfg.payoutType === "percentual" ? "Percentual" : "Fixo"}
-                          </TableCell>
-                          <TableCell className="text-xs text-right">
-                            {cfg.payoutType === "percentual" ? `${cfg.payoutValue}%` : fmtBRL(cfg.payoutValue)}
-                          </TableCell>
-                          <TableCell className="text-xs">
-                            {fmtDate(cfg.validFrom)} – {cfg.validUntil ? fmtDate(cfg.validUntil) : "Atual"}
-                          </TableCell>
-                          <TableCell>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-6 px-2 text-xs"
-                              onClick={() => startEditConfig(cfg)}
-                              data-testid={`button-edit-config-${cfg.id}`}
-                            >
+                        <tr key={cfg.id} className={cn(tdRow, "text-cp-ink")} data-testid={`row-config-${cfg.id}`}>
+                          <td className="px-3 py-2 font-medium">{cfg.psychologistName ?? `#${cfg.psychologistId}`}</td>
+                          <td className="px-3 py-2">{cfg.payoutType === "percentual" ? "Percentual" : "Fixo"}</td>
+                          <td className="px-3 py-2 text-right">{cfg.payoutType === "percentual" ? `${cfg.payoutValue}%` : formatBRL(cfg.payoutValue)}</td>
+                          <td className="px-3 py-2">{fmtDate(cfg.validFrom)} – {cfg.validUntil ? fmtDate(cfg.validUntil) : "Atual"}</td>
+                          <td className="px-3 py-2 text-right">
+                            <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-xs text-cp-action hover:bg-cp-action-soft" onClick={() => startEditConfig(cfg)} data-testid={`button-edit-config-${cfg.id}`}>
+                              <Pencil className="h-3 w-3" />
                               Editar
                             </Button>
-                          </TableCell>
-                        </TableRow>
+                          </td>
+                        </tr>
                       ))}
-                    </TableBody>
-                  </Table>
+                    </tbody>
+                  </table>
                 </div>
               </div>
             )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowConfig(false)}>Fechar</Button>
+          <DialogFooter className="pt-2">
+            <button type="button" className={cpButton.secondary} onClick={() => setShowConfig(false)}>Fechar</button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
