@@ -1,275 +1,188 @@
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { useLocation, useRoute, Route, Switch, Link } from "wouter";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
+import { useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertAppointmentSchema } from "@shared/schema";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { CheckCircle, Loader2, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { apiRequest } from "@/lib/queryClient";
+import { CalendarDays, CheckCircle2, Clock, Link2Off, Loader2, Mail, Phone, Send, User as UserIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { cpButton } from "@/components/cp/PageHeader";
+import { CharCountTextarea, IconField } from "@/components/cp/fields";
+import { PublicShell, PublicState } from "@/components/cp/PublicShell";
+import { fromDateKey } from "@/lib/time";
+import { cn } from "@/lib/utils";
 
-// Extend appointment schema for form validation
 const quickBookingSchema = z.object({
   patientName: z.string().min(2, "Nome deve ter pelo menos 2 caracteres"),
   patientEmail: z.string().email("Email inválido"),
   patientPhone: z.string().min(8, "Telefone inválido"),
-  notes: z.string().optional(),
+  notes: z.string().max(500).optional(),
 });
 
 type QuickBookingFormValues = z.infer<typeof quickBookingSchema>;
+type Phase = "loading" | "invalid" | "form" | "done";
+
+const fieldLabel = "text-[13px] font-semibold text-cp-ink";
+
+/** "2026-10-22" -> "quinta-feira, 22 de outubro de 2026" (local date, no UTC shift). */
+function longDate(key: string) {
+  const d = fromDateKey(key);
+  return d ? format(d, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR }) : key;
+}
+
+function BookingSummary({ date, time, psychologistName }: { date: string; time: string; psychologistName: string }) {
+  return (
+    <div className="space-y-2 rounded-xl bg-cp-sage-soft/60 p-4 text-sm text-cp-ink">
+      <p className="flex items-center gap-2 first-letter:uppercase"><CalendarDays className="h-4 w-4 text-cp-sage-ink" /><span className="first-letter:uppercase">{longDate(date)}</span></p>
+      <p className="flex items-center gap-2"><Clock className="h-4 w-4 text-cp-sage-ink" />{time}</p>
+      <p className="flex items-center gap-2"><UserIcon className="h-4 w-4 text-cp-sage-ink" />{psychologistName}</p>
+    </div>
+  );
+}
 
 export default function QuickBooking() {
   const [location] = useLocation();
-  const [_, params] = useRoute("/quick-booking");
   const { toast } = useToast();
-  const [isSubmitted, setIsSubmitted] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [bookingData, setBookingData] = useState({
-    date: "",
-    time: "",
-    psychologistId: "",
-    psychologistName: "",
-  });
+  const [phase, setPhase] = useState<Phase>("loading");
+  const [bookingData, setBookingData] = useState({ date: "", time: "", psychologistId: "", psychologistName: "" });
 
-  // Parse URL query parameters
+  // The link carries ?date=yyyy-MM-dd&time=HH:mm - HH:mm&psychologist=<id>
   useEffect(() => {
-    const searchParams = new URLSearchParams(location.split("?")[1]);
+    const searchParams = new URLSearchParams(window.location.search || location.split("?")[1]);
     const date = searchParams.get("date") || "";
     const time = searchParams.get("time") || "";
     const psychologistId = searchParams.get("psychologist") || "";
 
-    if (!date || !time || !psychologistId) {
-      toast({
-        title: "Erro",
-        description: "Informações de agendamento incompletas no link",
-        variant: "destructive",
-      });
+    // Without these the page used to spin forever; now it says the link is invalid
+    if (!date || !time || !psychologistId || !fromDateKey(date)) {
+      setPhase("invalid");
       return;
     }
 
-    // Fetch psychologist data
-    const fetchPsychologist = async () => {
+    (async () => {
       try {
         const response = await fetch(`/api/psychologists/${psychologistId}`);
-        if (!response.ok) throw new Error("Erro ao buscar dados do psicólogo");
-        
+        if (!response.ok) throw new Error();
         const psychologist = await response.json();
-        
-        setBookingData({
-          date,
-          time,
-          psychologistId,
-          psychologistName: psychologist.user.fullName || "Psicólogo",
-        });
-        
-        setIsLoading(false);
-      } catch (error) {
-        toast({
-          title: "Erro",
-          description: "Não foi possível carregar os dados do profissional",
-          variant: "destructive",
-        });
-        setIsLoading(false);
+        setBookingData({ date, time, psychologistId, psychologistName: psychologist.user?.fullName || "Psicóloga" });
+        setPhase("form");
+      } catch {
+        setPhase("invalid");
       }
-    };
+    })();
+  }, [location]);
 
-    fetchPsychologist();
-  }, [location, toast]);
-
-  // Form setup
   const form = useForm<QuickBookingFormValues>({
     resolver: zodResolver(quickBookingSchema),
-    defaultValues: {
-      patientName: "",
-      patientEmail: "",
-      patientPhone: "",
-      notes: "",
-    },
+    defaultValues: { patientName: "", patientEmail: "", patientPhone: "", notes: "" },
   });
 
-  // Create appointment mutation
   const bookAppointmentMutation = useMutation({
     mutationFn: async (data: QuickBookingFormValues) => {
-      // Extract start and end time from time slot (e.g., "09:00 - 10:00")
       const [startTime, endTime] = bookingData.time.split(" - ");
-      
-      const appointmentData = {
+      // No roomId: the server assigns the default room and staff can change it later
+      const response = await apiRequest("POST", "/api/appointments/quick-book", {
         date: bookingData.date,
         startTime,
         endTime,
         patientName: data.patientName,
         psychologistId: parseInt(bookingData.psychologistId),
-        roomId: 1, // Default room, can be changed by staff later
         status: "scheduled",
         notes: `Email: ${data.patientEmail}\nTelefone: ${data.patientPhone}\n${data.notes || ""}`,
-      };
-      
-      const response = await apiRequest("POST", "/api/appointments/quick-book", appointmentData);
+      });
       return response.json();
     },
     onSuccess: () => {
-      setIsSubmitted(true);
+      setPhase("done");
       form.reset();
     },
     onError: (error) => {
-      toast({
-        title: "Erro no agendamento",
-        description: error.message || "Não foi possível realizar o agendamento",
-        variant: "destructive",
-      });
+      toast({ title: "Erro no agendamento", description: error.message || "Não foi possível realizar o agendamento", variant: "destructive" });
     },
   });
 
-  const onSubmit = (data: QuickBookingFormValues) => {
-    bookAppointmentMutation.mutate(data);
-  };
-
-  if (isLoading) {
+  if (phase === "loading") {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
+      <PublicShell>
+        <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-cp-action" /></div>
+      </PublicShell>
     );
   }
 
-  if (isSubmitted) {
+  if (phase === "invalid") {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <div className="flex justify-center mb-4">
-              <CheckCircle className="h-16 w-16 text-green-500" />
-            </div>
-            <CardTitle className="text-center">Agendamento Solicitado!</CardTitle>
-            <CardDescription className="text-center">
-              Sua solicitação de agendamento foi recebida com sucesso.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="text-center">
-            <p className="mb-4">
-              Um membro da nossa equipe entrará em contato para confirmar sua consulta em breve.
-            </p>
-            <div className="text-sm p-4 bg-gray-50 rounded-md">
-              <p className="font-medium">Detalhes do agendamento:</p>
-              <p>Data: {new Date(bookingData.date).toLocaleDateString('pt-BR')}</p>
-              <p>Horário: {bookingData.time}</p>
-              <p>Profissional: {bookingData.psychologistName}</p>
-            </div>
-          </CardContent>
-          <CardFooter className="flex justify-center">
-            <Button asChild>
-              <Link href="/">Ir para a página inicial</Link>
-            </Button>
-          </CardFooter>
-        </Card>
-      </div>
+      <PublicShell>
+        <PublicState icon={<Link2Off className="h-8 w-8 text-cp-sage-ink" />} title="Link de agendamento inválido">
+          O link está incompleto ou o horário não está mais disponível. Peça um novo link para a sua psicóloga.
+        </PublicState>
+      </PublicShell>
+    );
+  }
+
+  if (phase === "done") {
+    return (
+      <PublicShell psychologistName={bookingData.psychologistName}>
+        <PublicState icon={<CheckCircle2 className="h-8 w-8 text-cp-success" />} title="Agendamento solicitado!">
+          Recebemos sua solicitação. A equipe entrará em contato para confirmar a consulta em breve.
+        </PublicState>
+        <BookingSummary {...bookingData} />
+        <p className="mt-4 text-center text-xs text-cp-muted">Você já pode fechar esta página.</p>
+      </PublicShell>
     );
   }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Agendamento de Consulta</CardTitle>
-          <CardDescription>
-            Preencha seus dados para agendar um horário com {bookingData.psychologistName}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="bg-blue-50 p-3 rounded-md mb-4">
-            <p className="text-sm font-medium">Detalhes da consulta:</p>
-            <p className="text-sm">Data: {new Date(bookingData.date).toLocaleDateString('pt-BR')}</p>
-            <p className="text-sm">Horário: {bookingData.time}</p>
-            <p className="text-sm">Profissional: {bookingData.psychologistName}</p>
+    <PublicShell psychologistName={bookingData.psychologistName}>
+      <h1 className="text-[22px] font-bold text-cp-ink">Agendamento de Consulta</h1>
+      <p className="mb-4 mt-1 text-sm text-cp-muted">Preencha seus dados para reservar este horário com {bookingData.psychologistName}.</p>
+      <BookingSummary {...bookingData} />
+
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit((d) => bookAppointmentMutation.mutate(d))} className="mt-5 space-y-4">
+          <FormField control={form.control} name="patientName" render={({ field }) => (
+            <FormItem>
+              <FormLabel className={fieldLabel}>Nome completo <span className="text-cp-danger">*</span></FormLabel>
+              <IconField icon={UserIcon}><FormControl><Input autoComplete="name" placeholder="Seu nome" {...field} /></FormControl></IconField>
+              <FormMessage />
+            </FormItem>
+          )} />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <FormField control={form.control} name="patientEmail" render={({ field }) => (
+              <FormItem>
+                <FormLabel className={fieldLabel}>E-mail <span className="text-cp-danger">*</span></FormLabel>
+                <IconField icon={Mail}><FormControl><Input type="email" autoComplete="email" placeholder="voce@exemplo.com" {...field} /></FormControl></IconField>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="patientPhone" render={({ field }) => (
+              <FormItem>
+                <FormLabel className={fieldLabel}>Telefone <span className="text-cp-danger">*</span></FormLabel>
+                <IconField icon={Phone}><FormControl><Input type="tel" autoComplete="tel" placeholder="(51) 91234-5678" {...field} /></FormControl></IconField>
+                <FormMessage />
+              </FormItem>
+            )} />
           </div>
-          
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="patientName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Nome completo</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <FormField
-                control={form.control}
-                name="patientEmail"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input type="email" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <FormField
-                control={form.control}
-                name="patientPhone"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Telefone</FormLabel>
-                    <FormControl>
-                      <Input type="tel" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <FormField
-                control={form.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Observações (opcional)</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <Button 
-                type="submit" 
-                className="w-full" 
-                disabled={bookAppointmentMutation.isPending}
-              >
-                {bookAppointmentMutation.isPending ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Processando...
-                  </>
-                ) : "Solicitar Agendamento"}
-              </Button>
-            </form>
-          </Form>
-        </CardContent>
-        <CardFooter className="flex justify-center">
-          <Button variant="outline" asChild>
-            <Link href="/">
-              <X className="mr-2 h-4 w-4" />
-              Cancelar
-            </Link>
-          </Button>
-        </CardFooter>
-      </Card>
-    </div>
+          <FormField control={form.control} name="notes" render={({ field }) => (
+            <FormItem>
+              <FormLabel className={fieldLabel}>Observações (opcional)</FormLabel>
+              <FormControl>
+                <CharCountTextarea max={500} placeholder="Algo que a psicóloga deva saber antes da consulta?" {...field} value={field.value ?? ""} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )} />
+
+          <button type="submit" className={cn(cpButton.primary, "h-12 w-full")} disabled={bookAppointmentMutation.isPending}>
+            {bookAppointmentMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {bookAppointmentMutation.isPending ? "Enviando..." : "Solicitar Agendamento"}
+          </button>
+        </form>
+      </Form>
+    </PublicShell>
   );
 }

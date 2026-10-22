@@ -1,10 +1,13 @@
 import { useState, useEffect } from "react";
 import { useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Loader2, CheckCircle2, ClockAlert, Heart, Send } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Loader2, CheckCircle2, ClockAlert, Send, SearchX } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { cpButton } from "@/components/cp/PageHeader";
+import { InfoBanner } from "@/components/cp/fields";
+import { PublicShell, PublicState } from "@/components/cp/PublicShell";
+import { cn } from "@/lib/utils";
 
 interface PublicQuestion {
   id: number;
@@ -158,51 +161,39 @@ export default function ResponderPage() {
 
   if (!isLoading && (status === 410 || code === "expired")) {
     return (
-      <PublicShell clinicName="ConsultaPsi">
-        <div className="text-center py-12 space-y-3">
-          <ClockAlert className="h-12 w-12 mx-auto text-amber-400" />
-          <h2 className="text-xl font-semibold text-neutral-700">Este link expirou</h2>
-          <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-            O prazo para responder este formulário já passou. Se precisar, entre em contato com sua
-            psicóloga.
-          </p>
-        </div>
+      <PublicShell>
+        <PublicState icon={<ClockAlert className="h-8 w-8 text-cp-warning" />} title="Este link expirou">
+          O prazo para responder este formulário já passou. Se precisar, entre em contato com sua psicóloga.
+        </PublicState>
       </PublicShell>
     );
   }
 
   if (!isLoading && (status === 409 || code === "already_answered")) {
     return (
-      <PublicShell clinicName="ConsultaPsi">
-        <div className="text-center py-12 space-y-3">
-          <CheckCircle2 className="h-12 w-12 mx-auto text-teal-500" />
-          <h2 className="text-xl font-semibold text-neutral-700">Formulário já respondido</h2>
-          <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-            Você já enviou suas respostas para este formulário. Obrigada!
-          </p>
-        </div>
+      <PublicShell>
+        <PublicState icon={<CheckCircle2 className="h-8 w-8 text-cp-success" />} title="Formulário já respondido">
+          Você já enviou suas respostas para este formulário. Obrigada!
+        </PublicState>
       </PublicShell>
     );
   }
 
   if (!isLoading && error && status !== 410 && status !== 409) {
     return (
-      <PublicShell clinicName="ConsultaPsi">
-        <div className="text-center py-12 space-y-3">
-          <h2 className="text-xl font-semibold text-neutral-700">Formulário não encontrado</h2>
-          <p className="text-sm text-muted-foreground">
-            O link pode ser inválido ou ter expirado.
-          </p>
-        </div>
+      <PublicShell>
+        <PublicState icon={<SearchX className="h-8 w-8 text-cp-sage-ink" />} title="Formulário não encontrado">
+          O link pode ser inválido ou ter expirado.
+        </PublicState>
       </PublicShell>
     );
   }
 
   if (isLoading || !data) {
     return (
-      <PublicShell clinicName="ConsultaPsi">
+      <PublicShell>
         <div className="flex justify-center py-16">
-          <Loader2 className="h-8 w-8 animate-spin text-teal-500" />
+          <Loader2 className="h-8 w-8 animate-spin text-cp-action" />
         </div>
       </PublicShell>
     );
@@ -211,15 +202,9 @@ export default function ResponderPage() {
   if (submitted) {
     return (
       <PublicShell clinicName={data.clinicName} psychologistName={data.psychologistName}>
-        <div className="text-center py-12 space-y-3">
-          <CheckCircle2 className="h-14 w-14 mx-auto text-teal-500" />
-          <h2 className="text-2xl font-semibold text-neutral-700">
-            Obrigada, {data.patientFirstName}!
-          </h2>
-          <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-            Suas respostas foram registradas com sucesso. Sua psicóloga irá analisá-las.
-          </p>
-        </div>
+        <PublicState icon={<CheckCircle2 className="h-8 w-8 text-cp-success" />} title={`Obrigada, ${data.patientFirstName}!`}>
+          Suas respostas foram registradas com sucesso. Sua psicóloga irá analisá-las.
+        </PublicState>
       </PublicShell>
     );
   }
@@ -230,15 +215,15 @@ export default function ResponderPage() {
     <PublicShell clinicName={data.clinicName} psychologistName={data.psychologistName}>
       <div className="space-y-6">
         <div>
-          <h2 className="text-xl font-semibold text-neutral-800">{data.subject}</h2>
-          <p className="text-sm text-neutral-500 mt-1">
+          <h1 className="text-[22px] font-bold text-cp-ink">{data.subject}</h1>
+          <p className="mt-1 text-sm text-cp-muted">
             Olá, <strong>{data.patientFirstName}</strong>!{" "}
             {data.psychologistName} enviou este formulário para você.
           </p>
           {data.customMessage && (
-            <div className="mt-3 bg-teal-50 border border-teal-200 rounded-lg px-4 py-3 text-sm text-teal-800">
-              {data.customMessage}
-            </div>
+            <InfoBanner variant="success" className="mt-3">
+              <span className="whitespace-pre-wrap text-cp-ink">{data.customMessage}</span>
+            </InfoBanner>
           )}
         </div>
 
@@ -256,62 +241,23 @@ export default function ResponderPage() {
         </div>
 
         {submitMutation.isError && (
-          <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+          <div role="alert" className="rounded-xl border border-cp-danger/30 bg-cp-danger-soft px-4 py-3 text-sm text-cp-danger">
             {(submitMutation.error as ApiError)?.message ?? "Erro ao enviar. Tente novamente."}
           </div>
         )}
 
-        <Button
+        <button
+          type="button"
           onClick={handleSubmit}
           disabled={submitMutation.isPending}
-          className="w-full bg-teal-600 hover:bg-teal-700 text-white py-3"
+          className={cn(cpButton.primary, "h-12 w-full")}
           data-testid="btn-submit-form"
         >
-          {submitMutation.isPending ? (
-            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <Send className="h-4 w-4 mr-2" />
-          )}
+          {submitMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           Enviar Respostas
-        </Button>
+        </button>
       </div>
     </PublicShell>
-  );
-}
-
-function PublicShell({
-  children,
-  clinicName = "ConsultaPsi",
-  psychologistName,
-}: {
-  children: React.ReactNode;
-  clinicName?: string;
-  psychologistName?: string;
-}) {
-  return (
-    <div className="min-h-screen bg-neutral-50 flex flex-col">
-      <header className="bg-teal-600 text-white px-4 py-4 shadow-md">
-        <div className="max-w-xl mx-auto flex items-center gap-3">
-          <Heart className="h-5 w-5 flex-shrink-0" />
-          <div>
-            <p className="font-semibold text-base leading-tight">{clinicName}</p>
-            {psychologistName && (
-              <p className="text-xs text-teal-100">Psicóloga: {psychologistName}</p>
-            )}
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1 py-8 px-4">
-        <div className="max-w-xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-100 p-6 md:p-8">
-          {children}
-        </div>
-      </main>
-
-      <footer className="py-4 px-4 text-center text-xs text-muted-foreground">
-        🔒 Suas informações são confidenciais e usadas apenas para acompanhamento clínico.
-      </footer>
-    </div>
   );
 }
 
@@ -326,9 +272,9 @@ interface QuestionFieldProps {
 function QuestionField({ index, question, value, onChange, error }: QuestionFieldProps) {
   return (
     <div className="space-y-2" data-testid={`question-field-${question.id}`}>
-      <label className="block text-sm font-medium text-neutral-700">
+      <label className="block text-[15px] font-medium text-cp-ink">
         {index}. {question.questionText}
-        {question.isRequired && <span className="text-red-500 ml-0.5">*</span>}
+        {question.isRequired && <span className="ml-0.5 text-cp-danger">*</span>}
       </label>
 
       {question.questionType === "text" && (
@@ -337,7 +283,8 @@ function QuestionField({ index, question, value, onChange, error }: QuestionFiel
           placeholder="Sua resposta…"
           value={value?.text ?? ""}
           onChange={(e) => onChange("text", e.target.value)}
-          className={error ? "border-red-400" : ""}
+          aria-invalid={!!error}
+          className={cn("h-11 rounded-xl border-cp-border focus-visible:ring-cp-action", error && "border-cp-danger")}
         />
       )}
 
@@ -348,31 +295,35 @@ function QuestionField({ index, question, value, onChange, error }: QuestionFiel
           rows={4}
           value={value?.text ?? ""}
           onChange={(e) => onChange("text", e.target.value)}
-          className={`resize-none ${error ? "border-red-400" : ""}`}
+          aria-invalid={!!error}
+          className={cn("resize-none rounded-xl border-cp-border focus-visible:ring-cp-action", error && "border-cp-danger")}
         />
       )}
 
       {question.questionType === "scale" && (
         <div className="space-y-2">
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={question.questionText}>
             {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
               <button
                 key={n}
                 type="button"
                 onClick={() => onChange("scale", n)}
+                role="radio"
+                aria-checked={value?.scale === n}
                 data-testid={`scale-btn-${question.id}-${n}`}
-                className={`w-9 h-9 rounded-lg text-sm font-semibold border transition-colors ${
+                className={cn(
+                  "h-11 w-11 rounded-full border text-sm font-semibold transition-colors",
                   value?.scale === n
-                    ? "bg-teal-600 text-white border-teal-600"
-                    : "bg-white text-neutral-600 border-neutral-200 hover:border-teal-400"
-                }`}
+                    ? "border-cp-action bg-cp-action text-white"
+                    : "border-cp-border bg-white text-cp-ink hover:border-cp-sage hover:bg-cp-sage-soft/50",
+                )}
               >
                 {n}
               </button>
             ))}
           </div>
           {value?.scale !== undefined && (
-            <p className="text-xs text-teal-600 font-medium">
+            <p className="text-xs font-medium text-cp-action">
               Você selecionou: {value.scale}
             </p>
           )}
@@ -386,12 +337,14 @@ function QuestionField({ index, question, value, onChange, error }: QuestionFiel
               key={opt}
               type="button"
               onClick={() => onChange("choice", opt)}
+              aria-pressed={value?.choice === opt}
               data-testid={`choice-btn-${question.id}-${opt}`}
-              className={`w-full text-left px-4 py-2.5 rounded-lg text-sm border transition-colors ${
+              className={cn(
+                "min-h-[44px] w-full rounded-xl border px-4 py-2.5 text-left text-sm transition-colors",
                 value?.choice === opt
-                  ? "bg-teal-50 border-teal-500 text-teal-700 font-medium"
-                  : "bg-white border-neutral-200 text-neutral-700 hover:border-teal-300"
-              }`}
+                  ? "border-cp-sage bg-cp-sage-soft font-medium text-cp-sage-ink"
+                  : "border-cp-border bg-white text-cp-ink hover:border-cp-sage",
+              )}
             >
               {opt}
             </button>
@@ -399,7 +352,7 @@ function QuestionField({ index, question, value, onChange, error }: QuestionFiel
         </div>
       )}
 
-      {error && <p className="text-xs text-red-500 mt-0.5">{error}</p>}
+      {error && <p className="mt-0.5 text-xs text-cp-danger">{error}</p>}
     </div>
   );
 }
