@@ -135,6 +135,8 @@ export const appointments = pgTable("appointments", {
   endTime: time("end_time").notNull(),
   status: text("status").notNull().default("scheduled"), // scheduled, confirmed, canceled, completed, pending-confirmation (para agendamentos rápidos via WhatsApp)
   notes: text("notes"),
+  // Terapia Individual, Retorno, Avaliação Inicial, Acompanhamento, Orientação Familiar, Outro (optional)
+  sessionType: text("session_type"),
 });
 
 export const insertAppointmentSchema = createInsertSchema(appointments).pick({
@@ -146,6 +148,7 @@ export const insertAppointmentSchema = createInsertSchema(appointments).pick({
   endTime: true,
   status: true,
   notes: true,
+  sessionType: true,
 });
 
 // Finances

@@ -657,7 +657,9 @@ var appointments = pgTable2("appointments", {
   endTime: time2("end_time").notNull(),
   status: text2("status").notNull().default("scheduled"),
   // scheduled, confirmed, canceled, completed, pending-confirmation (para agendamentos rápidos via WhatsApp)
-  notes: text2("notes")
+  notes: text2("notes"),
+  // Terapia Individual, Retorno, Avaliação Inicial, Acompanhamento, Orientação Familiar, Outro (optional)
+  sessionType: text2("session_type")
 });
 var insertAppointmentSchema = createInsertSchema2(appointments).pick({
   patientName: true,
@@ -667,7 +669,8 @@ var insertAppointmentSchema = createInsertSchema2(appointments).pick({
   startTime: true,
   endTime: true,
   status: true,
-  notes: true
+  notes: true,
+  sessionType: true
 });
 var transactions = pgTable2("transactions", {
   id: serial2("id").primaryKey(),
@@ -7237,6 +7240,10 @@ async function runStartupMigrations() {
         ADD COLUMN IF NOT EXISTS ai_summary text,
         ADD COLUMN IF NOT EXISTS ai_summary_at timestamp,
         ADD COLUMN IF NOT EXISTS ai_summary_model text
+    `);
+    await pool.query(`
+      ALTER TABLE appointments
+        ADD COLUMN IF NOT EXISTS session_type text
     `);
   } catch (error) {
     log(`startup migration failed: ${error.message}`);

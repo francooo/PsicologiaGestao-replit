@@ -11,6 +11,40 @@ export default {
         sm: "calc(var(--radius) - 4px)",
       },
       colors: {
+        // ConsultaPsi redesign palette (asset/consultaPsi-pacote-design). Use `cp-*` in new UI.
+        cp: {
+          bg: "#FBFAF7",
+          surface: "#FFFFFF",
+          ink: "#243647",
+          muted: "#6B7480",
+          subtle: "#8A929C",
+          border: "#E7E3DC",
+          divider: "#EEEAE4",
+          hover: "#F5F2EC",
+          action: {
+            DEFAULT: "#287EA5",
+            hover: "#21698A",
+            soft: "#E5F0F6",
+          },
+          sage: {
+            DEFAULT: "#8BA798",
+            soft: "#E3EBE5",
+            ink: "#4F6B5C",
+          },
+          lavender: {
+            DEFAULT: "#DCD8EA",
+            soft: "#F0EEF6",
+            ink: "#5B5486",
+          },
+          sand: {
+            DEFAULT: "#EDE3D5",
+            soft: "#F7F1E8",
+            ink: "#8A6A45",
+          },
+          success: { DEFAULT: "#3E8E63", soft: "#E3F1E8" },
+          warning: { DEFAULT: "#B7791F", soft: "#FBF0DC" },
+          danger: { DEFAULT: "#C2413A", soft: "#FBE4E2" },
+        },
         neutral: {
           darkest: "#111827",
           dark: "#4b5563",

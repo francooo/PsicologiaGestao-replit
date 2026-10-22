@@ -78,10 +78,10 @@ export function TopBar({ todayAppointments = [] }: { todayAppointments?: Appoint
         <PopoverTrigger asChild>
           <button
             type="button"
-            className="flex h-12 flex-1 max-w-[560px] items-center gap-3 rounded-xl border border-[#E3E1DE] bg-white/90 px-4 text-left text-[15px] text-[#8A8F96] shadow-sm hover:border-[#C9CED3]"
+            className="flex h-12 flex-1 max-w-[560px] items-center gap-3 rounded-xl border border-cp-border bg-white/90 px-4 text-left text-[15px] text-cp-subtle shadow-sm hover:border-cp-border"
             aria-label="Buscar pacientes, consultas, salas"
           >
-            <Search className="h-[18px] w-[18px] text-[#5D6670]" />
+            <Search className="h-[18px] w-[18px] text-cp-muted" />
             Buscar pacientes, consultas, salas…
           </button>
         </PopoverTrigger>
@@ -98,7 +98,7 @@ export function TopBar({ todayAppointments = [] }: { todayAppointments?: Appoint
                       value={`paciente ${p.fullName} ${p.email ?? ""} ${p.cpf ?? ""}`}
                       onSelect={() => go(`/patients/${p.id}/record`)}
                     >
-                      <UserRound className="mr-2 h-4 w-4 text-[#2E729B]" />
+                      <UserRound className="mr-2 h-4 w-4 text-cp-action" />
                       {p.fullName}
                     </CommandItem>
                   ))}
@@ -112,7 +112,7 @@ export function TopBar({ todayAppointments = [] }: { todayAppointments?: Appoint
                       value={`consulta ${a.patientName} ${a.startTime}`}
                       onSelect={() => go("/appointments")}
                     >
-                      <CalendarClock className="mr-2 h-4 w-4 text-[#2E729B]" />
+                      <CalendarClock className="mr-2 h-4 w-4 text-cp-action" />
                       {a.startTime.slice(0, 5)} · {a.patientName}
                     </CommandItem>
                   ))}
@@ -122,7 +122,7 @@ export function TopBar({ todayAppointments = [] }: { todayAppointments?: Appoint
                 <CommandGroup heading="Salas">
                   {rooms.map((r) => (
                     <CommandItem key={`r${r.id}`} value={`sala ${r.name}`} onSelect={() => go("/appointments?tab=rooms")}>
-                      <DoorOpen className="mr-2 h-4 w-4 text-[#2E729B]" />
+                      <DoorOpen className="mr-2 h-4 w-4 text-cp-action" />
                       {r.name}
                     </CommandItem>
                   ))}
@@ -142,30 +142,30 @@ export function TopBar({ todayAppointments = [] }: { todayAppointments?: Appoint
               className="relative flex h-11 w-11 items-center justify-center rounded-full hover:bg-white/70"
               aria-label={`Notificações${pending.length ? `: ${pending.length} aguardando confirmação` : ""}`}
             >
-              <Bell className="h-5 w-5 text-[#1F3347]" />
+              <Bell className="h-5 w-5 text-cp-ink" />
               {pending.length > 0 && (
-                <span className="absolute right-2.5 top-2.5 h-2.5 w-2.5 rounded-full border-2 border-[#FAF6F1] bg-[#D9774A]" />
+                <span className="absolute right-2.5 top-2.5 h-2.5 w-2.5 rounded-full border-2 border-cp-bg bg-cp-warning" />
               )}
             </button>
           </PopoverTrigger>
           <PopoverContent align="end" className="w-80 p-0">
-            <div className="border-b border-[#ECE8E3] px-4 py-3">
-              <p className="text-sm font-semibold text-[#1F3347]">Aguardando confirmação</p>
-              <p className="text-xs text-[#6B7178]">Próximos 7 dias</p>
+            <div className="border-b border-cp-divider px-4 py-3">
+              <p className="text-sm font-semibold text-cp-ink">Aguardando confirmação</p>
+              <p className="text-xs text-cp-muted">Próximos 7 dias</p>
             </div>
             <div className="max-h-72 overflow-y-auto">
               {pending.length === 0 ? (
-                <p className="px-4 py-6 text-center text-sm text-[#8A8F96]">Nenhuma pendência.</p>
+                <p className="px-4 py-6 text-center text-sm text-cp-subtle">Nenhuma pendência.</p>
               ) : (
                 pending.slice(0, 10).map((a) => (
                   <button
                     key={a.id}
                     type="button"
                     onClick={() => setLocation("/appointments")}
-                    className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left hover:bg-[#F4EFE8]"
+                    className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left hover:bg-cp-hover"
                   >
-                    <span className="truncate text-sm text-[#1F3347]">{a.patientName}</span>
-                    <span className="shrink-0 text-xs text-[#6B7178]">
+                    <span className="truncate text-sm text-cp-ink">{a.patientName}</span>
+                    <span className="shrink-0 text-xs text-cp-muted">
                       {a.date.slice(8, 10)}/{a.date.slice(5, 7)} · {a.startTime.slice(0, 5)}
                     </span>
                   </button>
@@ -175,7 +175,7 @@ export function TopBar({ todayAppointments = [] }: { todayAppointments?: Appoint
             <button
               type="button"
               onClick={() => setLocation("/appointments")}
-              className="w-full border-t border-[#ECE8E3] px-4 py-2.5 text-sm font-medium text-[#2E729B] hover:bg-[#F4EFE8]"
+              className="w-full border-t border-cp-divider px-4 py-2.5 text-sm font-medium text-cp-action hover:bg-cp-hover"
             >
               Ver agendamentos
             </button>
@@ -186,13 +186,13 @@ export function TopBar({ todayAppointments = [] }: { todayAppointments?: Appoint
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button type="button" className="flex items-center gap-1.5 rounded-full p-1 hover:bg-white/70" aria-label="Menu do usuário">
-              <Avatar className="h-10 w-10 border border-[#ECE8E3]">
+              <Avatar className="h-10 w-10 border border-cp-divider">
                 <AvatarImage src={user?.profileImage || undefined} alt={user?.fullName || "Usuário"} />
-                <AvatarFallback showPsychologySymbol={false} className="bg-[#2E729B] text-white">
+                <AvatarFallback showPsychologySymbol={false} className="bg-cp-action text-white">
                   {initials}
                 </AvatarFallback>
               </Avatar>
-              <ChevronDown className="h-4 w-4 text-[#5D6670]" />
+              <ChevronDown className="h-4 w-4 text-cp-muted" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">

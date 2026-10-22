@@ -21,6 +21,7 @@ import Sidebar from "@/components/sidebar";
 import MobileNav from "@/components/mobile-nav";
 import { TopBar } from "@/components/top-bar";
 import { LeafDecor } from "@/components/brand/leaf-decor";
+import { MetricCard } from "@/components/cp/MetricCard";
 import { useAuth } from "@/hooks/use-auth";
 import { overlaps, timeToMinutes, toDateKey } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -67,14 +68,14 @@ function qs(params: Record<string, string | number | null | undefined>) {
 }
 
 const statusBadge: Record<string, { label: string; cls: string; dot: string; row: string }> = {
-  confirmed: { label: "Confirmada", cls: "bg-[#DCE2D3] text-[#3F4A3B]", dot: "bg-[#5E8A55]", row: "bg-[#EEF2EA]" },
-  scheduled: { label: "Pendente", cls: "bg-[#F6E3CF] text-[#B05E1E]", dot: "bg-[#A99BBB]", row: "bg-[#F1EDF6]" },
-  "pending-confirmation": { label: "Pendente", cls: "bg-[#F6E3CF] text-[#B05E1E]", dot: "bg-[#A99BBB]", row: "bg-[#F1EDF6]" },
-  completed: { label: "Concluída", cls: "bg-[#E3EEF5] text-[#2E729B]", dot: "bg-[#2E729B]", row: "bg-[#F4F8FB]" },
-  canceled: { label: "Cancelada", cls: "bg-[#F1EFEC] text-[#6B7178]", dot: "bg-[#C9CED3]", row: "bg-[#F7F5F2]" },
-  "first-session": { label: "1ª sessão", cls: "bg-[#E6E0EE] text-[#4A4257]", dot: "bg-[#A99BBB]", row: "bg-[#F1EDF6]" },
+  confirmed: { label: "Confirmada", cls: "bg-cp-sage-soft text-cp-sage-ink", dot: "bg-cp-sage", row: "bg-cp-sage-soft" },
+  scheduled: { label: "Pendente", cls: "bg-cp-sand-soft text-cp-sand-ink", dot: "bg-cp-lavender-ink", row: "bg-cp-lavender-soft" },
+  "pending-confirmation": { label: "Pendente", cls: "bg-cp-sand-soft text-cp-sand-ink", dot: "bg-cp-lavender-ink", row: "bg-cp-lavender-soft" },
+  completed: { label: "Concluída", cls: "bg-cp-action-soft text-cp-action", dot: "bg-cp-action", row: "bg-cp-action-soft" },
+  canceled: { label: "Cancelada", cls: "bg-cp-hover text-cp-muted", dot: "bg-cp-border", row: "bg-cp-hover" },
+  "first-session": { label: "1ª sessão", cls: "bg-cp-lavender-soft text-cp-lavender-ink", dot: "bg-cp-lavender-ink", row: "bg-cp-lavender-soft" },
 };
-const badgeFor = (s: string) => statusBadge[s] ?? { label: s, cls: "bg-[#F1EFEC] text-[#6B7178]", dot: "bg-[#C9CED3]", row: "bg-[#F7F5F2]" };
+const badgeFor = (s: string) => statusBadge[s] ?? { label: s, cls: "bg-cp-hover text-cp-muted", dot: "bg-cp-border", row: "bg-cp-hover" };
 
 /** "segunda-feira, 12 de outubro de 2026" -> "Segunda-feira, 12 de outubro de 2026" */
 function longDate(date: Date) {
@@ -182,7 +183,7 @@ export default function Dashboard() {
   const firstName = rawFirst.charAt(0).toUpperCase() + rawFirst.slice(1);
 
   return (
-    <div className="flex h-screen bg-[#FAF6F1]">
+    <div className="flex h-screen bg-cp-bg">
       <Sidebar />
       <div className="relative flex-1 overflow-y-auto pt-16 md:ml-64 md:pt-0">
         <MobileNav />
@@ -195,13 +196,13 @@ export default function Dashboard() {
           {/* Greeting */}
           <div className="mt-8 flex flex-wrap items-start justify-between gap-5">
             <div>
-              <h1 className="text-[34px] font-semibold leading-tight tracking-tight text-[#1F3347] sm:text-[40px]">
+              <h1 className="text-[34px] font-semibold leading-tight tracking-tight text-cp-ink sm:text-[40px]">
                 {greeting(now)}{firstName ? `, ${firstName}` : ""}
               </h1>
-              <p className="mt-1 text-lg text-[#6B7178]">{longDate(now)}</p>
+              <p className="mt-1 text-lg text-cp-muted">{longDate(now)}</p>
               <div className="mt-4 flex items-center gap-4">
-                <span className="h-0.5 w-14 rounded bg-[#7E9A6E]" />
-                <span className="text-[15px] text-[#6B7178]">Mais tempo para o que importa</span>
+                <span className="h-0.5 w-14 rounded bg-cp-sage" />
+                <span className="text-[15px] text-cp-muted">Mais tempo para o que importa</span>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -210,7 +211,7 @@ export default function Dashboard() {
                   aria-label="Filtrar por psicóloga"
                   value={psychologistId ?? ""}
                   onChange={(e) => setPsychologistId(e.target.value ? Number(e.target.value) : null)}
-                  className="h-12 rounded-xl border border-[#E3E1DE] bg-white px-3 text-[15px] text-[#1F3347] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2E729B]"
+                  className="h-12 rounded-xl border border-cp-border bg-white px-3 text-[15px] text-cp-ink shadow-sm focus:outline-none focus:ring-2 focus:ring-cp-action"
                 >
                   <option value="">Todas as psicólogas</option>
                   {(psychologistsQ.data ?? []).map((p) => (
@@ -222,61 +223,61 @@ export default function Dashboard() {
               )}
               <Link
                 href={scheduleLink()}
-                className="flex h-12 items-center gap-2 rounded-xl bg-[#2E729B] px-6 text-[16px] font-medium text-white shadow-sm transition-colors hover:bg-[#255E80]"
+                className="flex h-12 items-center gap-2 rounded-xl bg-cp-action px-6 text-[16px] font-medium text-white shadow-sm transition-colors hover:bg-cp-action-hover"
               >
                 <Plus className="h-5 w-5" />
                 Nova consulta
               </Link>
               {/* Brand phrase (wide screens only, like the mock) */}
               <div aria-hidden="true" className="ml-6 hidden 2xl:block">
-                <p className="text-[11px] uppercase leading-6 tracking-[0.45em] text-[#7B7F86]">Organização</p>
-                <p className="text-[11px] uppercase leading-6 tracking-[0.45em] text-[#7B7F86]">também cuida</p>
-                <div className="mt-2 h-px w-10 bg-[#9AA08F]" />
+                <p className="text-[11px] uppercase leading-6 tracking-[0.45em] text-cp-subtle">Organização</p>
+                <p className="text-[11px] uppercase leading-6 tracking-[0.45em] text-cp-subtle">também cuida</p>
+                <div className="mt-2 h-px w-10 bg-cp-sage" />
               </div>
             </div>
           </div>
 
           {isLoading ? (
             <div className="flex h-64 items-center justify-center">
-              <Loader2 className="h-8 w-8 animate-spin text-[#2E729B]" />
+              <Loader2 className="h-8 w-8 animate-spin text-cp-action" />
             </div>
           ) : (
             <>
               {/* Stat cards */}
               <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <StatCard
-                  icon={<CalendarDays className="h-6 w-6 text-[#3F4A3B]" />}
-                  tint="bg-[#DCE2D3]"
+                <MetricCard
+                  icon={<CalendarDays className="h-6 w-6 text-cp-sage-ink" />}
+                  tint="bg-cp-sage-soft"
                   label="Consultas hoje"
                   value={todayList.length}
                   sub={`${confirmedToday} confirmada${confirmedToday !== 1 ? "s" : ""} · ${pendingToday} pendente${pendingToday !== 1 ? "s" : ""}`}
                 />
-                <StatCard
-                  icon={<CheckCircle2 className="h-6 w-6 text-[#5B4C8A]" />}
-                  tint="bg-[#E6E0EE]"
+                <MetricCard
+                  icon={<CheckCircle2 className="h-6 w-6 text-cp-lavender-ink" />}
+                  tint="bg-cp-lavender-soft"
                   label="Concluídas no mês"
                   value={completedMonth}
                   sub={
                     variation === null ? (
                       "— vs. mês anterior"
                     ) : (
-                      <span className={variation >= 0 ? "text-[#3E8E63]" : "text-[#C2413A]"}>
+                      <span className={variation >= 0 ? "text-cp-success" : "text-cp-danger"}>
                         {variation >= 0 ? "+" : ""}
                         {variation}% vs. mês anterior
                       </span>
                     )
                   }
                 />
-                <StatCard
-                  icon={<Clock className="h-6 w-6 text-[#B05E1E]" />}
-                  tint="bg-[#F6E3CF]"
+                <MetricCard
+                  icon={<Clock className="h-6 w-6 text-cp-sand-ink" />}
+                  tint="bg-cp-sand-soft"
                   label="Aguardando confirmação"
                   value={waitingAll}
                   sub="Via WhatsApp"
                 />
-                <StatCard
-                  icon={<Users className="h-6 w-6 text-[#5B4C8A]" />}
-                  tint="bg-[#E6E0EE]"
+                <MetricCard
+                  icon={<Users className="h-6 w-6 text-cp-lavender-ink" />}
+                  tint="bg-cp-lavender-soft"
                   label="Pacientes ativos"
                   value={activePatients}
                   sub={newPatients > 0 ? `${newPatients} novo${newPatients !== 1 ? "s" : ""} este mês` : "Sem novos este mês"}
@@ -285,29 +286,29 @@ export default function Dashboard() {
 
               <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
                 {/* Agenda */}
-                <section className="rounded-2xl border border-[#ECE8E3] bg-white shadow-[0_10px_40px_-18px_rgba(31,51,71,0.18)]">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#ECE8E3] px-6 py-5">
+                <section className="rounded-2xl border border-cp-divider bg-white shadow-[0_10px_40px_-18px_rgba(31,51,71,0.18)]">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-cp-divider px-6 py-5">
                     <div className="flex items-center gap-3">
-                      <CalendarDays className="h-6 w-6 text-[#5E8A55]" />
-                      <h2 className="text-[22px] font-semibold text-[#1F3347]">{isToday(selectedDate) ? "Agenda de hoje" : "Agenda do dia"}</h2>
+                      <CalendarDays className="h-6 w-6 text-cp-sage" />
+                      <h2 className="text-[22px] font-semibold text-cp-ink">{isToday(selectedDate) ? "Agenda de hoje" : "Agenda do dia"}</h2>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-[#6B7178]">{longDate(selectedDate)}</span>
+                      <span className="text-sm text-cp-muted">{longDate(selectedDate)}</span>
                       <button
                         type="button"
                         aria-label="Dia anterior"
                         onClick={() => setSelectedDate((d) => addDays(d, -1))}
-                        className="flex h-8 w-8 items-center justify-center rounded-full border border-[#ECE8E3] hover:bg-[#F4EFE8]"
+                        className="flex h-8 w-8 items-center justify-center rounded-full border border-cp-divider hover:bg-cp-hover"
                       >
-                        <ChevronLeft className="h-4 w-4 text-[#1F3347]" />
+                        <ChevronLeft className="h-4 w-4 text-cp-ink" />
                       </button>
                       <button
                         type="button"
                         aria-label="Próximo dia"
                         onClick={() => setSelectedDate((d) => addDays(d, 1))}
-                        className="flex h-8 w-8 items-center justify-center rounded-full border border-[#ECE8E3] hover:bg-[#F4EFE8]"
+                        className="flex h-8 w-8 items-center justify-center rounded-full border border-cp-divider hover:bg-cp-hover"
                       >
-                        <ChevronRight className="h-4 w-4 text-[#1F3347]" />
+                        <ChevronRight className="h-4 w-4 text-cp-ink" />
                       </button>
                     </div>
                   </div>
@@ -315,10 +316,10 @@ export default function Dashboard() {
                   <div className="px-4 py-4 sm:px-6">
                     {dayQ.isLoading ? (
                       <div className="flex h-40 items-center justify-center">
-                        <Loader2 className="h-6 w-6 animate-spin text-[#2E729B]" />
+                        <Loader2 className="h-6 w-6 animate-spin text-cp-action" />
                       </div>
                     ) : agenda.length === 0 ? (
-                      <p className="py-10 text-center text-sm text-[#8A8F96]">
+                      <p className="py-10 text-center text-sm text-cp-subtle">
                         {isStaff && psychFilter === null
                           ? "Nenhuma consulta neste dia. Escolha uma psicóloga para ver os horários livres."
                           : "Nenhuma consulta neste dia."}
@@ -329,18 +330,18 @@ export default function Dashboard() {
                           if (item.kind === "free") {
                             return (
                               <li key={`free-${item.time}`} className="grid grid-cols-[52px_20px_1fr] items-center gap-3">
-                                <span className="text-[15px] font-medium text-[#1F3347]">{item.time}</span>
-                                <TimelineDot className="bg-[#D5D2CD]" />
-                                <div className="flex items-center gap-3 rounded-xl bg-[#F7F5F2] px-4 py-3">
-                                  <Clock className="h-5 w-5 shrink-0 text-[#8A8F96]" />
+                                <span className="text-[15px] font-medium text-cp-ink">{item.time}</span>
+                                <TimelineDot className="bg-cp-border" />
+                                <div className="flex items-center gap-3 rounded-xl bg-cp-hover px-4 py-3">
+                                  <Clock className="h-5 w-5 shrink-0 text-cp-subtle" />
                                   <div className="min-w-0 flex-1">
-                                    <p className="text-[15px] font-medium text-[#1F3347]">Horário disponível</p>
-                                    <p className="text-[13px] text-[#8A8F96]">Agende uma consulta</p>
+                                    <p className="text-[15px] font-medium text-cp-ink">Horário disponível</p>
+                                    <p className="text-[13px] text-cp-subtle">Agende uma consulta</p>
                                   </div>
                                   <button
                                     type="button"
                                     onClick={() => setLocation(scheduleLink(item.time))}
-                                    className="rounded-xl border border-[#E3E1DE] bg-white px-4 py-1.5 text-sm font-medium text-[#1F3347] hover:bg-[#F4EFE8]"
+                                    className="rounded-xl border border-cp-border bg-white px-4 py-1.5 text-sm font-medium text-cp-ink hover:bg-cp-hover"
                                   >
                                     Agendar
                                   </button>
@@ -358,19 +359,19 @@ export default function Dashboard() {
                             .join(" · ");
                           return (
                             <li key={a.id} className="grid grid-cols-[52px_20px_1fr] items-center gap-3">
-                              <span className="text-[15px] font-medium text-[#1F3347]">{item.time}</span>
+                              <span className="text-[15px] font-medium text-cp-ink">{item.time}</span>
                               <TimelineDot className={b.dot} />
                               <Link
                                 href="/appointments"
                                 className={cn("flex items-center gap-3 rounded-xl px-4 py-3 transition-opacity hover:opacity-90", b.row)}
                               >
-                                <UserRound className="h-5 w-5 shrink-0 text-[#3F4A3B]" />
+                                <UserRound className="h-5 w-5 shrink-0 text-cp-sage-ink" />
                                 <div className="min-w-0 flex-1">
-                                  <p className="truncate text-[15px] font-medium text-[#1F3347]">{a.patientName}</p>
-                                  <p className="truncate text-[13px] text-[#6B7178]">{detail}</p>
+                                  <p className="truncate text-[15px] font-medium text-cp-ink">{a.patientName}</p>
+                                  <p className="truncate text-[13px] text-cp-muted">{detail}</p>
                                 </div>
                                 <span className={cn("rounded-full px-3 py-1 text-xs font-medium", b.cls)}>{b.label}</span>
-                                <ChevronRight className="h-4 w-4 shrink-0 text-[#8A8F96]" />
+                                <ChevronRight className="h-4 w-4 shrink-0 text-cp-subtle" />
                               </Link>
                             </li>
                           );
@@ -378,7 +379,7 @@ export default function Dashboard() {
                       </ol>
                     )}
                     <div className="mt-4 text-center">
-                      <Link href="/appointments" className="inline-flex items-center gap-2 text-[15px] font-medium text-[#2E729B] hover:underline">
+                      <Link href="/appointments" className="inline-flex items-center gap-2 text-[15px] font-medium text-cp-action hover:underline">
                         Ver agenda completa <ArrowRight className="h-4 w-4" />
                       </Link>
                     </div>
@@ -387,42 +388,42 @@ export default function Dashboard() {
 
                 <div className="space-y-5">
                   {/* Day summary */}
-                  <section className="rounded-2xl border border-[#ECE8E3] bg-white px-6 py-5 shadow-[0_10px_40px_-18px_rgba(31,51,71,0.18)]">
-                    <div className="mb-3 flex items-center gap-3 border-b border-[#ECE8E3] pb-4">
-                      <BarChart3 className="h-6 w-6 text-[#5E8A55]" />
-                      <h2 className="text-[22px] font-semibold text-[#1F3347]">Resumo do dia</h2>
+                  <section className="rounded-2xl border border-cp-divider bg-white px-6 py-5 shadow-[0_10px_40px_-18px_rgba(31,51,71,0.18)]">
+                    <div className="mb-3 flex items-center gap-3 border-b border-cp-divider pb-4">
+                      <BarChart3 className="h-6 w-6 text-cp-sage" />
+                      <h2 className="text-[22px] font-semibold text-cp-ink">Resumo do dia</h2>
                     </div>
                     <SummaryRow
-                      tint="bg-[#E6E0EE]"
-                      icon={<Users className="h-5 w-5 text-[#5B4C8A]" />}
+                      tint="bg-cp-lavender-soft"
+                      icon={<Users className="h-5 w-5 text-cp-lavender-ink" />}
                       title={`${activePatients} paciente${activePatients !== 1 ? "s" : ""} ativo${activePatients !== 1 ? "s" : ""}`}
                       sub={newPatients > 0 ? `${newPatients} novo${newPatients !== 1 ? "s" : ""} este mês` : "Sem novos este mês"}
                     />
                     <SummaryRow
-                      tint="bg-[#DCE2D3]"
-                      icon={<DoorOpen className="h-5 w-5 text-[#3F4A3B]" />}
+                      tint="bg-cp-sage-soft"
+                      icon={<DoorOpen className="h-5 w-5 text-cp-sage-ink" />}
                       title={`${freeRooms} sala${freeRooms !== 1 ? "s" : ""} disponíve${freeRooms !== 1 ? "is" : "l"}`}
                       sub={`De ${rooms.length} sala${rooms.length !== 1 ? "s" : ""} totais`}
                     />
                     <SummaryRow
-                      tint="bg-[#F6E3CF]"
-                      icon={<Clock className="h-5 w-5 text-[#B05E1E]" />}
+                      tint="bg-cp-sand-soft"
+                      icon={<Clock className="h-5 w-5 text-cp-sand-ink" />}
                       title={`${waitingAll} confirmaç${waitingAll !== 1 ? "ões pendentes" : "ão pendente"}`}
                       sub="Via WhatsApp"
                     />
                   </section>
 
                   {/* Room bookings today */}
-                  <section className="rounded-2xl border border-[#ECE8E3] bg-white shadow-[0_10px_40px_-18px_rgba(31,51,71,0.18)]">
-                    <Link href="/appointments?tab=rooms" className="flex items-center justify-between border-b border-[#ECE8E3] px-6 py-4 hover:bg-[#FBF9F6]">
+                  <section className="rounded-2xl border border-cp-divider bg-white shadow-[0_10px_40px_-18px_rgba(31,51,71,0.18)]">
+                    <Link href="/appointments?tab=rooms" className="flex items-center justify-between border-b border-cp-divider px-6 py-4 hover:bg-cp-bg">
                       <span className="flex items-center gap-3">
-                        <DoorOpen className="h-6 w-6 text-[#5E8A55]" />
-                        <span className="text-[20px] font-semibold text-[#1F3347]">Reservas de salas — hoje</span>
+                        <DoorOpen className="h-6 w-6 text-cp-sage" />
+                        <span className="text-[20px] font-semibold text-cp-ink">Reservas de salas — hoje</span>
                       </span>
-                      <ChevronRight className="h-5 w-5 text-[#8A8F96]" />
+                      <ChevronRight className="h-5 w-5 text-cp-subtle" />
                     </Link>
                     {roomStatus.length === 0 ? (
-                      <p className="px-6 py-8 text-center text-sm text-[#8A8F96]">Nenhuma sala cadastrada</p>
+                      <p className="px-6 py-8 text-center text-sm text-cp-subtle">Nenhuma sala cadastrada</p>
                     ) : (
                       <ul>
                         {roomStatus.map(({ room, current, next }, i) => {
@@ -431,13 +432,13 @@ export default function Dashboard() {
                           const mine = booking?.psychologist?.userId === user?.id;
                           const who = booking ? (isStaff ? booking.psychologist?.user?.fullName : mine ? "Você" : null) : null;
                           return (
-                            <li key={room.id} className={cn("flex items-center gap-3 px-6 py-3", i > 0 && "border-t border-[#ECE8E3]")}>
-                              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#F6E3CF]">
-                                <DoorOpen className="h-[18px] w-[18px] text-[#B05E1E]" />
+                            <li key={room.id} className={cn("flex items-center gap-3 px-6 py-3", i > 0 && "border-t border-cp-divider")}>
+                              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-cp-sand-soft">
+                                <DoorOpen className="h-[18px] w-[18px] text-cp-sand-ink" />
                               </span>
                               <div className="min-w-0 flex-1">
-                                <p className="truncate text-[15px] font-medium text-[#1F3347]">{room.name}</p>
-                                <p className="truncate text-[13px] text-[#6B7178]">
+                                <p className="truncate text-[15px] font-medium text-cp-ink">{room.name}</p>
+                                <p className="truncate text-[13px] text-cp-muted">
                                   {booking
                                     ? `${booking.startTime.slice(0, 5)} – ${booking.endTime.slice(0, 5)}${who ? ` · ${who}` : ""}`
                                     : "Sem reservas hoje"}
@@ -446,7 +447,7 @@ export default function Dashboard() {
                               <span
                                 className={cn(
                                   "rounded-full px-3 py-1 text-xs font-medium",
-                                  current ? "bg-[#E6E0EE] text-[#4A4257]" : "bg-[#DCE2D3] text-[#3F4A3B]",
+                                  current ? "bg-cp-lavender-soft text-cp-lavender-ink" : "bg-cp-sage-soft text-cp-sage-ink",
                                 )}
                               >
                                 {current ? "Ocupada" : "Disponível"}
@@ -470,22 +471,9 @@ export default function Dashboard() {
 function TimelineDot({ className }: { className: string }) {
   return (
     <span className="relative flex h-full items-center justify-center">
-      <span className="absolute inset-y-[-8px] left-1/2 w-px -translate-x-1/2 border-l border-dashed border-[#E3E1DE]" />
+      <span className="absolute inset-y-[-8px] left-1/2 w-px -translate-x-1/2 border-l border-dashed border-cp-border" />
       <span className={cn("relative h-3 w-3 rounded-full ring-4 ring-white", className)} />
     </span>
-  );
-}
-
-function StatCard({ icon, tint, label, value, sub }: { icon: ReactNode; tint: string; label: string; value: number; sub: ReactNode }) {
-  return (
-    <div className="flex items-start gap-4 rounded-2xl border border-[#ECE8E3] bg-white p-5 shadow-[0_10px_40px_-18px_rgba(31,51,71,0.18)]">
-      <div className={cn("flex h-14 w-14 shrink-0 items-center justify-center rounded-xl", tint)}>{icon}</div>
-      <div className="min-w-0">
-        <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-[#6B7178]">{label}</p>
-        <p className="mt-1 text-[32px] font-semibold leading-tight text-[#1F3347]">{value}</p>
-        <p className="mt-1 text-[14px] text-[#6B7178]">{sub}</p>
-      </div>
-    </div>
   );
 }
 
@@ -494,8 +482,8 @@ function SummaryRow({ tint, icon, title, sub }: { tint: string; icon: ReactNode;
     <div className="flex items-center gap-4 py-3">
       <div className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-xl", tint)}>{icon}</div>
       <div>
-        <p className="text-[16px] font-medium text-[#1F3347]">{title}</p>
-        <p className="text-[13px] text-[#6B7178]">{sub}</p>
+        <p className="text-[16px] font-medium text-cp-ink">{title}</p>
+        <p className="text-[13px] text-cp-muted">{sub}</p>
       </div>
     </div>
   );

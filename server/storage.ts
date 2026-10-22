@@ -440,7 +440,8 @@ export class MemStorage implements IStorage {
       ...appointment,
       id,
       status: appointment.status || 'scheduled',
-      notes: appointment.notes || null
+      notes: appointment.notes || null,
+      sessionType: appointment.sessionType || null
     };
     this.appointments.set(id, newAppointment);
     return newAppointment;

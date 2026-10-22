@@ -74,19 +74,19 @@ export default function Sidebar() {
   const mainItems = [
     {
       name: "Pacientes",
-      icon: <ContactRound className="w-5 h-5 mr-3 text-[#2E729B] flex-shrink-0" />,
+      icon: <ContactRound className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />,
       href: "/patients",
       roles: ["admin", "psychologist", "receptionist"],
     },
     {
       name: "Psicólogas",
-      icon: <Users className="w-5 h-5 mr-3 text-[#2E729B] flex-shrink-0" />,
+      icon: <Users className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />,
       href: "/admin/psicologas",
       roles: ["admin"],
     },
     {
       name: "Salas",
-      icon: <DoorOpen className="w-5 h-5 mr-3 text-[#2E729B] flex-shrink-0" />,
+      icon: <DoorOpen className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />,
       href: "/rooms",
       roles: ["admin"],
     },
@@ -95,31 +95,31 @@ export default function Sidebar() {
   const financialItems = [
     {
       name: "Financeiro",
-      icon: <BarChart3 className="w-5 h-5 mr-3 text-[#2E729B] flex-shrink-0" />,
+      icon: <BarChart3 className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />,
       href: "/financial",
       roles: ["admin", "psychologist", "receptionist"],
     },
     {
       name: "Fluxo de Caixa",
-      icon: <LineChart className="w-5 h-5 mr-3 text-[#2E729B] flex-shrink-0" />,
+      icon: <LineChart className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />,
       href: "/cash-flow",
       roles: ["admin", "psychologist", "receptionist"],
     },
     {
       name: "Minhas Notas Fiscais",
-      icon: <FileText className="w-5 h-5 mr-3 text-[#2E729B] flex-shrink-0" />,
+      icon: <FileText className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />,
       href: "/invoices",
       roles: ["admin", "psychologist", "receptionist"],
     },
     {
       name: "Gestão de Notas",
-      icon: <ClipboardList className="w-5 h-5 mr-3 text-[#2E729B] flex-shrink-0" />,
+      icon: <ClipboardList className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />,
       href: "/admin/invoices",
       roles: ["admin"],
     },
     {
       name: "Comissões",
-      icon: <HandCoins className="w-5 h-5 mr-3 text-[#2E729B] flex-shrink-0" />,
+      icon: <HandCoins className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />,
       href: "/admin/comissoes",
       roles: ["admin"],
     },
@@ -128,19 +128,19 @@ export default function Sidebar() {
   const systemItems = [
     {
       name: "Permissões",
-      icon: <Lock className="w-5 h-5 mr-3 text-[#2E729B] flex-shrink-0" />,
+      icon: <Lock className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />,
       href: "/permissions",
       roles: ["admin"],
     },
     {
       name: "Meu Perfil",
-      icon: <UserCircle className="w-5 h-5 mr-3 text-[#2E729B] flex-shrink-0" />,
+      icon: <UserCircle className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />,
       href: "/perfil",
       roles: ["psychologist"],
     },
     {
       name: "Configurações",
-      icon: <Settings className="w-5 h-5 mr-3 text-[#2E729B] flex-shrink-0" />,
+      icon: <Settings className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />,
       href: "/profile",
       roles: ["admin", "psychologist", "receptionist"],
     },
@@ -152,13 +152,13 @@ export default function Sidebar() {
 
   // "Acolhimento" look: active item on soft sage, navy text
   const navLinkClass = (active: boolean) => cn(
-    "flex items-center rounded-xl px-3 py-2.5 mb-0.5 text-[14px] font-medium text-[#3D4B5C] hover:bg-[#F4EFE8] transition-colors",
-    active && "bg-[#DCE2D3]/70 text-[#1F3347] hover:bg-[#DCE2D3]/70"
+    "flex items-center rounded-xl px-3 py-2.5 mb-0.5 text-[14px] font-medium text-cp-ink hover:bg-cp-hover transition-colors",
+    active && "bg-cp-sage-soft/70 text-cp-ink hover:bg-cp-sage-soft/70"
   );
 
   return (
     // Same fixed w-64 slot as before (pages keep md:ml-64); the floating card lives inside it
-    <aside className="hidden md:block w-64 h-screen fixed left-0 top-0 z-20 bg-[#FAF6F1] p-3">
+    <aside className="hidden md:block w-64 h-screen fixed left-0 top-0 z-20 bg-cp-bg p-3">
       <div className="flex h-full flex-col overflow-y-auto rounded-2xl bg-white shadow-[0_10px_40px_-14px_rgba(31,51,71,0.18)]">
       {/* Brand */}
       <div className="px-5 pt-5 pb-4">
@@ -166,17 +166,17 @@ export default function Sidebar() {
       </div>
 
       {/* User */}
-      <div className="mx-3 px-2 pb-4 border-b border-[#ECE8E3]">
+      <div className="mx-3 px-2 pb-4 border-b border-cp-divider">
         <div className="flex items-center gap-3">
-          <Avatar className="w-11 h-11 border border-[#ECE8E3] bg-[#2E729B] text-white">
+          <Avatar className="w-11 h-11 border border-cp-divider bg-cp-action text-white">
             <AvatarImage src={user?.profileImage || undefined} alt={user?.fullName || "Usuário"} />
             <AvatarFallback showPsychologySymbol={false} className="text-sm font-semibold bg-primary text-white">
               {user?.fullName?.charAt(0) || "U"}
             </AvatarFallback>
           </Avatar>
           <div>
-            <h3 className="text-[14px] font-semibold text-[#1F3347] leading-snug">{user?.fullName || "Usuário"}</h3>
-            <p className="text-[12px] text-[#6B7178]">{getRoleLabel(user?.role)}</p>
+            <h3 className="text-[14px] font-semibold text-cp-ink leading-snug">{user?.fullName || "Usuário"}</h3>
+            <p className="text-[12px] text-cp-muted">{getRoleLabel(user?.role)}</p>
           </div>
         </div>
       </div>
@@ -187,7 +187,7 @@ export default function Sidebar() {
           {/* Dashboard */}
           <li>
             <Link href="/dashboard" className={navLinkClass(isActive('/dashboard') || isActive('/'))}>
-              <LayoutGrid className="w-5 h-5 mr-3 text-[#2E729B] flex-shrink-0" />
+              <LayoutGrid className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />
               Dashboard
             </Link>
           </li>
@@ -197,12 +197,12 @@ export default function Sidebar() {
             <button
               onClick={() => setAgendamentosOpen(o => !o)}
               className={cn(
-                "flex items-center justify-between w-full rounded-xl px-3 py-2.5 text-[14px] font-medium text-[#3D4B5C] hover:bg-[#F4EFE8] transition-colors",
-                isAppointmentsPath && "bg-[#DCE2D3]/70 text-[#1F3347]"
+                "flex items-center justify-between w-full rounded-xl px-3 py-2.5 text-[14px] font-medium text-cp-ink hover:bg-cp-hover transition-colors",
+                isAppointmentsPath && "bg-cp-sage-soft/70 text-cp-ink"
               )}
             >
               <span className="flex items-center">
-                <CalendarDays className="w-5 h-5 mr-3 text-[#2E729B] flex-shrink-0" />
+                <CalendarDays className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />
                 Agendamentos
               </span>
               <ChevronDown
@@ -211,13 +211,13 @@ export default function Sidebar() {
             </button>
 
             {agendamentosOpen && (
-              <ul className="mt-1 ml-7 border-l-2 border-[#DCE2D3] pl-3 space-y-0.5">
+              <ul className="mt-1 ml-7 border-l-2 border-cp-sage-soft pl-3 space-y-0.5">
                 <li>
                   <Link
                     href="/appointments"
                     className={cn(
-                      "flex items-center gap-2 px-2 py-1.5 rounded-r-md text-[13px] font-medium text-slate-500 hover:text-[#1F3347] hover:bg-[#F4EFE8] transition-colors",
-                      isAppointmentsPath && !isActiveTab('rooms') && "text-[#1F3347] font-semibold bg-[#DCE2D3]/60"
+                      "flex items-center gap-2 px-2 py-1.5 rounded-r-md text-[13px] font-medium text-slate-500 hover:text-cp-ink hover:bg-cp-hover transition-colors",
+                      isAppointmentsPath && !isActiveTab('rooms') && "text-cp-ink font-semibold bg-cp-sage-soft/60"
                     )}
                   >
                     <CalendarCheck2 className="w-4 h-4 flex-shrink-0" />
@@ -228,8 +228,8 @@ export default function Sidebar() {
                   <Link
                     href="/appointments?tab=rooms"
                     className={cn(
-                      "flex items-center gap-2 px-2 py-1.5 rounded-r-md text-[13px] font-medium text-slate-500 hover:text-[#1F3347] hover:bg-[#F4EFE8] transition-colors",
-                      isActiveTab('rooms') && "text-[#1F3347] font-semibold bg-[#DCE2D3]/60"
+                      "flex items-center gap-2 px-2 py-1.5 rounded-r-md text-[13px] font-medium text-slate-500 hover:text-cp-ink hover:bg-cp-hover transition-colors",
+                      isActiveTab('rooms') && "text-cp-ink font-semibold bg-cp-sage-soft/60"
                     )}
                   >
                     <BookOpen className="w-4 h-4 flex-shrink-0" />
@@ -248,7 +248,7 @@ export default function Sidebar() {
               data-testid="nav-reunioes"
             >
               <span className="flex items-center">
-                <Video className="w-5 h-5 mr-3 text-[#2E729B] flex-shrink-0" />
+                <Video className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />
                 Reuniões
               </span>
               {hasActiveMeeting && (
@@ -272,7 +272,7 @@ export default function Sidebar() {
 
         {visibleFinancial.length > 0 && (
           <>
-            <p className="mt-4 mb-1.5 px-5 text-[10px] font-semibold tracking-[0.22em] text-[#8A8F96] uppercase">Financeiro</p>
+            <p className="mt-4 mb-1.5 px-5 text-[10px] font-semibold tracking-[0.22em] text-cp-subtle uppercase">Financeiro</p>
             <ul className="px-2">
               {visibleFinancial.map(item => (
                 <li key={item.href}>
@@ -288,7 +288,7 @@ export default function Sidebar() {
 
         {visibleSystem.length > 0 && (
           <>
-            <p className="mt-4 mb-1.5 px-5 text-[10px] font-semibold tracking-[0.22em] text-[#8A8F96] uppercase">Sistema</p>
+            <p className="mt-4 mb-1.5 px-5 text-[10px] font-semibold tracking-[0.22em] text-cp-subtle uppercase">Sistema</p>
             <ul className="px-2">
               {visibleSystem.map(item => (
                 <li key={item.href}>
@@ -304,12 +304,12 @@ export default function Sidebar() {
       </nav>
 
       {/* Logout */}
-      <div className="mx-3 border-t border-[#ECE8E3] py-3">
+      <div className="mx-3 border-t border-cp-divider py-3">
         <button
           onClick={handleLogout}
-          className="w-full flex items-center rounded-xl px-3 py-2.5 text-[14px] font-medium text-[#3D4B5C] hover:bg-[#F4EFE8]"
+          className="w-full flex items-center rounded-xl px-3 py-2.5 text-[14px] font-medium text-cp-ink hover:bg-cp-hover"
         >
-          <LogOut className="w-5 h-5 mr-3 text-[#2E729B]" />
+          <LogOut className="w-5 h-5 mr-3 text-cp-action" />
           <span>Sair</span>
         </button>
       </div>

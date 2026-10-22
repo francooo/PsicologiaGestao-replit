@@ -59,21 +59,34 @@ import {
 import {
   Loader2,
   Plus,
-  Share,
-  ExternalLink,
+  Share2,
   ChevronLeft,
   ChevronRight,
-  Info,
   Trash2,
   MapPin,
   Monitor,
+  User as UserIcon,
+  Users,
+  DoorOpen,
+  Calendar as CalendarIcon,
+  Clock,
+  FileText,
+  Search,
+  CalendarCheck,
+  LayoutGrid,
+  Lock,
 } from "lucide-react";
 import { format, addDays, startOfWeek, endOfWeek } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { type Patient } from "@shared/schema";
 import { useLocation, useSearch } from "wouter";
 import { cn } from "@/lib/utils";
-import { timeToMinutes } from "@/lib/time";
+import { overlaps, timeToMinutes, toDateKey } from "@/lib/time";
+import { roomIcon } from "@/lib/room-icon";
+import { PageHeader, cpButton } from "@/components/cp/PageHeader";
+import { CharCountTextarea, IconField, InfoBanner, ModalHeader } from "@/components/cp/fields";
+import { appointmentStatus, statusOf, toneClasses, type Tone } from "@/components/cp/status";
+import { WhatsAppIcon } from "@/components/cp/WhatsAppIcon";
 
 // ─── Schemas ────────────────────────────────────────────────────────────────
 
@@ -89,7 +102,7 @@ const whatsAppShareSchema = z.object({
   psychologistId: z.string().min(1, "Selecione uma psicóloga"),
   startDate: z.string().min(1, "Data inicial é obrigatória"),
   endDate: z.string().min(1, "Data final é obrigatória"),
-  message: z.string().optional(),
+  message: z.string().max(500, "Máximo de 500 caracteres").optional(),
 });
 type WhatsAppShareFormValues = z.infer<typeof whatsAppShareSchema>;
 
@@ -102,7 +115,14 @@ type BookingFormValues = z.infer<typeof bookingFormSchema>;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const formatDateForRequest = (date: Date) => date.toISOString().split('T')[0];
+// Local calendar date (toISOString() is UTC and shifted the day at night in BRT)
+const formatDateForRequest = (date: Date) => toDateKey(date);
+
+export const SESSION_TYPES = ["Terapia Individual", "Retorno", "Avaliação Inicial", "Acompanhamento", "Orientação Familiar", "Outro"];
+
+/** Booking purpose without patient data (appointment bookings are saved as "Appointment with {patient}"). */
+const bookingTitle = (purpose?: string | null) =>
+  !purpose || /^appointment with/i.test(purpose) ? "Reserva de Sala" : purpose;
 
 const PSYCH_COLORS = [
   { bg: 'bg-[#e8f4f6]', text: 'text-[#155f6b]', borderColor: '#1e7e8c', dot: 'bg-[#1e7e8c]' },
@@ -235,6 +255,7 @@ export default function Appointments() {
     roomName: a.room?.name || 'N/A',
     status: a.status,
     notes: a.notes,
+    sessionType: a.sessionType as string | null,
   }));
 
   const patientOptions = Array.from(
@@ -254,6 +275,7 @@ export default function Appointments() {
       const { duration, ...payload } = data;
       const res = await apiRequest("POST", "/api/appointments", {
         ...payload,
+        sessionType: payload.sessionType || null,
         psychologistId: Number(payload.psychologistId),
         roomId: Number(payload.roomId),
       });
@@ -272,6 +294,7 @@ export default function Appointments() {
         endTime: "10:00",
         status: "scheduled",
         notes: "",
+        sessionType: "",
         duration: "50",
       });
     },
@@ -339,6 +362,7 @@ export default function Appointments() {
       endTime: "10:00",
       status: "scheduled",
       notes: "",
+      sessionType: "",
       duration: "50",
     }
   });
@@ -468,148 +492,115 @@ export default function Appointments() {
   }, {});
 
   // ── Render ──
+  const navBtn =
+    "flex h-9 w-9 items-center justify-center rounded-xl border border-cp-border bg-white text-cp-muted transition-colors hover:bg-cp-hover hover:text-cp-ink";
+  const selectCls =
+    "h-9 rounded-xl border border-cp-border bg-white px-3 text-[13px] text-cp-ink outline-none focus:ring-2 focus:ring-cp-action";
+
   return (
-    <div className="flex h-screen bg-[#f7f8fa]">
+    <div className="flex h-screen bg-cp-bg">
       <Sidebar />
 
-      <div className="flex-1 flex flex-col ml-0 md:ml-64 pt-16 md:pt-0 overflow-hidden">
+      <div className="relative flex-1 flex flex-col ml-0 md:ml-64 pt-16 md:pt-0 overflow-hidden">
         <MobileNav />
 
         {/* Header */}
-        <div className="flex items-center justify-between px-7 py-4 bg-white border-b border-slate-200 flex-shrink-0">
-          <div>
-            {activeTab === 'consultas' ? (
-              <>
-                <h1 className="text-[17px] font-bold text-slate-800">Minhas Consultas</h1>
-                <p className="text-[11px] text-slate-400 mt-0.5">Agenda de {user?.fullName?.split(' ')[0] || 'usuário'}</p>
-              </>
-            ) : (
-              <>
-                <h1 className="text-[17px] font-bold text-slate-800">Reservas de Salas</h1>
-                <p className="text-[11px] text-slate-400 mt-0.5">Grade de ocupação das salas</p>
-              </>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {activeTab === 'consultas' ? (
-              <>
-                <Dialog open={isShareDialogOpen} onOpenChange={setIsShareDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline" size="sm" className="flex items-center gap-1.5 text-[13px]">
-                      <Share className="h-3.5 w-3.5" />
-                      Compartilhar Horários
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Compartilhar Disponibilidade</DialogTitle>
-                      <DialogDescription>Compartilhe os horários disponíveis via WhatsApp.</DialogDescription>
-                    </DialogHeader>
-                    <Form {...shareForm}>
-                      <form onSubmit={shareForm.handleSubmit(d => shareWhatsAppMutation.mutate(d))} className="space-y-4 mt-4">
-                        <FormField control={shareForm.control} name="psychologistId" render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Psicóloga</FormLabel>
-                            {user?.role === "psychologist" ? (
-                              <div className="flex h-10 items-center rounded-md border border-input bg-muted px-3 text-sm">
-                                {user.fullName}
-                              </div>
-                            ) : (
-                              <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
-                                <SelectContent>
-                                  {(psychologists as any[]).map(p => (
-                                    <SelectItem key={p.id} value={p.id.toString()}>{p.user.fullName}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            )}
-                            <FormMessage />
-                          </FormItem>
-                        )} />
-                        <div className="grid grid-cols-2 gap-4">
-                          <FormField control={shareForm.control} name="startDate" render={({ field }) => (
-                            <FormItem><FormLabel>Data Inicial</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
-                          )} />
-                          <FormField control={shareForm.control} name="endDate" render={({ field }) => (
-                            <FormItem><FormLabel>Data Final</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
-                          )} />
-                        </div>
-                        <FormField control={shareForm.control} name="message" render={({ field }) => (
-                          <FormItem><FormLabel>Mensagem</FormLabel><FormControl><Textarea className="resize-none" {...field} /></FormControl><FormMessage /></FormItem>
-                        )} />
-                        <DialogFooter>
-                          <Button type="submit" className="bg-green-600 hover:bg-green-700" disabled={shareWhatsAppMutation.isPending}>
-                            {shareWhatsAppMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ExternalLink className="mr-2 h-4 w-4" />}
-                            Compartilhar via WhatsApp
-                          </Button>
-                        </DialogFooter>
-                      </form>
-                    </Form>
-                  </DialogContent>
-                </Dialog>
+        <div className="flex-shrink-0 px-4 pt-6 pb-4 sm:px-7">
+          {activeTab === 'consultas' ? (
+            <PageHeader
+              title="Minhas Consultas"
+              subtitle={`Agenda de ${user?.fullName?.split(' ')[0] || 'usuário'}`}
+              phrase
+              actions={
+                <>
+                  <Dialog open={isShareDialogOpen} onOpenChange={setIsShareDialogOpen}>
+                    <DialogTrigger asChild>
+                      <button type="button" className={cpButton.secondary}>
+                        <Share2 className="h-4 w-4" />
+                        Compartilhar Horários
+                      </button>
+                    </DialogTrigger>
+                    <ShareDialog
+                      form={shareForm}
+                      psychologists={psychologists as any[]}
+                      user={user}
+                      isPending={shareWhatsAppMutation.isPending}
+                      onClose={() => setIsShareDialogOpen(false)}
+                      onSubmit={(d: WhatsAppShareFormValues) => shareWhatsAppMutation.mutate(d)}
+                    />
+                  </Dialog>
 
-                <Dialog open={isNewAppointmentDialogOpen} onOpenChange={setIsNewAppointmentDialogOpen}>
+                  <Dialog open={isNewAppointmentDialogOpen} onOpenChange={setIsNewAppointmentDialogOpen}>
+                    <DialogTrigger asChild>
+                      <button type="button" className={cpButton.primary}>
+                        <Plus className="h-4 w-4" />
+                        Nova Consulta
+                      </button>
+                    </DialogTrigger>
+                    <AppointmentDialog
+                      form={appointmentForm}
+                      psychologists={psychologists as any[]}
+                      rooms={rooms as any[]}
+                      patients={patients}
+                      isPatientSearchOpen={isPatientSearchOpen}
+                      setIsPatientSearchOpen={setIsPatientSearchOpen}
+                      isPending={createAppointmentMutation.isPending}
+                      onClose={() => setIsNewAppointmentDialogOpen(false)}
+                      onSubmit={(data: AppointmentFormValues) => createAppointmentMutation.mutate(data)}
+                      calculateEndTime={calculateEndTime}
+                      loggedPsychologist={loggedPsychologist}
+                      user={user}
+                    />
+                  </Dialog>
+                </>
+              }
+            />
+          ) : (
+            <PageHeader
+              title="Reservas de Salas"
+              subtitle="Grade de ocupação das salas"
+              phrase
+              actions={
+                <Dialog open={isNewBookingDialogOpen} onOpenChange={setIsNewBookingDialogOpen}>
                   <DialogTrigger asChild>
-                    <Button size="sm" className="flex items-center gap-1.5 text-[13px]">
-                      <Plus className="h-3.5 w-3.5" />
-                      Nova Consulta
-                    </Button>
+                    <button type="button" className={cpButton.primary}>
+                      <Plus className="h-4 w-4" />
+                      Reservar Sala
+                    </button>
                   </DialogTrigger>
-                  <AppointmentDialog
-                    form={appointmentForm}
+                  <BookingDialog
+                    form={bookingForm}
                     psychologists={psychologists as any[]}
                     rooms={rooms as any[]}
-                    patients={patients}
-                    isPatientSearchOpen={isPatientSearchOpen}
-                    setIsPatientSearchOpen={setIsPatientSearchOpen}
-                    isPending={createAppointmentMutation.isPending}
-                    onClose={() => setIsNewAppointmentDialogOpen(false)}
-                    onSubmit={(data: AppointmentFormValues) => createAppointmentMutation.mutate(data)}
-                    calculateEndTime={calculateEndTime}
-                    loggedPsychologist={loggedPsychologist}
+                    isPending={createBookingMutation.isPending}
+                    onClose={() => setIsNewBookingDialogOpen(false)}
+                    onSubmit={d => createBookingMutation.mutate(d)}
                     user={user}
+                    loggedPsychologist={loggedPsychologist}
                   />
                 </Dialog>
-              </>
-            ) : (
-              <Dialog open={isNewBookingDialogOpen} onOpenChange={setIsNewBookingDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button size="sm" className="flex items-center gap-1.5 text-[13px]">
-                    <Plus className="h-3.5 w-3.5" />
-                    Reservar Sala
-                  </Button>
-                </DialogTrigger>
-                <BookingDialog
-                  form={bookingForm}
-                  psychologists={psychologists as any[]}
-                  rooms={rooms as any[]}
-                  isPending={createBookingMutation.isPending}
-                  onClose={() => setIsNewBookingDialogOpen(false)}
-                  onSubmit={d => createBookingMutation.mutate(d)}
-                  user={user}
-                  loggedPsychologist={loggedPsychologist}
-                />
-              </Dialog>
-            )}
-          </div>
+              }
+            />
+          )}
         </div>
 
         {/* Tab content */}
         {activeTab === 'consultas' ? (
-          <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 flex flex-col overflow-hidden px-4 pb-5 sm:px-7">
             {/* Calendar toolbar */}
-            <div className="px-7 py-3 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
-              <div className="flex items-center gap-3 flex-wrap">
+            <div className="mb-4 flex flex-shrink-0 flex-wrap items-center justify-between gap-3 rounded-2xl border border-cp-divider bg-white px-4 py-3 shadow-[0_10px_40px_-20px_rgba(36,54,71,0.18)]">
+              <div className="flex flex-wrap items-center gap-3">
                 {/* View toggle */}
-                <div className="inline-flex bg-slate-100 rounded-lg p-0.5 gap-0.5">
+                <div className="inline-flex gap-0.5 rounded-xl bg-cp-hover p-1" role="tablist" aria-label="Visualização">
                   {(['month','week','day'] as const).map(v => (
                     <button
                       key={v}
+                      role="tab"
+                      aria-selected={viewMode === v}
                       onClick={() => setViewMode(v)}
                       className={cn(
-                        "px-3 py-1.5 rounded-md text-[12.5px] font-medium transition-all",
-                        viewMode === v ? "bg-[#1e7e8c] text-white shadow-sm" : "text-slate-500 hover:text-slate-700"
+                        "rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition-all",
+                        viewMode === v ? "bg-cp-sage-soft text-cp-ink shadow-sm" : "text-cp-muted hover:text-cp-ink"
                       )}
                     >
                       {v === 'month' ? 'Mês' : v === 'week' ? 'Semana' : 'Dia'}
@@ -619,57 +610,58 @@ export default function Appointments() {
 
                 {/* Date nav */}
                 <div className="flex items-center gap-1.5">
-                  <button onClick={goToPrev} className="w-7 h-7 rounded-md border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:border-[#1e7e8c] hover:text-[#1e7e8c] transition-colors">
+                  <button onClick={goToPrev} aria-label="Período anterior" className={navBtn}>
                     <ChevronLeft className="h-4 w-4" />
                   </button>
-                  <span className="text-[14px] font-bold text-slate-800 min-w-[130px] text-center">{periodLabel}</span>
-                  <button onClick={goToNext} className="w-7 h-7 rounded-md border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:border-[#1e7e8c] hover:text-[#1e7e8c] transition-colors">
+                  <span className="min-w-[130px] text-center text-[15px] font-semibold text-cp-ink">{periodLabel}</span>
+                  <button onClick={goToNext} aria-label="Próximo período" className={navBtn}>
                     <ChevronRight className="h-4 w-4" />
                   </button>
-                  <button onClick={() => { goToToday(); setViewMode('week'); }} className="px-3 py-1 border border-slate-200 rounded-md text-[12.5px] font-medium text-slate-500 hover:border-[#1e7e8c] hover:text-[#1e7e8c] transition-colors bg-white">
+                  <button
+                    onClick={() => { goToToday(); setViewMode('week'); }}
+                    className="h-9 rounded-xl border border-cp-border bg-white px-3.5 text-[13px] font-medium text-cp-ink transition-colors hover:bg-cp-hover"
+                  >
                     Hoje
                   </button>
                 </div>
 
                 {/* Filters */}
-                <select
-                  value={filterPatient}
-                  onChange={e => setFilterPatient(e.target.value)}
-                  className="px-2 py-1.5 border border-slate-200 rounded-md text-[12px] text-slate-600 bg-white outline-none focus:border-[#1e7e8c]"
-                >
+                <select value={filterPatient} onChange={e => setFilterPatient(e.target.value)} className={selectCls} aria-label="Filtrar por paciente">
                   <option value="">Todos os pacientes</option>
                   {patientOptions.map(name => (
                     <option key={name} value={name}>{name}</option>
                   ))}
                 </select>
 
-                <select
-                  value={filterStatus}
-                  onChange={e => setFilterStatus(e.target.value)}
-                  className="px-2 py-1.5 border border-slate-200 rounded-md text-[12px] text-slate-600 bg-white outline-none focus:border-[#1e7e8c]"
-                >
+                <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className={selectCls} aria-label="Filtrar por status">
                   <option value="">Todos os status</option>
                   <option value="confirmed">Confirmado</option>
                   <option value="scheduled">Aguardando</option>
                   <option value="completed">Concluído</option>
                   <option value="canceled">Cancelado</option>
+                  <option value="first-session">Primeira sessão</option>
                 </select>
               </div>
 
               {/* Legend */}
-              <div className="flex items-center gap-4 text-[11.5px] text-slate-500">
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#1e7e8c]" />Confirmado</span>
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#d97706]" />Aguardando</span>
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#16a34a]" />Concluído</span>
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-slate-400" />Cancelado</span>
+              <div className="flex flex-wrap items-center gap-4 text-[12px] text-cp-muted">
+                {(['confirmed', 'scheduled', 'completed', 'canceled', 'first-session'] as const).map(st => {
+                  const def = appointmentStatus[st];
+                  return (
+                    <span key={st} className="flex items-center gap-1.5">
+                      <span className={cn("h-2 w-2 rounded-full", toneClasses[def.tone].dot)} />
+                      {def.label}
+                    </span>
+                  );
+                })}
               </div>
             </div>
 
             {/* Calendar area */}
-            <div className="flex-1 flex flex-col overflow-hidden px-7 py-4">
+            <div className="flex-1 flex flex-col overflow-hidden">
               {isLoading || loadingPsychs || loadingRooms ? (
                 <div className="flex justify-center items-center h-full">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  <Loader2 className="h-8 w-8 animate-spin text-cp-action" />
                 </div>
               ) : (
                 <>
@@ -712,80 +704,75 @@ export default function Appointments() {
           </div>
         ) : (
           /* ── Reservas de Salas ── */
-          <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 flex flex-col overflow-hidden px-4 pb-5 sm:px-7">
             {/* Room tabs + date nav */}
-            <div className="px-7 py-3 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
-              {/* Room tabs */}
-              <div className="flex items-center gap-1 flex-wrap">
+            <div className="mb-3 flex flex-shrink-0 flex-wrap items-center justify-between gap-3 rounded-2xl border border-cp-divider bg-white px-4 py-2 shadow-[0_10px_40px_-20px_rgba(36,54,71,0.18)]">
+              <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Salas">
                 <button
+                  role="tab"
+                  aria-selected={roomTab === 'all'}
                   onClick={() => setRoomTab('all')}
                   className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12.5px] font-medium border-b-2 transition-colors",
-                    roomTab === 'all' ? "border-[#1e7e8c] text-[#1e7e8c]" : "border-transparent text-slate-500 hover:text-slate-700"
+                    "flex items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] font-medium transition-colors",
+                    roomTab === 'all' ? "border-cp-action text-cp-ink" : "border-transparent text-cp-muted hover:text-cp-ink"
                   )}
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-                  </svg>
+                  <LayoutGrid className="h-4 w-4" />
                   Visão Geral
                 </button>
-                {(rooms as any[]).map(r => (
-                  <button
-                    key={r.id}
-                    onClick={() => setRoomTab(r.id)}
-                    className={cn(
-                      "px-3 py-1.5 rounded-md text-[12.5px] font-medium border-b-2 transition-colors",
-                      roomTab === r.id ? "border-[#1e7e8c] text-[#1e7e8c]" : "border-transparent text-slate-500 hover:text-slate-700"
-                    )}
-                  >
-                    {r.name}
-                  </button>
-                ))}
+                {(rooms as any[]).map(r => {
+                  const RIcon = roomIcon(r.name);
+                  return (
+                    <button
+                      key={r.id}
+                      role="tab"
+                      aria-selected={roomTab === r.id}
+                      onClick={() => setRoomTab(r.id)}
+                      className={cn(
+                        "flex items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] font-medium transition-colors",
+                        roomTab === r.id ? "border-cp-action text-cp-ink" : "border-transparent text-cp-muted hover:text-cp-ink"
+                      )}
+                    >
+                      <RIcon className="h-4 w-4" />
+                      {r.name}
+                    </button>
+                  );
+                })}
               </div>
 
-              {/* Date nav */}
               <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => setRoomDate(d => addDays(d, -1))}
-                  className="w-7 h-7 rounded-md border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:border-[#1e7e8c] hover:text-[#1e7e8c] transition-colors"
-                >
+                <button onClick={() => setRoomDate(d => addDays(d, -1))} aria-label="Dia anterior" className={navBtn}>
                   <ChevronLeft className="h-4 w-4" />
                 </button>
-                <span className="text-[13px] font-semibold text-slate-700 min-w-[130px] text-center">
+                <span className="min-w-[150px] text-center text-[14px] font-semibold text-cp-ink">
                   {format(roomDate, "d 'de' MMMM yyyy", { locale: ptBR })}
                 </span>
-                <button
-                  onClick={() => setRoomDate(d => addDays(d, 1))}
-                  className="w-7 h-7 rounded-md border border-slate-200 bg-white flex items-center justify-center text-slate-500 hover:border-[#1e7e8c] hover:text-[#1e7e8c] transition-colors"
-                >
+                <button onClick={() => setRoomDate(d => addDays(d, 1))} aria-label="Próximo dia" className={navBtn}>
                   <ChevronRight className="h-4 w-4" />
                 </button>
                 <button
                   onClick={() => setRoomDate(new Date())}
-                  className="px-3 py-1 border border-slate-200 rounded-md text-[12.5px] font-medium text-slate-500 hover:border-[#1e7e8c] hover:text-[#1e7e8c] transition-colors bg-white"
+                  className="h-9 rounded-xl border border-cp-border bg-white px-3.5 text-[13px] font-medium text-cp-ink transition-colors hover:bg-cp-hover"
                 >
                   Hoje
                 </button>
               </div>
             </div>
 
-            {/* Privacy notice */}
-            <div className="px-7 py-2 bg-[#f8fafc] border-b border-slate-100 flex items-center gap-2">
-              <Info className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
-              <p className="text-[11.5px] text-slate-400">Dados de pacientes não são exibidos — apenas psicóloga, sala e horário</p>
-            </div>
+            <InfoBanner variant="info" className="mb-3 flex-shrink-0">
+              Dados de pacientes não são exibidos — apenas psicóloga, sala e horário
+            </InfoBanner>
 
             {/* Room grid */}
-            <div className="flex-1 overflow-auto px-7 py-4">
+            <div className="flex-1 overflow-auto">
               {loadingRoomBookings ? (
                 <div className="flex justify-center items-center h-64">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  <Loader2 className="h-8 w-8 animate-spin text-cp-action" />
                 </div>
               ) : (
                 <RoomGrid
                   rooms={rooms as any[]}
                   bookings={roomBookings as any[]}
-                  psychColorMap={psychColorMap}
                   selectedRoom={roomTab}
                   user={user}
                   onDelete={id => setDeleteBookingId(id)}
@@ -794,20 +781,10 @@ export default function Appointments() {
             </div>
 
             {/* Legend */}
-            {(psychologists as any[]).length > 0 && (
-              <div className="px-7 py-3 border-t border-slate-200 bg-white flex flex-wrap items-center gap-4">
-                {(psychologists as any[]).map((p, i) => {
-                  const c = getPsychColor(i);
-                  return (
-                    <span key={p.id} className="flex items-center gap-1.5 text-[12px] text-slate-600">
-                      <span className={`w-2.5 h-2.5 rounded-full ${c.dot}`} />
-                      {p.user.fullName}
-                      {p.userId === user?.id && ' (você)'}
-                    </span>
-                  );
-                })}
-              </div>
-            )}
+            <div className="mt-3 flex flex-shrink-0 flex-wrap items-center gap-5 text-[12px] text-cp-muted">
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-cp-lavender" />Reserva</span>
+              <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm border border-dashed border-cp-sage" />Horário disponível</span>
+            </div>
           </div>
         )}
       </div>
@@ -822,7 +799,7 @@ export default function Appointments() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-red-600 hover:bg-red-700"
+              className="bg-cp-danger hover:bg-cp-danger/90"
               onClick={() => deleteBookingId !== null && deleteBookingMutation.mutate(deleteBookingId)}
             >
               {deleteBookingMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Remover'}
@@ -853,33 +830,22 @@ function WeekGrid({
   const todayStr = formatDateForRequest(today);
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
-  const statusColor = (status: string) => {
-    switch (status) {
-      case 'confirmed': return 'bg-[#e8f4f6] border-[#1e7e8c] text-[#155f6b]';
-      case 'scheduled': return 'bg-[#fef3e2] border-[#d97706] text-[#92400e]';
-      case 'completed': return 'bg-[#f0fdf4] border-[#16a34a] text-[#14532d]';
-      case 'canceled':  return 'bg-slate-100 border-slate-300 text-slate-500';
-      case 'first-session': return 'bg-[#f3e8ff] border-[#7c3aed] text-[#5b21b6]';
-      default: return 'bg-[#e8f4f6] border-[#1e7e8c] text-[#155f6b]';
-    }
-  };
-
   return (
-    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-full">
+    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-cp-divider bg-white shadow-[0_10px_40px_-20px_rgba(36,54,71,0.18)]">
       {/* Day headers */}
-      <div className="grid border-b border-slate-200 flex-shrink-0" style={{ gridTemplateColumns: `54px repeat(7, 1fr)` }}>
+      <div className="grid flex-shrink-0 border-b border-cp-divider" style={{ gridTemplateColumns: `58px repeat(7, 1fr)` }}>
         <div className="p-2" />
         {days.map((day, i) => {
           const ds = formatDateForRequest(day);
           const isToday = ds === todayStr;
           return (
-            <div key={i} className={cn("px-2 py-2 text-center border-l border-slate-100", isToday && "bg-[#f0f9fa]")}>
-              <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                {format(day, 'EEE', { locale: ptBR })}
+            <div key={i} className={cn("border-l border-cp-divider px-2 py-3 text-center", isToday && "bg-cp-sage-soft/60")}>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-cp-muted">
+                {format(day, 'EEEE', { locale: ptBR }).split('-')[0]}
               </div>
               <div className={cn(
-                "mt-1 text-[18px] font-bold text-slate-600 leading-none",
-                isToday && "w-8 h-8 rounded-full bg-[#1e7e8c] text-white text-[14px] flex items-center justify-center mx-auto"
+                "mx-auto mt-1 flex h-8 w-8 items-center justify-center text-[18px] font-bold leading-none text-cp-ink",
+                isToday && "rounded-full bg-cp-sage text-[15px] text-white"
               )}>
                 {format(day, 'd')}
               </div>
@@ -890,12 +856,12 @@ function WeekGrid({
 
       {/* Time grid */}
       <div className="flex-1 overflow-y-auto">
-        <div className="relative" style={{ gridTemplateColumns: `54px repeat(7, 1fr)`, display: 'grid', height: `${HOUR_H * HOURS.length}px` }}>
+        <div className="relative" style={{ gridTemplateColumns: `58px repeat(7, 1fr)`, display: 'grid', height: `${HOUR_H * HOURS.length}px` }}>
           {/* Hour labels */}
           <div className="relative">
             {HOURS.map(h => (
-              <div key={h} className="absolute w-full flex items-start justify-end pr-2 pt-0.5" style={{ top: `${(h - 7) * HOUR_H}px`, height: `${HOUR_H}px` }}>
-                <span className="text-[10.5px] text-slate-400 font-medium">{h.toString().padStart(2, '0')}:00</span>
+              <div key={h} className="absolute flex w-full items-start justify-end pr-2 pt-1" style={{ top: `${(h - 7) * HOUR_H}px`, height: `${HOUR_H}px` }}>
+                <span className="text-[11px] font-medium text-cp-subtle">{h.toString().padStart(2, '0')}:00</span>
               </div>
             ))}
           </div>
@@ -909,49 +875,47 @@ function WeekGrid({
             return (
               <div
                 key={di}
-                className={cn("relative border-l border-slate-100 cursor-pointer group", isToday && "bg-[#f0f9fa]/40")}
+                className={cn("group relative cursor-pointer border-l border-cp-divider", isToday && "bg-cp-sage-soft/30")}
                 onClick={() => onAddClick(day)}
               >
-                {/* Hour lines */}
                 {HOURS.map(h => (
-                  <div key={h} className="absolute w-full border-t border-slate-100" style={{ top: `${(h - 7) * HOUR_H}px` }} />
+                  <div key={h} className="absolute w-full border-t border-cp-divider" style={{ top: `${(h - 7) * HOUR_H}px` }} />
                 ))}
 
-                {/* Event cards */}
                 {events.map(ev => {
                   const startMin = timeToMinutes(ev.startTime);
                   const endMin = timeToMinutes(ev.endTime);
                   const top = (startMin - 7 * 60) / 60 * HOUR_H;
-                  const height = Math.max((endMin - startMin) / 60 * HOUR_H, 24);
+                  const height = Math.max((endMin - startMin) / 60 * HOUR_H, 26);
+                  const st = statusOf(appointmentStatus, ev.status);
+                  const t = toneClasses[st.tone];
+                  // Session type when set; older appointments fall back to the room / online
+                  const kind = ev.sessionType || (ev.roomId === 0 ? 'Online' : ev.roomName);
 
                   return (
                     <div
                       key={ev.id}
                       onClick={e => e.stopPropagation()}
-                      className={cn(
-                        "absolute left-0.5 right-0.5 rounded-md border-l-[3px] px-1.5 py-1 overflow-hidden",
-                        statusColor(ev.status)
-                      )}
-                      style={{ top: `${top}px`, height: `${height}px` }}
+                      title={`${ev.patientName} · ${st.label}`}
+                      className={cn("absolute left-1 right-1 overflow-hidden rounded-lg px-2 py-1.5", t.row)}
+                      style={{ top: `${top + 1}px`, height: `${height - 2}px` }}
                     >
-                      <div className="text-[10px] font-semibold leading-tight truncate">
-                        {ev.startTime} – {ev.endTime}
+                      <div className="flex items-center gap-1.5 text-[11px] font-medium leading-tight text-cp-muted">
+                        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", t.dot)} aria-label={st.label} />
+                        <span className="truncate">{ev.startTime.slice(0, 5)} – {ev.endTime.slice(0, 5)}</span>
                       </div>
-                      {height > 30 && (
-                        <div className="text-[10px] leading-tight truncate font-medium">{ev.patientName}</div>
+                      {height > 34 && (
+                        <div className="truncate text-[12px] font-semibold leading-tight text-cp-ink">{kind}</div>
                       )}
-                      {height > 46 && (
-                        <div className="text-[9.5px] leading-tight truncate opacity-75">
-                          {ev.roomName} · {ev.status === 'completed' ? 'Concluído' : ev.status === 'confirmed' ? 'Presencial' : 'Agendado'}
-                        </div>
+                      {height > 50 && (
+                        <div className="truncate text-[11px] leading-tight text-cp-muted">{ev.patientName}</div>
                       )}
                     </div>
                   );
                 })}
 
-                {/* Add hint on hover */}
-                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 flex items-center justify-center pointer-events-none transition-opacity">
-                  <span className="text-[10px] text-slate-400">+ Agendar</span>
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100">
+                  <span className="text-[11px] text-cp-subtle">+ Agendar</span>
                 </div>
               </div>
             );
@@ -964,92 +928,190 @@ function WeekGrid({
 
 // ─── RoomGrid ────────────────────────────────────────────────────────────────
 
+// Room booking grid shows 07:00–18:00 (spec); each room gets its own soft tone
+const ROOM_HOURS = Array.from({ length: 12 }, (_, i) => i + 7);
+const ROOM_TONES: Tone[] = ["lavender", "sand", "sage", "info"];
+
 function RoomGrid({
   rooms,
   bookings,
-  psychColorMap,
   selectedRoom,
   user,
   onDelete,
 }: {
   rooms: any[];
   bookings: any[];
-  psychColorMap: Record<number, typeof PSYCH_COLORS[0]>;
   selectedRoom: 'all' | number;
   user: any;
   onDelete: (id: number) => void;
 }) {
   const displayRooms = selectedRoom === 'all' ? rooms : rooms.filter(r => r.id === selectedRoom);
+  const toneOf = (roomId: number) => ROOM_TONES[Math.max(0, rooms.findIndex(r => r.id === roomId)) % ROOM_TONES.length];
+  const cols = `72px repeat(${Math.max(displayRooms.length, 1)}, minmax(180px, 1fr))`;
+
+  if (rooms.length === 0) {
+    return (
+      <div className="rounded-2xl border border-cp-divider bg-white py-12 text-center text-sm text-cp-subtle">
+        Nenhuma sala cadastrada
+      </div>
+    );
+  }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-      {/* Header */}
-      <div className="grid border-b border-slate-200" style={{ gridTemplateColumns: `72px repeat(${displayRooms.length}, 1fr)` }}>
-        <div className="p-3 bg-[#f8fafc]" />
-        {displayRooms.map(r => (
-          <div key={r.id} className="px-3 py-3 text-center bg-[#f8fafc] border-l border-slate-200">
-            <div className="text-[10.5px] font-bold uppercase tracking-wide text-slate-400">{r.name}</div>
-          </div>
-        ))}
+    <div className="overflow-hidden rounded-2xl border border-cp-divider bg-white shadow-[0_10px_40px_-20px_rgba(36,54,71,0.18)]">
+      <div className="grid border-b border-cp-divider bg-cp-hover/60" style={{ gridTemplateColumns: cols }}>
+        <div className="px-3 py-3 text-[11px] font-semibold uppercase tracking-wide text-cp-muted">Horário</div>
+        {displayRooms.map(r => {
+          const RIcon = roomIcon(r.name);
+          const t = toneClasses[toneOf(r.id)];
+          return (
+            <div key={r.id} className="flex items-center justify-center gap-2 border-l border-cp-divider px-3 py-3">
+              <span className={cn("flex h-8 w-8 items-center justify-center rounded-full", t.badge)}>
+                <RIcon className="h-4 w-4" />
+              </span>
+              <span className="text-[12px] font-semibold uppercase tracking-wide text-cp-ink">{r.name}</span>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Time rows */}
-      {HOURS.map(h => {
+      {ROOM_HOURS.map(h => {
         const hourStr = `${h.toString().padStart(2, '0')}:00`;
+        const nextStr = `${(h + 1).toString().padStart(2, '0')}:00`;
         return (
-          <div key={h} className="grid border-t border-slate-100" style={{ gridTemplateColumns: `72px repeat(${displayRooms.length}, 1fr)`, minHeight: '60px' }}>
-            <div className="px-3 pt-2 text-[11px] text-slate-400 font-medium">{hourStr}</div>
+          <div key={h} className="grid border-t border-cp-divider" style={{ gridTemplateColumns: cols, minHeight: '64px' }}>
+            <div className="px-3 pt-2 text-[12px] font-medium text-cp-subtle">{hourStr}</div>
             {displayRooms.map(room => {
-              const slot = bookings.filter(b => {
+              const starting = bookings.filter(b => {
                 if (b.roomId !== room.id) return false;
                 const bStart = timeToMinutes(b.startTime);
-                const bEnd = timeToMinutes(b.endTime);
                 return bStart >= h * 60 && bStart < (h + 1) * 60;
               });
+              const busy = bookings.some(b => b.roomId === room.id && overlaps(hourStr, nextStr, b.startTime, b.endTime));
+              const t = toneClasses[toneOf(room.id)];
 
               return (
-                <div key={room.id} className="border-l border-slate-100 p-1 relative min-h-[60px]">
-                  {slot.map(b => {
-                    const c = psychColorMap[b.psychologistId] || PSYCH_COLORS[0];
+                <div key={room.id} className="relative min-h-[64px] border-l border-cp-divider p-1.5">
+                  {starting.map(b => {
                     const isMe = b.psychologist?.userId === user?.id;
-                    const duration = timeToMinutes(b.endTime) - timeToMinutes(b.startTime);
-                    const heightRatio = duration / 60;
-
                     return (
-                      <div
-                        key={b.id}
-                        className={cn("rounded-md px-2 py-1 mb-1 relative group", c.bg)}
-                        style={{ borderLeft: `3px solid ${c.borderColor}` }}
-                      >
-                        <div className={cn("text-[11px] font-semibold leading-tight truncate", c.text)}>
-                          {b.psychologist?.user?.fullName || 'Psicóloga'}
-                          {isMe && ' (você)'}
-                        </div>
-                        <div className={cn("text-[10.5px] leading-tight", c.text, "opacity-80")}>
-                          {b.startTime} – {b.endTime} · {b.purpose || 'Consulta'}
+                      <div key={b.id} className={cn("group relative mb-1 rounded-lg border-l-[3px] border-cp-lavender-ink/40 px-2.5 py-1.5", t.row)}>
+                        <div className="text-[11px] text-cp-muted">{b.startTime.slice(0, 5)} – {b.endTime.slice(0, 5)}</div>
+                        {/* Never shows patient data — only the booking purpose */}
+                        <div className="truncate text-[12px] font-semibold text-cp-ink">{bookingTitle(b.purpose)}</div>
+                        <div className="truncate text-[11px] text-cp-muted">
+                          Psicóloga: {b.psychologist?.user?.fullName || '—'}{isMe && ' (você)'}
                         </div>
                         <button
                           onClick={() => onDelete(b.id)}
-                          className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-red-400 hover:text-red-600"
+                          aria-label="Remover reserva"
+                          className="absolute right-1 top-1 rounded p-0.5 text-cp-danger opacity-0 transition-opacity hover:bg-white group-hover:opacity-100 focus:opacity-100"
                         >
-                          <Trash2 className="h-3 w-3" />
+                          <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     );
                   })}
+                  {!busy && (
+                    <div className="flex h-full min-h-[50px] items-center justify-center rounded-lg border border-dashed border-cp-sage/60 text-[11px] text-cp-subtle">
+                      Horário disponível
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
         );
       })}
-
-      {bookings.length === 0 && (
-        <div className="py-12 text-center text-slate-400 text-sm">
-          Nenhuma reserva para esta data
-        </div>
-      )}
     </div>
+  );
+}
+
+// ─── Shared dialog bits ──────────────────────────────────────────────────────
+
+const labelCls = "text-[13px] font-semibold text-cp-ink";
+const readOnlyCls = "flex h-11 items-center rounded-xl border border-cp-border bg-cp-hover px-3 text-sm text-cp-ink";
+
+function DialogActions({ onClose, isPending, label, pendingLabel, icon }: { onClose: () => void; isPending: boolean; label: string; pendingLabel: string; icon?: React.ReactNode }) {
+  return (
+    <DialogFooter className="flex-row justify-between gap-3 sm:justify-between">
+      <button type="button" onClick={onClose} className={cpButton.subtle}>Cancelar</button>
+      <button type="submit" disabled={isPending} className={cpButton.primary}>
+        {isPending ? <><Loader2 className="h-4 w-4 animate-spin" />{pendingLabel}</> : <>{icon}{label}</>}
+      </button>
+    </DialogFooter>
+  );
+}
+
+// ─── ShareDialog ─────────────────────────────────────────────────────────────
+
+function ShareDialog({ form, psychologists, user, isPending, onClose, onSubmit }: any) {
+  return (
+    <DialogContent className="max-w-lg rounded-2xl">
+      <ModalHeader icon={Share2} title="Compartilhar Disponibilidade" description="Compartilhe os horários disponíveis via WhatsApp." />
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="mt-2 space-y-4">
+          <FormField control={form.control} name="psychologistId" render={({ field }: any) => (
+            <FormItem>
+              <FormLabel className={labelCls}>Psicóloga</FormLabel>
+              {user?.role === "psychologist" ? (
+                <div className={readOnlyCls}>{user.fullName}</div>
+              ) : (
+                <IconField icon={UserIcon}>
+                  <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      {psychologists.map((p: any) => (
+                        <SelectItem key={p.id} value={p.id.toString()}>{p.user.fullName}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </IconField>
+              )}
+              <FormMessage />
+            </FormItem>
+          )} />
+          <div className="grid grid-cols-2 gap-4">
+            <FormField control={form.control} name="startDate" render={({ field }: any) => (
+              <FormItem>
+                <FormLabel className={labelCls}>Data Inicial</FormLabel>
+                <IconField icon={CalendarIcon}><Input type="date" {...field} /></IconField>
+                <FormMessage />
+              </FormItem>
+            )} />
+            <FormField control={form.control} name="endDate" render={({ field }: any) => (
+              <FormItem>
+                <FormLabel className={labelCls}>Data Final</FormLabel>
+                <IconField icon={CalendarIcon}><Input type="date" {...field} /></IconField>
+                <FormMessage />
+              </FormItem>
+            )} />
+          </div>
+          <FormField control={form.control} name="message" render={({ field }: any) => (
+            <FormItem>
+              <FormLabel className={labelCls}>Mensagem</FormLabel>
+              <FormControl><CharCountTextarea max={500} {...field} /></FormControl>
+              <FormMessage />
+            </FormItem>
+          )} />
+          <DialogFooter className="flex-row justify-between gap-3 sm:justify-between">
+            <button type="button" onClick={onClose} className={cpButton.subtle}>Cancelar</button>
+            <button
+              type="submit"
+              disabled={isPending}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#25A244] px-5 text-[15px] font-medium text-white shadow-sm transition-colors hover:bg-[#1E8A39] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#25A244] focus-visible:ring-offset-2 disabled:opacity-60"
+            >
+              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <WhatsAppIcon className="h-5 w-5" />}
+              Compartilhar via WhatsApp
+            </button>
+          </DialogFooter>
+          <p className="flex items-center justify-center gap-1.5 text-[12px] text-cp-subtle">
+            <Lock className="h-3.5 w-3.5" />
+            A mensagem será aberta no WhatsApp com os horários selecionados.
+          </p>
+        </form>
+      </Form>
+    </DialogContent>
   );
 }
 
@@ -1078,32 +1140,34 @@ function AppointmentDialog({
       form.setValue('roomId', 0);
     }
   };
+
+  const modalityBtn = (active: boolean) =>
+    cn(
+      "flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors",
+      active ? "bg-cp-action text-white" : "bg-white text-cp-muted hover:bg-cp-hover",
+    );
+
   return (
-    <DialogContent className="max-w-2xl max-h-[90vh] p-0 overflow-hidden flex flex-col">
-      <DialogHeader className="flex flex-row items-center gap-3 px-6 py-4 border-b border-neutral-light">
-        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-          <Plus className="h-5 w-5" />
-        </div>
-        <div className="text-left">
-          <DialogTitle className="text-lg font-semibold">Novo Agendamento</DialogTitle>
-          <DialogDescription className="text-sm text-neutral-dark">Agende uma sessão para um paciente.</DialogDescription>
-        </div>
-      </DialogHeader>
+    <DialogContent className="flex max-h-[92vh] max-w-2xl flex-col overflow-hidden rounded-2xl p-0">
+      <div className="border-b border-cp-divider px-6 py-4">
+        <ModalHeader icon={Plus} tone="action" title="Novo Agendamento" description="Agende uma sessão para um paciente." />
+      </div>
 
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0 overflow-hidden">
-          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <form onSubmit={form.handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
               <FormField control={form.control} name="patientName" render={({ field }: any) => (
                 <FormItem>
-                  <FormLabel>Paciente</FormLabel>
-                  <FormControl><Input placeholder="Buscar ou digitar..." {...field} /></FormControl>
+                  <FormLabel className={labelCls}>Paciente</FormLabel>
+                  <IconField icon={UserIcon}><Input placeholder="Buscar ou digitar..." {...field} /></IconField>
                   <FormMessage />
                   <div className="mt-2">
-                    <Button type="button" variant="outline" size="sm" onClick={() => setIsPatientSearchOpen(true)}>
+                    <button type="button" onClick={() => setIsPatientSearchOpen(true)} className="inline-flex h-9 items-center gap-2 rounded-xl border border-cp-border bg-white px-3 text-[13px] font-medium text-cp-ink hover:bg-cp-hover">
+                      <Search className="h-3.5 w-3.5" />
                       Buscar paciente existente
-                    </Button>
-                    <Command shouldFilter className={isPatientSearchOpen ? "mt-2 border rounded-md" : "hidden"}>
+                    </button>
+                    <Command shouldFilter className={isPatientSearchOpen ? "mt-2 rounded-xl border border-cp-border" : "hidden"}>
                       <CommandInput placeholder="Buscar por nome..." />
                       <CommandList>
                         <CommandEmpty>Nenhum paciente encontrado.</CommandEmpty>
@@ -1115,7 +1179,7 @@ function AppointmentDialog({
                             }}>
                               <div className="flex flex-col">
                                 <span className="text-sm font-medium">{p.fullName}</span>
-                                {p.email && <span className="text-xs text-neutral-dark">{p.email}</span>}
+                                {p.email && <span className="text-xs text-cp-muted">{p.email}</span>}
                               </div>
                             </CommandItem>
                           ))}
@@ -1128,152 +1192,175 @@ function AppointmentDialog({
 
               <FormField control={form.control} name="psychologistId" render={({ field }: any) => (
                 <FormItem>
-                  <FormLabel>Psicóloga</FormLabel>
+                  <FormLabel className={labelCls}>Psicóloga</FormLabel>
                   {isPsychologist ? (
-                    <div className="flex h-10 items-center rounded-md border border-input bg-muted px-3 text-sm">
-                      {user.fullName}
-                    </div>
+                    <div className={readOnlyCls}>{user.fullName}</div>
                   ) : (
-                    <Select onValueChange={v => field.onChange(parseInt(v))} defaultValue={field.value?.toString()}>
-                      <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
-                      <SelectContent>
-                        {psychologists.map((p: any) => (
-                          <SelectItem key={p.id} value={p.id.toString()}>{p.user.fullName}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <IconField icon={Users}>
+                      <Select onValueChange={v => field.onChange(parseInt(v))} defaultValue={field.value ? field.value.toString() : undefined}>
+                        <FormControl><SelectTrigger><SelectValue placeholder="Selecione uma psicóloga" /></SelectTrigger></FormControl>
+                        <SelectContent>
+                          {psychologists.map((p: any) => (
+                            <SelectItem key={p.id} value={p.id.toString()}>{p.user.fullName}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </IconField>
                   )}
                   <FormMessage />
                 </FormItem>
               )} />
             </div>
 
-            {/* Modalidade: Online / Presencial */}
-            <div className="space-y-2">
-              <p className="text-sm font-medium leading-none">Modalidade</p>
-              <div className="flex rounded-lg border border-input overflow-hidden w-fit">
-                <button
-                  type="button"
-                  onClick={() => handleModalityChange('presential')}
-                  className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors ${
-                    modality === 'presential'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-background text-muted-foreground hover:bg-muted'
-                  }`}
-                  data-testid="button-modality-presential"
-                >
-                  <MapPin className="h-3.5 w-3.5" />
-                  Presencial
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleModalityChange('online')}
-                  className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors border-l border-input ${
-                    modality === 'online'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-background text-muted-foreground hover:bg-muted'
-                  }`}
-                  data-testid="button-modality-online"
-                >
-                  <Monitor className="h-3.5 w-3.5" />
-                  Online
-                </button>
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+              <div className="space-y-2">
+                <p className={labelCls}>Modalidade</p>
+                <div className="flex w-fit overflow-hidden rounded-xl border border-cp-border">
+                  <button type="button" onClick={() => handleModalityChange('presential')} className={modalityBtn(modality === 'presential')} data-testid="button-modality-presential">
+                    <MapPin className="h-3.5 w-3.5" />
+                    Presencial
+                  </button>
+                  <button type="button" onClick={() => handleModalityChange('online')} className={cn(modalityBtn(modality === 'online'), "border-l border-cp-border")} data-testid="button-modality-online">
+                    <Monitor className="h-3.5 w-3.5" />
+                    Online
+                  </button>
+                </div>
               </div>
+
+              <FormField control={form.control} name="sessionType" render={({ field }: any) => (
+                <FormItem>
+                  <FormLabel className={labelCls}>Tipo de sessão</FormLabel>
+                  <IconField icon={FileText}>
+                    <Select onValueChange={field.onChange} value={field.value || undefined}>
+                      <FormControl><SelectTrigger><SelectValue placeholder="Selecione o tipo" /></SelectTrigger></FormControl>
+                      <SelectContent>
+                        {SESSION_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </IconField>
+                  <FormMessage />
+                </FormItem>
+              )} />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
               <FormField control={form.control} name="roomId" render={({ field }: any) => (
                 <FormItem>
-                  <FormLabel className={modality === 'online' ? 'text-muted-foreground' : ''}>
-                    Sala {modality === 'online' && <span className="text-xs font-normal">(não aplicável para online)</span>}
+                  <FormLabel className={cn(labelCls, modality === 'online' && 'text-cp-subtle')}>
+                    Sala {modality === 'online' && <span className="text-xs font-normal">(não se aplica a online)</span>}
                   </FormLabel>
-                  <Select
-                    onValueChange={v => field.onChange(parseInt(v))}
-                    defaultValue={field.value.toString()}
-                    disabled={modality === 'online'}
-                  >
-                    <FormControl>
-                      <SelectTrigger className={modality === 'online' ? 'opacity-50 cursor-not-allowed' : ''}>
-                        <SelectValue placeholder={modality === 'online' ? '—' : 'Selecione'} />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {rooms.map((r: any) => (
-                        <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <IconField icon={DoorOpen}>
+                    <Select
+                      onValueChange={v => field.onChange(parseInt(v))}
+                      defaultValue={field.value ? field.value.toString() : undefined}
+                      disabled={modality === 'online'}
+                    >
+                      <FormControl>
+                        <SelectTrigger className={modality === 'online' ? 'cursor-not-allowed opacity-50' : ''}>
+                          <SelectValue placeholder={modality === 'online' ? '—' : 'Selecione uma sala'} />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {rooms.map((r: any) => (
+                          <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </IconField>
                   <FormMessage />
                 </FormItem>
               )} />
 
               <FormField control={form.control} name="status" render={({ field }: any) => (
                 <FormItem>
-                  <FormLabel>Status</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
-                    <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
-                    <SelectContent>
-                      <SelectItem value="scheduled">Aguardando</SelectItem>
-                      <SelectItem value="confirmed">Confirmado</SelectItem>
-                      <SelectItem value="completed">Concluído</SelectItem>
-                      <SelectItem value="canceled">Cancelado</SelectItem>
-                      <SelectItem value="first-session">Primeira Sessão</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <FormLabel className={labelCls}>Status</FormLabel>
+                  <IconField icon={Clock}>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
+                      <SelectContent>
+                        {(['scheduled', 'confirmed', 'completed', 'canceled', 'first-session'] as const).map(st => {
+                          const def = appointmentStatus[st];
+                          return (
+                            <SelectItem key={st} value={st}>
+                              <span className="flex items-center gap-2">
+                                <span className={cn("h-2 w-2 rounded-full", toneClasses[def.tone].dot)} />
+                                {def.label}
+                              </span>
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </IconField>
                   <FormMessage />
                 </FormItem>
               )} />
             </div>
 
-            <div className="rounded-xl border border-primary/15 bg-primary/5 p-4 space-y-4">
-              <div className="grid grid-cols-3 gap-4">
+            <div className="space-y-4 rounded-2xl border border-cp-lavender bg-cp-lavender-soft/60 p-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <FormField control={form.control} name="date" render={({ field }: any) => (
-                  <FormItem><FormLabel>Data</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
+                  <FormItem>
+                    <FormLabel className={labelCls}>Data</FormLabel>
+                    <IconField icon={CalendarIcon}><Input type="date" {...field} /></IconField>
+                    <FormMessage />
+                  </FormItem>
                 )} />
                 <FormField control={form.control} name="startTime" render={({ field }: any) => (
                   <FormItem>
-                    <FormLabel>Início</FormLabel>
-                    <FormControl>
+                    <FormLabel className={labelCls}>Início</FormLabel>
+                    <IconField icon={Clock}>
                       <Input type="time" {...field} onChange={e => {
                         field.onChange(e);
                         const dur = form.getValues("duration") || "50";
                         form.setValue("endTime", calculateEndTime(e.target.value, dur));
                       }} />
-                    </FormControl>
+                    </IconField>
                     <FormMessage />
                   </FormItem>
                 )} />
                 <FormField control={form.control} name="endTime" render={({ field }: any) => (
-                  <FormItem><FormLabel>Término</FormLabel><FormControl><Input type="time" {...field} /></FormControl><FormMessage /></FormItem>
+                  <FormItem>
+                    <FormLabel className={labelCls}>Término</FormLabel>
+                    <IconField icon={Clock}><Input type="time" {...field} /></IconField>
+                    <FormMessage />
+                  </FormItem>
                 )} />
               </div>
               <FormField control={form.control} name="duration" render={({ field }: any) => (
                 <FormItem>
-                  <FormLabel>Duração</FormLabel>
-                  <Select onValueChange={v => { field.onChange(v); const s = form.getValues("startTime"); if (s) form.setValue("endTime", calculateEndTime(s, v)); }} defaultValue={field.value}>
-                    <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                    <SelectContent>
-                      <SelectItem value="50">50 minutos</SelectItem>
-                      <SelectItem value="60">60 minutos</SelectItem>
-                      <SelectItem value="90">90 minutos</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <FormLabel className={labelCls}>Duração</FormLabel>
+                  <IconField icon={Clock}>
+                    <Select onValueChange={v => { field.onChange(v); const s = form.getValues("startTime"); if (s) form.setValue("endTime", calculateEndTime(s, v)); }} defaultValue={field.value}>
+                      <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                      <SelectContent>
+                        <SelectItem value="50">50 minutos</SelectItem>
+                        <SelectItem value="60">60 minutos</SelectItem>
+                        <SelectItem value="90">90 minutos</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </IconField>
                   <FormMessage />
                 </FormItem>
               )} />
             </div>
 
             <FormField control={form.control} name="notes" render={({ field }: any) => (
-              <FormItem><FormLabel>Observações</FormLabel><FormControl><Textarea className="resize-none min-h-[80px]" {...field} /></FormControl><FormMessage /></FormItem>
+              <FormItem>
+                <FormLabel className={labelCls}>Observações</FormLabel>
+                <FormControl><CharCountTextarea max={500} placeholder="Opcional" {...field} value={field.value ?? ""} /></FormControl>
+                <FormMessage />
+              </FormItem>
             )} />
+
+            <InfoBanner variant="warning">
+              Verifique se a sala e o horário estão disponíveis antes de confirmar o agendamento.
+            </InfoBanner>
           </div>
 
-          <DialogFooter className="flex-shrink-0 px-6 py-4 border-t border-neutral-light bg-neutral-light/60">
-            <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>
-            <Button type="submit" disabled={isPending}>
-              {isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Criando...</> : "Criar Agendamento"}
-            </Button>
-          </DialogFooter>
+          <div className="border-t border-cp-divider px-6 py-4">
+            <DialogActions onClose={onClose} isPending={isPending} label="Criar Agendamento" pendingLabel="Criando..." icon={<CalendarCheck className="h-4 w-4" />} />
+          </div>
         </form>
       </Form>
     </DialogContent>
@@ -1284,35 +1371,30 @@ function AppointmentDialog({
 
 function BookingDialog({ form, psychologists, rooms, isPending, onClose, onSubmit, user, loggedPsychologist }: any) {
   return (
-    <DialogContent className="max-w-lg">
-      <DialogHeader>
-        <DialogTitle>Nova Reserva de Sala</DialogTitle>
-        <DialogDescription>Reserve uma sala para um horário específico.</DialogDescription>
-      </DialogHeader>
+    <DialogContent className="max-w-lg rounded-2xl">
+      <ModalHeader icon={DoorOpen} title="Nova Reserva de Sala" description="Reserve uma sala para um horário específico." />
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 mt-2">
+        <form onSubmit={form.handleSubmit(onSubmit)} className="mt-2 space-y-4">
           <FormField control={form.control} name="psychologistId" render={({ field }: any) => (
             <FormItem>
-              <FormLabel>Psicóloga</FormLabel>
+              <FormLabel className={labelCls}>Psicóloga</FormLabel>
               {user?.role === 'admin' ? (
-                /* Admin: dropdown para escolher qualquer psicóloga */
-                <Select onValueChange={v => field.onChange(parseInt(v))} value={field.value?.toString() || ""}>
-                  <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
-                  <SelectContent>
-                    {psychologists.map((p: any) => (
-                      <SelectItem key={p.id} value={p.id.toString()}>{p.user.fullName}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <IconField icon={UserIcon}>
+                  <Select onValueChange={v => field.onChange(parseInt(v))} value={field.value ? field.value.toString() : ""}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Selecione a psicóloga" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      {psychologists.map((p: any) => (
+                        <SelectItem key={p.id} value={p.id.toString()}>{p.user.fullName}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </IconField>
               ) : loggedPsychologist ? (
-                /* Não-admin: campo fixo com a psicóloga logada */
-                <div className="flex items-center border rounded-md px-3 bg-muted/50 h-10">
-                  <span className="text-sm">{loggedPsychologist.user?.fullName || user?.fullName}</span>
-                </div>
+                <div className={readOnlyCls}>{loggedPsychologist.user?.fullName || user?.fullName}</div>
               ) : (
-                <div className="text-amber-600 border border-amber-300 rounded-md p-3 bg-amber-50 text-sm">
+                <InfoBanner variant="warning">
                   Seu registro de psicóloga não foi encontrado. Entre em contato com o administrador.
-                </div>
+                </InfoBanner>
               )}
               <FormMessage />
             </FormItem>
@@ -1320,55 +1402,65 @@ function BookingDialog({ form, psychologists, rooms, isPending, onClose, onSubmi
 
           <FormField control={form.control} name="roomId" render={({ field }: any) => (
             <FormItem>
-              <FormLabel>Sala</FormLabel>
-              <Select onValueChange={v => field.onChange(parseInt(v))} defaultValue={field.value?.toString()}>
-                <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
-                <SelectContent>
-                  {rooms.map((r: any) => (
-                    <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <FormLabel className={labelCls}>Sala</FormLabel>
+              <IconField icon={DoorOpen}>
+                <Select onValueChange={v => field.onChange(parseInt(v))} defaultValue={field.value ? field.value.toString() : undefined}>
+                  <FormControl><SelectTrigger><SelectValue placeholder="Selecione a sala" /></SelectTrigger></FormControl>
+                  <SelectContent>
+                    {rooms.map((r: any) => (
+                      <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </IconField>
               <FormMessage />
             </FormItem>
           )} />
 
           <FormField control={form.control} name="purpose" render={({ field }: any) => (
             <FormItem>
-              <FormLabel>Tipo</FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value}>
-                <FormControl><SelectTrigger><SelectValue placeholder="Tipo de uso" /></SelectTrigger></FormControl>
-                <SelectContent>
-                  <SelectItem value="Consulta">Consulta</SelectItem>
-                  <SelectItem value="Supervisão">Supervisão</SelectItem>
-                  <SelectItem value="Formação">Formação</SelectItem>
-                  <SelectItem value="Uso pessoal">Uso pessoal</SelectItem>
-                  <SelectItem value="Outro">Outro</SelectItem>
-                </SelectContent>
-              </Select>
+              <FormLabel className={labelCls}>Tipo</FormLabel>
+              <IconField icon={FileText}>
+                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                  <FormControl><SelectTrigger><SelectValue placeholder="Tipo de uso" /></SelectTrigger></FormControl>
+                  <SelectContent>
+                    <SelectItem value="Consulta">Consulta</SelectItem>
+                    <SelectItem value="Supervisão">Supervisão</SelectItem>
+                    <SelectItem value="Formação">Formação</SelectItem>
+                    <SelectItem value="Uso pessoal">Uso pessoal</SelectItem>
+                    <SelectItem value="Outro">Outro</SelectItem>
+                  </SelectContent>
+                </Select>
+              </IconField>
               <FormMessage />
             </FormItem>
           )} />
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <FormField control={form.control} name="date" render={({ field }: any) => (
-              <FormItem><FormLabel>Data</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
+              <FormItem>
+                <FormLabel className={labelCls}>Data</FormLabel>
+                <IconField icon={CalendarIcon}><Input type="date" {...field} /></IconField>
+                <FormMessage />
+              </FormItem>
             )} />
             <FormField control={form.control} name="startTime" render={({ field }: any) => (
-              <FormItem><FormLabel>Início</FormLabel><FormControl><Input type="time" {...field} /></FormControl><FormMessage /></FormItem>
+              <FormItem>
+                <FormLabel className={labelCls}>Início</FormLabel>
+                <IconField icon={Clock}><Input type="time" {...field} /></IconField>
+                <FormMessage />
+              </FormItem>
             )} />
             <FormField control={form.control} name="endTime" render={({ field }: any) => (
-              <FormItem><FormLabel>Término</FormLabel><FormControl><Input type="time" {...field} /></FormControl><FormMessage /></FormItem>
+              <FormItem>
+                <FormLabel className={labelCls}>Término</FormLabel>
+                <IconField icon={Clock}><Input type="time" {...field} /></IconField>
+                <FormMessage />
+              </FormItem>
             )} />
           </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>
-            <Button type="submit" disabled={isPending}>
-              {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Reservar
-            </Button>
-          </DialogFooter>
+          <DialogActions onClose={onClose} isPending={isPending} label="Reservar" pendingLabel="Reservando..." />
         </form>
       </Form>
     </DialogContent>
