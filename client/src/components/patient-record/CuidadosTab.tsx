@@ -27,6 +27,9 @@ import {
 } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { CharCountTextarea } from "@/components/cp/fields";
+import { StatusBadge } from "@/components/cp/StatusBadge";
+import { dispatchStatus, statusOf } from "@/components/cp/status";
 import {
   DndContext,
   closestCenter,
@@ -145,21 +148,11 @@ function newQuestion(): EditableQuestion {
   };
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  sent:     { label: "Enviado",    color: "bg-blue-100 text-blue-700" },
-  opened:   { label: "Aberto",     color: "bg-yellow-100 text-yellow-700" },
-  answered: { label: "Respondido", color: "bg-green-100 text-green-700" },
-  expired:  { label: "Expirado",   color: "bg-gray-100 text-gray-500" },
-};
-
 function StatusChip({ status }: { status: string }) {
-  const cfg = STATUS_CONFIG[status] ?? { label: status, color: "bg-gray-100 text-gray-500" };
+  const st = statusOf(dispatchStatus, status);
   return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cfg.color}`}
-      data-testid={`chip-status-${status}`}
-    >
-      {cfg.label}
+    <span data-testid={`chip-status-${status}`}>
+      <StatusBadge label={st.label} tone={st.tone} />
     </span>
   );
 }
@@ -733,16 +726,16 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
       <div className="md:col-span-2 space-y-4">
-        <div className="bg-white rounded-xl border border-neutral-100 shadow-sm p-4 space-y-4">
-          <h3 className="text-sm font-semibold text-neutral-700 flex items-center gap-2">
-            <Send className="h-4 w-4 text-teal-600" />
+        <div className="rounded-2xl border border-cp-divider bg-white shadow-[0_10px_40px_-22px_rgba(36,54,71,0.2)] space-y-4 p-5">
+          <h3 className="flex items-center gap-2 text-[18px] font-semibold text-cp-ink">
+            <Send className="h-5 w-5 text-cp-sage-ink" />
             Enviar Formulário
           </h3>
 
           {/* Email banner */}
           {emailValid ? (
             <div
-              className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-sm text-green-700"
+              className="flex items-center gap-2 rounded-xl border border-cp-sage/40 bg-cp-sage-soft/70 px-3 py-2.5 text-sm text-cp-sage-ink"
               data-testid="banner-email-valid"
             >
               <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
@@ -752,7 +745,7 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
             </div>
           ) : (
             <div
-              className="flex items-center gap-2 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 text-sm text-yellow-800"
+              className="flex items-center gap-2 rounded-xl border border-cp-warning/25 bg-cp-warning-soft px-3 py-2.5 text-sm text-cp-ink"
               data-testid="banner-email-invalid"
             >
               <AlertCircle className="h-4 w-4 flex-shrink-0" />
@@ -774,10 +767,10 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
 
           {/* Template selector */}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-neutral-600">Template *</label>
+            <label className="text-[13px] font-medium text-cp-ink">Template *</label>
             <div className="flex gap-2">
               <Select value={selectedTemplateId} onValueChange={handleTemplateChange}>
-                <SelectTrigger data-testid="select-template" disabled={loadingTemplates} className="flex-1">
+                <SelectTrigger data-testid="select-template" disabled={loadingTemplates} className="h-11 flex-1 rounded-xl border-cp-border focus:ring-cp-action">
                   <SelectValue placeholder={loadingTemplates ? "Carregando…" : "Selecione um template"} />
                 </SelectTrigger>
                 <SelectContent>
@@ -789,7 +782,7 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
                       )}
                     </SelectItem>
                   ))}
-                  <SelectItem value="__new__" className="text-teal-600 font-medium">
+                  <SelectItem value="__new__" className="font-medium text-cp-action">
                     <Plus className="h-3 w-3 inline mr-1" />
                     Criar novo template…
                   </SelectItem>
@@ -848,8 +841,9 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
 
           {/* Subject */}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-neutral-600">Assunto do e-mail</label>
+            <label className="text-[13px] font-medium text-cp-ink">Assunto do e-mail</label>
             <Input
+              className="h-11 rounded-xl border-cp-border focus-visible:ring-cp-action"
               data-testid="input-subject"
               placeholder={`Check-in — ${firstName}`}
               value={subject}
@@ -859,16 +853,16 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
 
           {/* Custom message */}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-neutral-600">
+            <label className="text-[13px] font-medium text-cp-ink">
               Mensagem personalizada (opcional)
             </label>
-            <Textarea
+            <CharCountTextarea
+              max={500}
               data-testid="textarea-custom-message"
-              rows={3}
               placeholder="Uma mensagem curta que aparece no início do formulário…"
               value={customMessage}
               onChange={(e) => setCustomMessage(e.target.value)}
-              className="text-sm resize-none"
+              className="text-sm"
             />
           </div>
 
@@ -878,7 +872,7 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
               <TooltipTrigger asChild>
                 <span className="w-full block">
                   <Button
-                    className="w-full bg-teal-600 hover:bg-teal-700 text-white"
+                    className="h-12 w-full rounded-xl bg-cp-action text-[15px] text-white hover:bg-cp-action-hover"
                     disabled={!selectedTemplateId || !emailValid || dispatchMutation.isPending}
                     onClick={handleSend}
                     data-testid="btn-send-form"
@@ -888,7 +882,8 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
                     ) : (
                       <Mail className="h-4 w-4 mr-2" />
                     )}
-                    Enviar Formulário para {firstName} ✉️
+                    Enviar Formulário para {firstName}
+                    <Send className="ml-2 h-4 w-4" />
                   </Button>
                 </span>
               </TooltipTrigger>
@@ -902,9 +897,9 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
         </div>
       </div>
 
-      <div className="md:col-span-3 space-y-3">
-        <h3 className="text-sm font-semibold text-neutral-700 flex items-center gap-2">
-          <Clock className="h-4 w-4 text-neutral-400" />
+      <div className="rounded-2xl border border-cp-divider bg-white shadow-[0_10px_40px_-22px_rgba(36,54,71,0.2)] space-y-3 p-5 md:col-span-3">
+        <h3 className="flex items-center gap-2 text-[18px] font-semibold text-cp-ink">
+          <Clock className="h-5 w-5 text-cp-muted" />
           Histórico de Envios
         </h3>
 
@@ -915,9 +910,15 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
         )}
 
         {!loadingHistory && dispatches.length === 0 && (
-          <div className="text-center py-12 text-sm text-muted-foreground bg-white rounded-xl border border-neutral-100 shadow-sm">
-            <Heart className="h-8 w-8 mx-auto mb-2 text-teal-200" />
-            Nenhum formulário enviado ainda.
+          <div className="flex flex-col items-center py-14 text-center">
+            <div className="relative mb-5 flex h-28 w-36 items-center justify-center rounded-[48%] bg-cp-sage-soft/70">
+              <Mail className="h-12 w-12 text-cp-sage" strokeWidth={1.5} />
+              <Heart className="absolute top-5 h-5 w-5 fill-cp-sage text-cp-sage" />
+            </div>
+            <p className="text-[17px] font-medium text-cp-ink">Nenhum formulário enviado ainda.</p>
+            <p className="mt-1 max-w-xs text-sm text-cp-muted">
+              Quando você enviar formulários para este paciente, o histórico aparecerá aqui.
+            </p>
           </div>
         )}
 
@@ -925,13 +926,13 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
           {dispatches.map((d) => (
             <div
               key={d.id}
-              className="bg-white rounded-xl border border-neutral-100 shadow-sm p-3 flex flex-col sm:flex-row sm:items-center gap-2"
+              className="flex flex-col gap-2 rounded-xl border border-cp-divider bg-white p-3 transition-colors hover:bg-cp-hover sm:flex-row sm:items-center"
               data-testid={`dispatch-card-${d.id}`}
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <StatusChip status={d.status} />
-                  <span className="text-sm font-medium text-neutral-700 truncate">{d.subject}</span>
+                  <span className="truncate text-sm font-medium text-cp-ink">{d.subject}</span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {new Date(d.sentAt).toLocaleDateString("pt-BR", {
@@ -942,7 +943,7 @@ export default function CuidadosTab({ patient }: CuidadosTabProps) {
                   {" · "}
                   {d.sentToEmail}
                   {d.responseCount !== undefined && d.responseCount > 0 && (
-                    <span className="ml-1 text-teal-600">· {d.responseCount} resp.</span>
+                    <span className="ml-1 text-cp-action">· {d.responseCount} resp.</span>
                   )}
                 </p>
               </div>

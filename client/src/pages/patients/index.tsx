@@ -35,7 +35,15 @@ import {
     FormLabel,
     FormMessage,
 } from "@/components/ui/form";
-import { Loader2, Plus, Search, FileText } from "lucide-react";
+import { Loader2, Plus, Search, FileText, UserPlus } from "lucide-react";
+import { PageHeader, cpButton } from "@/components/cp/PageHeader";
+import { IconField, ModalHeader } from "@/components/cp/fields";
+import { StatusBadge } from "@/components/cp/StatusBadge";
+import { patientStatus, statusOf } from "@/components/cp/status";
+import { cn } from "@/lib/utils";
+
+// Soft alternating row tints from the mockup (white / lavender / white / sand)
+const rowTint = ["", "bg-cp-lavender-soft/70", "", "bg-cp-sand-soft/80"];
 
 type PatientWithPsychologist = Patient & { psychologistName?: string | null };
 
@@ -113,28 +121,27 @@ export default function PatientsList() {
     }
 
     return (
-        <div className="flex h-screen bg-neutral-lightest">
+        <div className="flex h-screen bg-cp-bg">
             <Sidebar />
             <div className="flex-1 overflow-x-hidden ml-0 md:ml-64 pt-16 md:pt-0">
                 <MobileNav />
-                <main className="p-4 md:p-6">
-                    <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
-                        <div>
-                            <h1 className="heading-page">Pacientes</h1>
-                            <p className="text-muted">Gerencie seus pacientes e prontuários</p>
-                        </div>
+                <main className="p-4 sm:px-7 sm:py-6">
+                    <PageHeader
+                        className="mb-6"
+                        title="Pacientes"
+                        subtitle="Gerencie seus pacientes e prontuários."
+                        phrase
+                        actions={
                         <Dialog open={isOpen} onOpenChange={setIsOpen}>
                             <DialogTrigger asChild>
-                                <Button className="mt-4 md:mt-0 bg-primary hover:bg-primary-dark text-white">
-                                    <Plus className="mr-2 h-4 w-4" /> Novo Paciente
-                                </Button>
+                                <button type="button" className={cpButton.primary} data-testid="button-new-patient">
+                                    <Plus className="h-4 w-4" /> Novo Paciente
+                                </button>
                             </DialogTrigger>
-                            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                                <DialogHeader>
-                                    <DialogTitle>Cadastrar Novo Paciente</DialogTitle>
-                                </DialogHeader>
+                            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl">
+                                <ModalHeader icon={UserPlus} title="Cadastrar Novo Paciente" description="Preencha os dados básicos; o restante pode ser completado no prontuário." />
                                 <Form {...form}>
-                                    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                                    <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 [&_input]:h-11 [&_input]:rounded-xl [&_input]:border-cp-border [&_input]:focus-visible:ring-cp-action">
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <FormField
                                                 control={form.control}
@@ -216,76 +223,76 @@ export default function PatientsList() {
                                             />
                                         </div>
 
-                                        <Button type="submit" className="w-full bg-primary hover:bg-primary-dark text-white" disabled={createPatientMutation.isPending}>
-                                            {createPatientMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                        <button type="submit" className={cn(cpButton.primary, "w-full")} disabled={createPatientMutation.isPending}>
+                                            {createPatientMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                                             Cadastrar
-                                        </Button>
+                                        </button>
                                     </form>
                                 </Form>
                             </DialogContent>
                         </Dialog>
-                    </div>
+                        }
+                    />
 
-                    <div className="bg-white rounded-lg shadow-sm p-6">
-                        <div className="flex items-center mb-6">
-                            <div className="relative flex-1 max-w-sm">
-                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-neutral-dark" />
+                    <div className="rounded-2xl border border-cp-divider bg-white p-4 shadow-[0_10px_40px_-20px_rgba(36,54,71,0.18)] sm:p-6">
+                        <div className="mb-5">
+                            <IconField icon={Search} className="max-w-md">
                                 <Input
-                                    className="pl-9"
+                                    className="bg-white"
                                     placeholder="Buscar por nome, CPF ou email..."
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                 />
-                            </div>
+                            </IconField>
                         </div>
 
                         {isLoading ? (
                             <div className="flex justify-center p-8">
-                                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                                <Loader2 className="h-8 w-8 animate-spin text-cp-action" />
                             </div>
                         ) : (
                             <div className="overflow-x-auto">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>Nome</TableHead>
-                                            {isAdmin && <TableHead>Psicóloga</TableHead>}
-                                            <TableHead>CPF</TableHead>
-                                            <TableHead>Telefone</TableHead>
-                                            <TableHead>Status</TableHead>
-                                            <TableHead className="text-right">Ações</TableHead>
+                                <Table className="border-separate border-spacing-y-1">
+                                    <TableHeader className="[&_tr]:border-0">
+                                        <TableRow className="bg-cp-sand-soft hover:bg-cp-sand-soft [&>th:first-child]:rounded-l-xl [&>th:last-child]:rounded-r-xl">
+                                            <TableHead className="h-12 text-[14px] font-medium text-cp-ink">Nome</TableHead>
+                                            {isAdmin && <TableHead className="text-[14px] font-medium text-cp-ink">Psicóloga</TableHead>}
+                                            <TableHead className="text-[14px] font-medium text-cp-ink">CPF</TableHead>
+                                            <TableHead className="text-[14px] font-medium text-cp-ink">Telefone</TableHead>
+                                            <TableHead className="text-[14px] font-medium text-cp-ink">Status</TableHead>
+                                            <TableHead className="text-right text-[14px] font-medium text-cp-ink">Ações</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
                                         {filteredPatients?.length === 0 ? (
-                                            <TableRow>
-                                                <TableCell colSpan={isAdmin ? 6 : 5} className="text-center py-8 text-neutral-dark">
+                                            <TableRow className="border-0 hover:bg-transparent">
+                                                <TableCell colSpan={isAdmin ? 6 : 5} className="py-10 text-center text-cp-muted">
                                                     Nenhum paciente encontrado.
                                                 </TableCell>
                                             </TableRow>
                                         ) : (
-                                            filteredPatients?.map((patient) => (
+                                            filteredPatients?.map((patient, i) => {
+                                                const st = statusOf(patientStatus, patient.status ?? "active");
+                                                return (
                                                 <TableRow
                                                     key={patient.id}
-                                                    className="cursor-pointer hover:bg-neutral-lightest"
+                                                    className={cn(
+                                                        "cursor-pointer border-0 transition-colors hover:bg-cp-hover [&>td:first-child]:rounded-l-xl [&>td:last-child]:rounded-r-xl",
+                                                        rowTint[i % rowTint.length],
+                                                    )}
                                                     onClick={() => setLocation(`/patients/${patient.id}/record`)}
                                                     data-testid={`row-patient-${patient.id}`}
                                                 >
-                                                    <TableCell className="font-medium text-neutral-darkest" data-testid={`text-patient-name-${patient.id}`}>{patient.fullName}</TableCell>
+                                                    <TableCell className="py-4 font-semibold text-cp-ink" data-testid={`text-patient-name-${patient.id}`}>{patient.fullName}</TableCell>
                                                     {isAdmin && (
-                                                        <TableCell className="text-neutral-darkest" data-testid={`text-psychologist-name-${patient.id}`}>
+                                                        <TableCell className="text-cp-ink" data-testid={`text-psychologist-name-${patient.id}`}>
                                                             {patient.psychologistName ?? "—"}
                                                         </TableCell>
                                                     )}
-                                                    <TableCell className="text-neutral-darkest">{patient.cpf || '-'}</TableCell>
-                                                    <TableCell className="text-neutral-darkest">{patient.phone}</TableCell>
+                                                    <TableCell className="text-cp-ink">{patient.cpf || '-'}</TableCell>
+                                                    <TableCell className="text-cp-ink">{patient.phone}</TableCell>
                                                     <TableCell>
-                                                        <span className={`px-2 py-1 rounded-full text-xs ${patient.status === 'active'
-                                                            ? 'bg-success bg-opacity-10 text-success'
-                                                            : 'bg-neutral-dark bg-opacity-10 text-neutral-dark'
-                                                            }`}>
-                                                            {patient.status === 'active' ? 'Ativo' : 'Inativo'}
-                                                        </span>
+                                                        <StatusBadge label={st.label} tone={st.tone} />
                                                     </TableCell>
                                                     <TableCell className="text-right">
                                                         <Button
@@ -295,7 +302,7 @@ export default function PatientsList() {
                                                                 e.stopPropagation();
                                                                 setLocation(`/patients/${patient.id}/record`);
                                                             }}
-                                                            className="text-primary hover:text-primary-dark hover:bg-primary-light/10"
+                                                            className="font-medium text-cp-action hover:bg-cp-action-soft hover:text-cp-action-hover"
                                                             data-testid={`btn-prontuario-${patient.id}`}
                                                         >
                                                             <FileText className="h-4 w-4 mr-2" />
@@ -303,7 +310,8 @@ export default function PatientsList() {
                                                         </Button>
                                                     </TableCell>
                                                 </TableRow>
-                                            ))
+                                                );
+                                            })
                                         )}
                                     </TableBody>
                                 </Table>

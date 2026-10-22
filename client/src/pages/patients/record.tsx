@@ -51,7 +51,7 @@ const TABS = [
     { value: "anamnesis", label: "Anamnese", icon: Activity, countKey: null },
     { value: "sessions", label: "Evoluções", icon: FileText, countKey: "sessions" },
     { value: "documents", label: "Documentos", icon: FolderOpen, countKey: "documents" },
-    { value: "cuidados", label: "Cuidados ♥", icon: Heart, countKey: null },
+    { value: "cuidados", label: "Cuidados", icon: Heart, countKey: null },
     { value: "assessments", label: "Avaliações", icon: ClipboardList, countKey: "assessments" },
 ] as const;
 
@@ -217,7 +217,7 @@ export default function PatientRecord() {
 
     if (isForbidden) {
         return (
-            <div className="flex h-screen bg-neutral-lightest">
+            <div className="flex h-screen bg-cp-bg">
                 <Sidebar />
                 <div className="flex-1 overflow-y-auto ml-0 md:ml-64 pt-16 md:pt-0">
                     <MobileNav />
@@ -252,11 +252,11 @@ export default function PatientRecord() {
     if (!patient) return <div className="p-8 text-neutral-500">Paciente não encontrado</div>;
 
     return (
-        <div className="flex h-screen bg-neutral-lightest">
+        <div className="flex h-screen bg-cp-bg">
             <Sidebar />
             <div ref={contentRef} className="flex-1 overflow-y-auto overflow-x-hidden ml-0 md:ml-64 pt-16 md:pt-0">
                 <MobileNav />
-                <main className="p-4 md:p-6 max-w-5xl mx-auto">
+                <main className="mx-auto max-w-6xl p-4 sm:px-7 sm:py-6">
                     <RecordHeader
                         patient={patient}
                         onNewEvolution={handleNewEvolution}
@@ -265,7 +265,7 @@ export default function PatientRecord() {
                     />
 
                     <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as TabValue)} className="w-full">
-                        <TabsList className="w-full justify-start flex-nowrap overflow-x-auto h-auto p-1 bg-white border border-neutral-100 rounded-xl shadow-sm mb-6 gap-0.5">
+                        <TabsList className="w-full justify-start flex-nowrap overflow-x-auto mb-6 h-auto gap-1 rounded-2xl border border-cp-divider bg-white p-1.5 shadow-[0_10px_40px_-22px_rgba(36,54,71,0.2)]">
                             {TABS.map(({ value, label, icon: Icon, countKey }) => {
                                 const count = countKey && counts ? counts[countKey as keyof TabCounts] : null;
                                 return (
@@ -274,19 +274,19 @@ export default function PatientRecord() {
                                         value={value}
                                         data-testid={`tab-${value}`}
                                         className={[
-                                            "relative flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200",
-                                            "text-muted-foreground hover:text-primary hover:bg-primary/5",
-                                            "data-[state=active]:text-primary data-[state=active]:bg-primary/10",
-                                            "data-[state=active]:shadow-sm",
-                                            "after:absolute after:bottom-0 after:left-2 after:right-2 after:h-0.5 after:rounded-full",
-                                            "after:bg-primary after:scale-x-0 data-[state=active]:after:scale-x-100",
+                                            "relative flex items-center gap-2 rounded-xl px-4 py-2.5 text-[15px] font-medium transition-all duration-200",
+                                            "text-cp-ink hover:bg-cp-hover",
+                                            "data-[state=active]:bg-cp-sage-soft data-[state=active]:text-cp-sage-ink",
+                                            "data-[state=active]:shadow-none",
+                                            "after:absolute after:bottom-0 after:left-3 after:right-3 after:h-[3px] after:rounded-full",
+                                            "after:bg-cp-sage-ink after:scale-x-0 data-[state=active]:after:scale-x-100",
                                             "after:transition-transform after:duration-300",
                                         ].join(" ")}
                                     >
                                         <Icon className="h-4 w-4 flex-shrink-0" />
                                         <span className="whitespace-nowrap">{label}</span>
                                         {count !== null && count > 0 && (
-                                            <span className="ml-0.5 bg-primary/15 text-primary text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                                            <span className="ml-0.5 bg-cp-action-soft text-cp-action text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
                                                 {count}
                                             </span>
                                         )}

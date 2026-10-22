@@ -2,7 +2,8 @@ import { useLocation } from "wouter";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/cp/StatusBadge";
+import { patientStatus, statusOf } from "@/components/cp/status";
 import { ArrowLeft, ChevronRight, CalendarDays, Plus, FileUp, ClipboardCheck, ArrowRightLeft } from "lucide-react";
 import { type Patient } from "@shared/schema";
 import TransferPatientModal from "./TransferPatientModal";
@@ -41,49 +42,43 @@ export default function RecordHeader({ patient, onNewEvolution, onNewDocument, o
     return (
         <div className="mb-6">
             {/* Breadcrumb */}
-            <nav className="flex items-center gap-1 text-sm text-muted-foreground mb-4">
+            <nav className="mb-4 flex items-center gap-1 text-sm text-cp-muted">
                 <button
                     onClick={() => setLocation("/patients")}
-                    className="hover:text-primary transition-colors font-medium"
+                    className="font-medium transition-colors hover:text-cp-action"
                 >
                     Pacientes
                 </button>
                 <ChevronRight className="h-3.5 w-3.5" />
-                <span className="truncate max-w-[160px] text-foreground font-medium">
+                <span className="max-w-[160px] truncate font-medium text-cp-ink">
                     {patient.fullName}
                 </span>
                 <ChevronRight className="h-3.5 w-3.5" />
-                <span className="text-primary font-semibold">Prontuário</span>
+                <span className="font-semibold text-cp-action">Prontuário</span>
             </nav>
 
             {/* Header Content */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
                     {/* Avatar */}
-                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center text-white font-bold text-xl shadow-md flex-shrink-0">
+                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-cp-action to-cp-action/70 flex items-center justify-center text-white font-bold text-xl shadow-md flex-shrink-0">
                         {initials}
                     </div>
 
                     {/* Name + Info */}
                     <div>
-                        <h1 className="text-2xl font-bold text-foreground leading-tight">{patient.fullName}</h1>
+                        <h1 className="text-[28px] font-bold leading-tight text-cp-ink">{patient.fullName}</h1>
                         <div className="flex flex-wrap items-center gap-2 mt-1">
                             {patient.birthDate && (
-                                <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                                <span className="flex items-center gap-1 text-sm text-cp-muted">
                                     <CalendarDays className="h-3.5 w-3.5" />
                                     {calculateAge(patient.birthDate)}
                                 </span>
                             )}
-                            <Badge
-                                variant="outline"
-                                className={
-                                    patient.status === "active"
-                                        ? "border-emerald-200 bg-emerald-50 text-emerald-700 text-xs"
-                                        : "border-neutral-200 bg-neutral-100 text-neutral-600 text-xs"
-                                }
-                            >
-                                {patient.status === "active" ? "Ativo" : "Inativo"}
-                            </Badge>
+                            {(() => {
+                                const st = statusOf(patientStatus, patient.status ?? "active");
+                                return <StatusBadge label={st.label} tone={st.tone} />;
+                            })()}
                         </div>
                     </div>
                 </div>
@@ -93,17 +88,17 @@ export default function RecordHeader({ patient, onNewEvolution, onNewDocument, o
                     <Button
                         size="sm"
                         variant="outline"
-                        className="gap-1.5 text-xs h-8 border-primary/30 text-primary hover:bg-primary/5"
+                        className="h-10 gap-1.5 rounded-xl border-cp-border bg-white text-[14px] text-cp-action hover:bg-cp-action-soft"
                         onClick={onNewEvolution}
                         id="btn-new-evolution"
                     >
-                        <Plus className="h-3.5 w-3.5" />
+                        <Plus className="h-4 w-4" />
                         Nova Evolução
                     </Button>
                     <Button
                         size="sm"
                         variant="outline"
-                        className="gap-1.5 text-xs h-8 border-primary/30 text-primary hover:bg-primary/5"
+                        className="h-10 gap-1.5 rounded-xl border-cp-border bg-white text-[14px] text-cp-action hover:bg-cp-action-soft"
                         onClick={onNewDocument}
                         id="btn-new-document"
                     >
@@ -113,7 +108,7 @@ export default function RecordHeader({ patient, onNewEvolution, onNewDocument, o
                     <Button
                         size="sm"
                         variant="outline"
-                        className="gap-1.5 text-xs h-8 border-primary/30 text-primary hover:bg-primary/5"
+                        className="h-10 gap-1.5 rounded-xl border-cp-border bg-white text-[14px] text-cp-action hover:bg-cp-action-soft"
                         onClick={onNewAssessment}
                         id="btn-new-assessment"
                     >
@@ -126,7 +121,7 @@ export default function RecordHeader({ patient, onNewEvolution, onNewDocument, o
                         <Button
                             size="sm"
                             variant="outline"
-                            className="gap-1.5 text-xs h-8 border-amber-400/50 text-amber-700 hover:bg-amber-50"
+                            className="h-10 gap-1.5 rounded-xl border-cp-sand-ink/30 bg-cp-sand-soft text-[14px] text-cp-sand-ink hover:bg-cp-sand"
                             onClick={() => setTransferOpen(true)}
                             id="btn-transfer-patient"
                         >
