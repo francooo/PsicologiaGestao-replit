@@ -39,8 +39,8 @@ function Router() {
       <ProtectedRoute path="/financial" component={Financial} />
       <ProtectedRoute path="/cash-flow" component={CashFlow} />
       <ProtectedRoute path="/invoices" component={Invoices} />
-      <ProtectedRoute path="/admin/invoices" component={AdminInvoices} />
-      <ProtectedRoute path="/permissions" component={Permissions} />
+      {user?.role === "admin" && <ProtectedRoute path="/admin/invoices" component={AdminInvoices} />}
+      {user?.role === "admin" && <ProtectedRoute path="/permissions" component={Permissions} />}
 
       <ProtectedRoute path="/profile" component={Profile} />
       <ProtectedRoute path="/patients" component={PatientsList} />

@@ -45,6 +45,42 @@ export const dispatchStatus: Record<string, StatusDef> = {
   expired: { label: "Expirado", tone: "neutral" },
 };
 
+export const invoiceStatus: Record<string, StatusDef> = {
+  ativa: { label: "Ativa", tone: "success" },
+  pendente: { label: "Pendente", tone: "warning" },
+  cancelada: { label: "Cancelada", tone: "danger" },
+};
+
+export const commissionStatus: Record<string, StatusDef> = {
+  pending: { label: "Pendente", tone: "warning" },
+  paid: { label: "Pago", tone: "success" },
+  cancelled: { label: "Cancelado", tone: "danger" },
+};
+
+export const userStatus: Record<string, StatusDef> = {
+  active: { label: "Ativo", tone: "success" },
+  inactive: { label: "Inativo", tone: "neutral" },
+  pending: { label: "Pendente", tone: "warning" },
+};
+
+export const transactionType: Record<string, StatusDef> = {
+  income: { label: "Receita", tone: "success" },
+  expense: { label: "Despesa", tone: "danger" },
+};
+
+/** Role values stored in the DB -> Portuguese label. */
+export const roleLabel: Record<string, string> = {
+  admin: "Administrador",
+  psychologist: "Psicóloga",
+  receptionist: "Recepcionista",
+  manager: "Gestor",
+  staff: "Equipe",
+};
+
+export function roleName(role?: string | null) {
+  return (role && roleLabel[role]) || role || "—";
+}
+
 export function statusOf(map: Record<string, StatusDef>, value?: string | null): StatusDef {
   return (value && map[value]) || { label: value || "—", tone: "neutral" };
 }
