@@ -33,3 +33,12 @@ mobile/.env.*
 *.p12
 *.key
 *.mobileprovision
+
+# /brag video: intermediate render files (frames, Chrome profile, audio stem)
+brag-output/work/chrome-profile/
+brag-output/work/frames/
+brag-output/work/framesV/
+brag-output/work/stills/
+brag-output/work/stills2/
+brag-output/work/*.png
+brag-output/work/*.wav

@@ -1,0 +1,860 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>ConsultaPsi brag</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=block" rel="stylesheet">
+<style>
+  :root {
+    --bg: #FBFAF7; --ink: #243647; --muted: #6B7480; --subtle: #8A929C; --border: #E7E3DC; --divider: #EEEAE4; --hover: #F5F2EC;
+    --action: #287EA5; --action-soft: #E5F0F6;
+    --sage: #8BA798; --sage-soft: #E3EBE5; --sage-ink: #4F6B5C;
+    --lav: #DCD8EA; --lav-soft: #F0EEF6; --lav-ink: #5B5486;
+    --sand: #EDE3D5; --sand-soft: #F7F1E8; --sand-ink: #8A6A45;
+    --success: #3E8E63; --success-soft: #E3F1E8; --warning: #B7791F; --warning-soft: #FBF0DC; --danger: #C2413A; --danger-soft: #FBE4E2;
+    --ai: #7C3AED; --ai-soft: #F1EAFB;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--bg); }
+  body { font-family: "DM Sans", sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; }
+  #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: var(--bg); }
+  .abs { position: absolute; }
+  .scene { position: absolute; inset: 0; }
+  .app { position: absolute; left: -760px; top: 520px; width: 1920px; height: 1080px; }
+  .cap { left: 60px !important; top: 290px !important; width: 960px !important; }
+  .cap .line { margin: 18px 0 26px !important; }
+  .cap h1 { font-size: 72px !important; }
+  .ico { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  .chip { position: absolute; display: flex; align-items: center; gap: 22px; padding: 26px 46px 26px 30px; border-radius: 999px;
+          font-size: 60px; font-weight: 600; white-space: nowrap; box-shadow: 0 18px 40px -22px rgba(36,54,71,.35); }
+  .chip .ic { width: 76px; height: 76px; border-radius: 22px; display: grid; place-items: center; background: rgba(255,255,255,.65); }
+  .chip svg { width: 44px; height: 44px; }
+
+  .logo { display: flex; align-items: center; gap: 22px; }
+  .word { font-weight: 500; letter-spacing: -0.02em; color: #1F3347; line-height: 1; }
+  .word b { font-weight: 600; color: #2E729B; }
+  .pillrow { display: flex; gap: 22px; }
+  .lchip { display: flex; align-items: center; gap: 14px; padding: 18px 32px; border-radius: 999px; font-size: 30px; font-weight: 500; }
+  .lchip svg { width: 32px; height: 32px; }
+
+  .cap { position: absolute; left: 130px; top: 0; width: 610px; }
+  .cap .lbl { font-size: 18px; letter-spacing: .45em; text-transform: uppercase; color: var(--subtle); }
+  .cap .line { width: 56px; height: 2px; background: #9AA08F; margin: 22px 0 34px; }
+  .cap h1 { font-size: 76px; line-height: 1.05; font-weight: 700; letter-spacing: -0.025em; color: var(--ink); }
+
+  .card { position: absolute; background: #fff; border: 1px solid var(--border); border-radius: 30px;
+          box-shadow: 0 40px 80px -50px rgba(36,54,71,.35), 0 2px 6px rgba(36,54,71,.04); }
+  .cardhead { display: flex; align-items: center; gap: 18px; padding: 32px 40px 24px; border-bottom: 1px solid var(--divider); }
+  .cardhead h2 { font-size: 34px; font-weight: 600; flex: 1; }
+  .cardhead .date { font-size: 22px; color: var(--muted); }
+  .cardhead > svg { width: 40px; height: 40px; color: var(--sage-ink); }
+  .hic { width: 54px; height: 54px; border-radius: 16px; display: grid; place-items: center; }
+  .hic svg { width: 30px; height: 30px; }
+
+  .row { position: absolute; left: 40px; right: 40px; height: 104px; display: flex; align-items: center; }
+  .row .time { width: 96px; font-size: 26px; font-weight: 500; }
+  .row .dot { width: 14px; height: 14px; border-radius: 50%; margin: 0 34px 0 10px; }
+  .row .box { flex: 1; height: 92px; border-radius: 20px; display: flex; align-items: center; gap: 22px; padding: 0 26px; position: relative; overflow: hidden; }
+  .row .box svg.person { width: 36px; height: 36px; }
+  .nm { font-size: 27px; font-weight: 500; }
+  .sub { font-size: 21px; color: var(--muted); margin-top: 2px; }
+  .grow { flex: 1; }
+  .pill { display: inline-flex; align-items: center; gap: 10px; padding: 9px 20px; border-radius: 999px; font-size: 21px; font-weight: 500; white-space: nowrap; }
+  .pill i { width: 9px; height: 9px; border-radius: 50%; display: block; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; padding: 12px 30px; border-radius: 16px; border: 1.5px solid var(--border); background: #fff; font-size: 22px; font-weight: 500; white-space: nowrap; }
+  .btn.pri { background: var(--action); color: #fff; border-color: var(--action); }
+  .btn.ok { background: var(--success); color: #fff; border-color: var(--success); }
+  .btn svg { width: 24px; height: 24px; }
+  .chev { width: 26px; height: 26px; color: var(--subtle); margin-left: 18px; }
+  .layer { position: absolute; inset: 0; display: flex; align-items: center; gap: 22px; padding: 0 26px; }
+  .stack { position: relative; display: inline-block; }
+  .stack > * { position: absolute; right: 0; top: 0; }
+
+  .field { margin-bottom: 22px; }
+  .field label { display: block; font-size: 19px; font-weight: 600; color: var(--muted); margin-bottom: 8px; }
+  .inp { height: 62px; border: 1.5px solid var(--border); border-radius: 16px; display: flex; align-items: center; padding: 0 20px; font-size: 24px; gap: 12px; background: #fff; position: relative; }
+  .inp .ph { color: #A3A9B0; }
+  .inp .tag { margin-left: auto; font-size: 15px; font-weight: 700; color: var(--ai); background: var(--ai-soft); border-radius: 8px; padding: 4px 9px; letter-spacing: .04em; }
+
+  .toast { position: absolute; display: flex; align-items: center; gap: 16px; background: #fff; border: 1px solid var(--border);
+           border-radius: 20px; padding: 20px 30px 20px 22px; font-size: 24px; font-weight: 500; white-space: nowrap;
+           box-shadow: 0 30px 60px -30px rgba(36,54,71,.45); z-index: 20; }
+  .toast .ok { width: 40px; height: 40px; border-radius: 50%; background: var(--sage-soft); display: grid; place-items: center; color: var(--success); }
+  .toast .ok svg { width: 24px; height: 24px; }
+  .toast small { display: block; font-size: 19px; color: var(--muted); font-weight: 400; }
+
+  #cursor { position: absolute; left: 0; top: 0; width: 46px; height: 46px; z-index: 60; filter: drop-shadow(0 6px 8px rgba(0,0,0,.25)); opacity: 0; }
+  #ripple { position: absolute; left: 0; top: 0; width: 80px; height: 80px; margin: -40px 0 0 -40px; border-radius: 50%; border: 3px solid var(--action); z-index: 59; opacity: 0; }
+  #touch { position: absolute; left: 0; top: 0; width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 50%; background: rgba(36,54,71,.22); border: 2px solid rgba(255,255,255,.9); z-index: 60; opacity: 0; }
+
+  .sec { position: absolute; left: 44px; right: 44px; }
+  .sec h3 { font-size: 25px; font-weight: 600; display: flex; align-items: center; gap: 12px; }
+  .sec h3 i { width: 12px; height: 12px; border-radius: 4px; display: block; }
+  .sec .body { position: absolute; top: 36px; left: 0; right: 0; }
+  .sec p { font-size: 23px; color: #46525E; line-height: 1.4; }
+  .sk { height: 18px; border-radius: 9px; background: linear-gradient(90deg, #F1EEE8 0%, #F8F6F2 50%, #F1EEE8 100%); background-size: 600px 100%; margin-top: 12px; }
+
+  /* steps tracker */
+  .steps { position: absolute; left: 800px; top: 56px; width: 1000px; display: flex; align-items: center; gap: 16px; }
+  .step { display: flex; align-items: center; gap: 12px; padding: 10px 22px 10px 10px; border-radius: 999px; font-size: 21px; font-weight: 600; background: #fff; border: 1.5px solid var(--border); color: var(--subtle); white-space: nowrap; }
+  .step b { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 18px; background: var(--hover); color: var(--muted); }
+  .steps .bar { flex: 1; height: 2px; background: var(--border); position: relative; }
+  .steps .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--action); }
+
+  /* phones */
+  .phone { position: absolute; width: 430px; height: 900px; border-radius: 64px; background: #1C2530; padding: 14px; box-shadow: 0 60px 100px -50px rgba(36,54,71,.55); }
+  .phone .scr { position: relative; width: 402px; height: 872px; border-radius: 52px; overflow: hidden; background: var(--bg); }
+  .phone .notch { position: absolute; left: 50%; top: 18px; width: 26px; height: 26px; margin-left: -13px; border-radius: 50%; background: #1C2530; z-index: 5; }
+  .sb { position: absolute; left: 0; right: 0; top: 0; height: 54px; display: flex; justify-content: space-between; align-items: center; padding: 6px 34px 0; font-size: 17px; font-weight: 600; z-index: 4; }
+  .pg { position: absolute; left: 0; top: 0; width: 402px; height: 872px; }
+  .m-card { background: #fff; border: 1px solid var(--border); border-radius: 22px; }
+  .tabbar { position: absolute; left: 0; right: 0; bottom: 0; height: 92px; background: #fff; border-top: 1px solid var(--divider); display: flex; justify-content: space-around; padding-top: 12px; z-index: 4; }
+  .tabbar div { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 14px; color: var(--subtle); width: 76px; }
+  .tabbar svg { width: 26px; height: 26px; }
+  .tabbar .on { color: var(--action); font-weight: 600; }
+
+  /* chart */
+  .kpi { flex: 1; border: 1px solid var(--border); border-radius: 20px; padding: 18px 24px; }
+  .kpi .k { font-size: 16px; letter-spacing: .14em; text-transform: uppercase; color: var(--subtle); }
+  .kpi .v { font-size: 38px; font-weight: 700; margin-top: 6px; font-variant-numeric: tabular-nums; }
+
+  #banner { position: absolute; left: 800px; width: 1000px; top: 890px; height: 78px; border-radius: 22px; background: var(--success); color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 16px 0 28px; z-index: 30; font-size: 24px; font-weight: 500; box-shadow: 0 30px 60px -30px rgba(62,142,99,.7); }
+  #banner .live { width: 14px; height: 14px; border-radius: 50%; background: #fff; display: inline-block; margin-right: 14px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <svg id="bgTR" class="abs" style="right:-200px; top:-200px; width:760px; height:760px" viewBox="0 0 560 560">
+    <path d="M120 0 H560 V430 C 500 470, 410 450, 330 380 C 250 310, 150 230, 120 120 C 110 70, 112 30, 120 0 Z" fill="#E4DDEB"/>
+    <path d="M0 40 C 80 160, 220 200, 330 240 C 430 280, 500 330, 545 470" stroke="#D9C2AA" stroke-width="2" fill="none"/>
+  </svg>
+  <svg id="bgBL" class="abs" style="left:-160px; bottom:-60px; width:900px; height:734px" viewBox="0 0 760 620">
+    <path d="M300 620 C 330 470, 470 400, 590 440 C 690 475, 730 560, 740 620 Z" fill="#F1E7DB"/>
+    <path d="M0 40 C 90 70, 140 160, 170 260 C 200 360, 230 400, 330 410 C 260 470, 250 560, 280 620 H0 Z" fill="#D5DACD"/>
+    <path d="M0 260 C 160 300, 330 400, 360 520 C 370 570, 355 600, 330 620" stroke="#7E8A77" stroke-width="2" fill="none"/>
+  </svg>
+
+  <!-- 1 hook -->
+  <div class="scene" id="s1">
+    <div id="s1t" class="abs" style="left:0; right:0; top:400px; text-align:center; font-size:50px; font-weight:500; color:var(--muted)">Uma clínica de psicologia é…</div>
+    <div class="chip" id="c1" style="left:370px; top:620px; background:var(--sage-soft); color:var(--sage-ink)"><span class="ic"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span>Agenda</div>
+    <div class="chip" id="c2" style="left:730px; top:770px; background:var(--sand-soft); color:var(--sand-ink)"><span class="ic"><svg class="ico" viewBox="0 0 24 24"><path d="M13 4h3a2 2 0 0 1 2 2v14M2 20h3M13 20h9M10 12v.01M13 4.56v16.16a1 1 0 0 1-1.24.97L5 20V5.56a2 2 0 0 1 1.51-1.94l4-1A2 2 0 0 1 13 4.56Z"/></svg></span>Salas</div>
+    <div class="chip" id="c3" style="left:420px; top:930px; background:var(--lav-soft); color:var(--lav-ink)"><span class="ic"><svg class="ico" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg></span>Prontuários</div>
+    <div class="chip" id="c4" style="left:640px; top:1100px; background:var(--action-soft); color:var(--action)"><span class="ic"><svg class="ico" viewBox="0 0 24 24"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8M12 17.5v-11"/></svg></span>Notas fiscais</div>
+    <div class="chip" id="c5" style="left:440px; top:1270px; background:var(--warning-soft); color:var(--warning)"><span class="ic"><svg class="ico" viewBox="0 0 24 24"><path d="M11 15h2a2 2 0 1 0 0-4h-3c-.6 0-1.1.2-1.4.6L3 17"/><path d="m7 21 1.6-1.4c.3-.4.8-.6 1.4-.6h4c1.1 0 2.1-.4 2.8-1.2l4.6-4.4a2 2 0 0 0-2.75-2.91l-4.2 3.9"/><path d="m2 16 6 6"/><circle cx="16" cy="9" r="2.9"/><circle cx="6" cy="5" r="3"/></svg></span>Repasses</div>
+  </div>
+
+  <!-- 2 reveal -->
+  <div class="scene" id="s2">
+    <div class="abs" style="left:0; right:0; top:640px; display:flex; justify-content:center">
+      <div class="logo">
+        <svg id="leaf" width="130" height="130" viewBox="0 0 48 48">
+          <path id="lf1" d="M23 33 C 16 22, 24 6, 44 1 C 48 18, 40 32, 23 33 Z" fill="#9FAE96"/>
+          <path id="lf2" d="M11 47 C 1 36, 5 19, 22 13 C 30 29, 25 43, 11 47 Z" fill="#A99BBB"/>
+          <path id="lf3" d="M22 13 C 26 21, 27 28, 25 33 C 21 30, 20 22, 22 13 Z" fill="#E9E6EE" opacity="0.9"/>
+        </svg>
+        <div id="s2word" class="word" style="font-size:112px">Consulta<b>Psi</b></div>
+      </div>
+    </div>
+    <div id="s2tag" class="abs" style="left:90px; right:90px; top:850px; text-align:center; font-size:64px; line-height:1.15; font-weight:500; letter-spacing:-0.015em">Seu consultório, mais leve de organizar.</div>
+    <div class="abs" style="left:0; right:0; top:1080px; display:flex; justify-content:center">
+      <div class="pillrow">
+        <div id="p1" class="lchip" style="background:var(--sage-soft); color:var(--sage-ink)"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>Agenda</div>
+        <div id="p2" class="lchip" style="background:var(--lav-soft); color:var(--lav-ink)"><svg class="ico" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8"/></svg>Prontuários</div>
+        <div id="p3" class="lchip" style="background:var(--sand-soft); color:var(--sand-ink)"><svg class="ico" viewBox="0 0 24 24"><path d="M6 20V14M12 20V8M18 20V4"/></svg>Financeiro</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3 WhatsApp → paciente → agenda -->
+  <div class="scene" id="s3">
+    <div class="cap" id="s3c" style="top:330px"><div class="lbl">Agendamento</div><div class="line"></div><h1>Do WhatsApp para a agenda, sem planilha.</h1></div>
+    <div class="steps" id="s3steps">
+      <div class="step" id="st1"><b>1</b>Compartilhar horários</div><div class="bar"><i id="sb1"></i></div>
+      <div class="step" id="st2"><b>2</b>Paciente escolhe</div><div class="bar"><i id="sb2"></i></div>
+      <div class="step" id="st3"><b>3</b>Na agenda</div>
+    </div>
+    <!-- A: share -->
+    <div class="card" id="s3A" style="left:800px; top:150px; width:1000px; height:800px">
+      <div class="cardhead"><div class="hic" style="background:var(--success-soft); color:var(--success)"><svg class="ico" viewBox="0 0 24 24"><path d="M3 21l1.65-3.8a9 9 0 1 1 3.4 2.9L3 21"/><path d="M9 10a.5.5 0 0 0 1 0V9a.5.5 0 0 0-1 0v1a5 5 0 0 0 5 5h1a.5.5 0 0 0 0-1h-1a.5.5 0 0 0 0 1"/></svg></div><h2>Compartilhar disponibilidade</h2></div>
+      <div style="padding:34px 44px">
+        <div class="field"><label>Psicóloga</label><div class="inp">Dra. Helena Prado<svg class="ico" viewBox="0 0 24 24" style="width:24px;height:24px;margin-left:auto;color:var(--subtle)"><path d="m6 9 6 6 6-6"/></svg></div></div>
+        <div style="display:flex; gap:22px">
+          <div class="field" style="flex:1"><label>Data inicial</label><div class="inp">27/10/2026</div></div>
+          <div class="field" style="flex:1"><label>Data final</label><div class="inp">31/10/2026</div></div>
+        </div>
+        <div class="field"><label>Mensagem</label><div class="inp" style="height:110px; align-items:flex-start; padding-top:16px"><span id="msgT"></span></div></div>
+        <div style="display:flex; justify-content:flex-end; margin-top:8px"><span class="btn ok" id="genbtn" style="font-size:24px; padding:16px 34px">Gerar link do WhatsApp</span></div>
+        <div id="linkbox" style="margin-top:26px; display:flex; align-items:center; gap:16px; padding:18px 22px; border-radius:18px; background:var(--success-soft); color:var(--sage-ink); font-size:23px; font-weight:500">
+          <svg class="ico" viewBox="0 0 24 24" style="width:28px;height:28px"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          Link gerado — pronto para enviar no WhatsApp<span class="btn" style="margin-left:auto; font-size:19px; padding:8px 18px">Copiar</span></div>
+      </div>
+    </div>
+    <!-- B: patient phone -->
+    <div class="phone" id="s3B" style="left:1085px; top:140px">
+      <div class="scr"><div class="notch"></div><div class="sb"><span>9:41</span><span>●●● ▮</span></div>
+        <div class="pg" style="padding:70px 28px 0">
+          <div style="display:flex; justify-content:center; align-items:center; gap:8px"><svg width="34" height="34" viewBox="0 0 48 48"><path d="M23 33 C 16 22, 24 6, 44 1 C 48 18, 40 32, 23 33 Z" fill="#9FAE96"/><path d="M11 47 C 1 36, 5 19, 22 13 C 30 29, 25 43, 11 47 Z" fill="#A99BBB"/></svg><span class="word" style="font-size:26px">Consulta<b>Psi</b></span></div>
+          <div class="m-card" style="margin-top:22px; padding:24px 22px; position:relative; height:640px">
+            <div style="font-size:27px; font-weight:700">Agendamento de Consulta</div>
+            <div style="font-size:18px; color:var(--muted); margin-top:4px">com Dra. Helena Prado</div>
+            <div style="font-size:16px; font-weight:600; color:var(--muted); margin-top:22px; letter-spacing:.08em; text-transform:uppercase">Segunda, 27 de outubro</div>
+            <div id="slots" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-top:12px">
+              <span class="slot">09:00</span><span class="slot">10:00</span><span class="slot">11:00</span>
+              <span class="slot" id="slot14">14:00</span><span class="slot">15:00</span><span class="slot">16:00</span>
+            </div>
+            <div style="font-size:16px; font-weight:600; color:var(--muted); margin-top:22px">Nome completo</div>
+            <div class="inp" style="height:54px; font-size:20px; margin-top:6px"><span id="nameT"></span></div>
+            <div style="font-size:16px; font-weight:600; color:var(--muted); margin-top:16px">Observações (opcional)</div>
+            <div class="inp" style="height:54px; font-size:20px; margin-top:6px"><span class="ph">Primeira consulta</span></div>
+            <div id="solbtn" class="btn pri" style="width:100%; justify-content:center; margin-top:22px; font-size:21px; padding:15px">Solicitar agendamento</div>
+            <div id="done" style="position:absolute; inset:0; background:#fff; border-radius:22px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:30px">
+              <div id="doneic" style="width:96px; height:96px; border-radius:50%; background:var(--success-soft); color:var(--success); display:grid; place-items:center"><svg class="ico" viewBox="0 0 24 24" style="width:52px;height:52px;stroke-width:2.6"><path d="M20 6 9 17l-5-5"/></svg></div>
+              <div style="font-size:28px; font-weight:700; margin-top:24px">Agendamento solicitado!</div>
+              <div style="font-size:18px; color:var(--muted); margin-top:10px; line-height:1.45">A equipe entrará em contato para confirmar a consulta em breve.</div>
+              <div style="margin-top:22px; font-size:19px; font-weight:500; background:var(--hover); border-radius:14px; padding:12px 18px">Seg, 27/10 · 14:00</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- C: agenda -->
+    <div class="card" id="s3C" style="left:800px; top:150px; width:1000px; height:800px">
+      <div class="cardhead"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg><h2>Agenda · Dra. Helena Prado</h2><span class="date">Seg, 27 de outubro</span></div>
+      <div class="abs" style="left:163px; top:150px; width:2px; height:560px; background:repeating-linear-gradient(#E7E3DC 0 8px, transparent 8px 14px)"></div>
+      <div class="row" style="top:140px"><span class="time">09:00</span><span class="dot" style="background:#3E8E63"></span><div class="box" style="background:#EEF3EF"><svg class="ico person" viewBox="0 0 24 24" style="color:#4F6B5C"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><div class="grow"><div class="nm">Ana Martins</div><div class="sub">Consulta Individual</div></div><span class="pill" style="background:var(--sage-soft); color:var(--sage-ink)"><i style="background:var(--success)"></i>Confirmada</span></div></div>
+      <div class="row" style="top:256px"><span class="time">11:00</span><span class="dot" style="background:#3E8E63"></span><div class="box" style="background:#EEF3EF"><svg class="ico person" viewBox="0 0 24 24" style="color:#4F6B5C"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><div class="grow"><div class="nm">Lucas Ferraz</div><div class="sub">Retorno</div></div><span class="pill" style="background:var(--sage-soft); color:var(--sage-ink)"><i style="background:var(--success)"></i>Confirmada</span></div></div>
+      <div class="row" id="c3row" style="top:372px"><span class="time">14:00</span><span class="dot" id="c3dot" style="background:#D6D2CB"></span>
+        <div class="box" style="background:#F7F5F1">
+          <div class="layer" id="c3a"><svg class="ico person" viewBox="0 0 24 24" style="color:#8A929C"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><div class="grow"><div class="nm">Horário disponível</div><div class="sub">Link enviado no WhatsApp</div></div></div>
+          <div class="layer" id="c3b" style="background:var(--warning-soft)"><svg class="ico person" viewBox="0 0 24 24" style="color:#B7791F"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><div class="grow"><div class="nm">Beatriz Lima</div><div class="sub">Primeira consulta · via link</div></div>
+            <span class="stack" style="width:330px; height:46px"><span id="c3wait" style="display:flex; gap:12px; align-items:center"><span class="pill" style="background:#fff; color:var(--warning)"><i style="background:var(--warning)"></i>Aguardando</span><span class="btn pri" id="confbtn" style="font-size:19px; padding:8px 18px">Confirmar</span></span>
+              <span class="pill" id="c3ok" style="background:var(--lav-soft); color:var(--lav-ink)"><i style="background:var(--lav-ink)"></i>Primeira sessão</span></span></div>
+        </div></div>
+      <div class="row" style="top:488px"><span class="time">16:00</span><span class="dot" style="background:#A99BBB"></span><div class="box" style="background:var(--lav-soft)"><svg class="ico person" viewBox="0 0 24 24" style="color:#5B5486"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><div class="grow"><div class="nm">Carla Souza</div><div class="sub">Consulta Individual</div></div><span class="pill" style="background:var(--warning-soft); color:var(--warning)"><i style="background:var(--warning)"></i>Pendente</span></div></div>
+      <div class="row" style="top:604px"><span class="time">17:30</span><span class="dot" style="background:#D6D2CB"></span><div class="box" style="background:#F7F5F1"><svg class="ico person" viewBox="0 0 24 24" style="color:#8A929C"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><div class="grow"><div class="nm">Horário disponível</div><div class="sub">Agende uma consulta</div></div><span class="btn">Agendar</span></div></div>
+    </div>
+    <div class="toast" id="s3toast" style="left:1180px; top:900px"><span class="ok" style="background:var(--warning-soft); color:var(--warning)"><svg class="ico" viewBox="0 0 24 24" style="stroke-width:2.4"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span><span>Nova solicitação de agendamento<small>Beatriz Lima · seg, 14:00</small></span></div>
+  </div>
+
+  <!-- 4 reuniões -->
+  <div class="scene" id="s4">
+    <div class="cap" id="s4c" style="top:340px"><div class="lbl">Reuniões online</div><div class="line"></div><h1>Sessão online com link do Meet.</h1></div>
+    <div class="card" id="s4modal" style="left:800px; top:120px; width:1000px; height:470px">
+      <div class="cardhead"><div class="hic" style="background:var(--action-soft); color:var(--action)"><svg class="ico" viewBox="0 0 24 24"><path d="m16 13 5.2 3.5a.5.5 0 0 0 .8-.4V7.9a.5.5 0 0 0-.8-.4L16 11"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg></div><h2>Nova reunião</h2></div>
+      <div style="padding:30px 44px">
+        <div style="display:flex; gap:22px">
+          <div class="field" style="flex:1"><label>Paciente</label><div class="inp">Lucas Ferraz</div></div>
+          <div class="field" style="flex:1"><label>Título da sessão</label><div class="inp">Sessão semanal</div></div>
+        </div>
+        <div class="field"><label>Duração</label>
+          <div style="display:flex; gap:12px" id="durs"><span class="btn dur">30 min</span><span class="btn dur">45 min</span><span class="btn dur" id="d50">50 min</span><span class="btn dur">60 min</span><span class="btn dur">90 min</span></div></div>
+        <div style="display:flex; align-items:center; gap:14px; font-size:23px; margin-top:6px">
+          <span id="chk" style="width:32px; height:32px; border-radius:9px; border:2px solid var(--border); display:grid; place-items:center; color:#fff"><svg class="ico" viewBox="0 0 24 24" style="width:22px;height:22px;stroke-width:3"><path d="M20 6 9 17l-5-5"/></svg></span>
+          Enviar link para o paciente agora
+          <span class="btn pri" id="mkbtn" style="margin-left:auto">Criar reunião</span></div>
+      </div>
+    </div>
+    <div class="card" id="s4meet" style="left:800px; top:620px; width:1000px; height:240px; padding:30px 40px">
+      <div style="display:flex; align-items:center; gap:20px">
+        <div class="hic" style="background:var(--action-soft); color:var(--action); width:64px; height:64px"><svg class="ico" viewBox="0 0 24 24"><path d="m16 13 5.2 3.5a.5.5 0 0 0 .8-.4V7.9a.5.5 0 0 0-.8-.4L16 11"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg></div>
+        <div class="grow"><div class="nm" style="font-size:29px">Sessão semanal · Lucas Ferraz</div><div class="sub">Hoje, 16:00 · 50 min</div></div>
+        <span class="stack" style="width:220px; height:46px"><span class="pill" id="mSched" style="background:var(--action-soft); color:var(--action)"><i style="background:var(--action)"></i>Agendada</span><span class="pill" id="mLive" style="background:var(--success-soft); color:var(--success)"><i style="background:var(--success)"></i>Em andamento</span></span>
+      </div>
+      <div style="display:flex; gap:14px; margin-top:26px; align-items:center">
+        <span class="pill" style="background:var(--hover); color:var(--ink); font-size:21px; padding:12px 20px"><svg class="ico" viewBox="0 0 24 24" style="width:22px;height:22px;color:var(--action)"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>Link do Google Meet criado</span>
+        <span class="pill" id="mMail" style="background:var(--sage-soft); color:var(--sage-ink); font-size:21px; padding:12px 20px"><svg class="ico" viewBox="0 0 24 24" style="width:22px;height:22px"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>Link enviado por e-mail</span>
+        <span class="btn" id="startbtn" style="margin-left:auto">Iniciar sessão</span>
+      </div>
+    </div>
+    <div id="banner"><span><span class="live" id="livedot"></span>Sessão em andamento com Lucas Ferraz <span style="opacity:.8; font-variant-numeric:tabular-nums; margin-left:16px" id="timer">⏱ 00:00</span></span>
+      <span class="btn" style="font-size:20px; padding:9px 20px; color:var(--ink)">Entrar no Meet</span></div>
+  </div>
+
+  <!-- 5 prontuário IA -->
+  <div class="scene" id="s5">
+    <div class="cap" id="s5c" style="top:330px"><div class="lbl">Prontuário</div><div class="line"></div><h1>Anamnese em PDF? Resumo pronto.</h1></div>
+    <div class="card" id="s5head" style="left:800px; top:100px; width:1000px; height:190px; padding:26px 34px">
+      <div style="display:flex; align-items:center; gap:18px">
+        <div style="width:62px;height:62px;border-radius:50%;background:var(--sage-soft);color:var(--sage-ink);display:grid;place-items:center;font-size:24px;font-weight:600">AM</div>
+        <div class="grow"><div class="nm" style="font-size:30px">Ana Martins</div><div class="sub">Prontuário</div></div>
+        <span class="pill" style="background:var(--sage-soft); color:var(--sage-ink)"><i style="background:var(--success)"></i>Ativo</span>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:22px; font-size:21px; color:var(--muted)">
+        <span class="tab">Dados pessoais</span><span class="tab">Anamnese</span><span class="tab">Evoluções</span><span class="tab" id="tabDocs">Documentos</span><span class="tab">Avaliações</span><span class="tab">Cuidados</span>
+      </div>
+    </div>
+    <div class="card" id="s5file" style="left:800px; top:316px; width:1000px; height:100px; display:flex; align-items:center; gap:20px; padding:0 30px">
+      <div style="width:56px; height:56px; border-radius:16px; background:var(--danger-soft); color:var(--danger); display:grid; place-items:center"><svg class="ico" viewBox="0 0 24 24" style="width:30px;height:30px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div>
+      <div class="grow"><div style="font-size:25px; font-weight:500">anamnese-inicial.pdf</div><div style="font-size:19px; color:var(--muted)">Documentos · enviado hoje</div></div>
+      <span id="aibtn" class="pill" style="background:var(--ai-soft); color:var(--ai); font-size:22px; padding:11px 22px"><svg class="ico" viewBox="0 0 24 24" style="width:24px;height:24px"><path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2z"/></svg>Resumo IA</span>
+    </div>
+    <div class="card" id="s5modal" style="left:800px; top:442px; width:1000px; height:560px">
+      <div class="cardhead" style="padding:22px 44px 18px">
+        <div class="hic" style="background:var(--ai-soft); color:var(--ai); width:46px; height:46px"><svg class="ico" viewBox="0 0 24 24" style="width:26px;height:26px"><path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2z"/></svg></div>
+        <h2 style="font-size:29px">Resumo IA — <span style="font-weight:400; color:var(--muted)">anamnese-inicial.pdf</span></h2></div>
+      <div class="sec" id="sc1" style="top:104px"><h3><i style="background:var(--action)"></i>Resumo objetivo</h3><div class="body"><p>Relata ansiedade ligada ao trabalho e sono irregular há três meses.</p></div><div class="skel"><div class="sk" style="width:90%"></div></div></div>
+      <div class="sec" id="sc2" style="top:208px"><h3><i style="background:var(--warning)"></i>Pontos de atenção clínica</h3><div class="body"><p>Episódios de insônia; observar uso de cafeína à noite.</p></div><div class="skel"><div class="sk" style="width:84%"></div></div></div>
+      <div class="sec" id="sc3" style="top:312px"><h3><i style="background:var(--lav-ink)"></i>Insights terapêuticos</h3><div class="body"><p>Boa adesão; responde bem a registros diários de humor.</p></div><div class="skel"><div class="sk" style="width:88%"></div></div></div>
+      <div class="sec" id="sc4" style="top:416px"><h3><i style="background:var(--success)"></i>Sugestões de follow-up</h3><div class="body"><p>Revisar o diário do sono na próxima sessão.</p></div><div class="skel"><div class="sk" style="width:70%"></div></div></div>
+    </div>
+  </div>
+
+  <!-- 6 cuidados -->
+  <div class="scene" id="s6">
+    <div class="cap" id="s6c" style="top:300px"><div class="lbl">Cuidados</div><div class="line"></div><h1>Formulário por e-mail. Resposta no prontuário.</h1></div>
+    <div class="card" id="s6send" style="left:800px; top:110px; width:1000px; height:340px">
+      <div class="cardhead"><div class="hic" style="background:var(--sage-soft); color:var(--sage-ink)"><svg class="ico" viewBox="0 0 24 24"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg></div><h2>Enviar formulário · Ana Martins</h2></div>
+      <div style="padding:28px 44px">
+        <div style="display:flex; gap:22px">
+          <div class="field" style="flex:1"><label>Template</label><div class="inp">Check-in Semanal<svg class="ico" viewBox="0 0 24 24" style="width:24px;height:24px;margin-left:auto;color:var(--subtle)"><path d="m6 9 6 6 6-6"/></svg></div></div>
+          <div class="field" style="flex:1"><label>Assunto</label><div class="inp">Como foi a sua semana?</div></div>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px; font-size:21px; color:var(--sage-ink)">
+          <svg class="ico" viewBox="0 0 24 24" style="width:24px;height:24px"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>Vai para o e-mail cadastrado da paciente
+          <span class="btn pri" id="sendbtn" style="margin-left:auto">Enviar formulário</span></div>
+      </div>
+    </div>
+    <div class="card" id="s6hist" style="left:800px; top:478px; width:1000px; height:410px">
+      <div class="cardhead"><svg class="ico" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5M12 7v5l4 2"/></svg><h2>Histórico de envios</h2></div>
+      <div style="padding:26px 40px">
+        <div style="display:flex; align-items:center; gap:18px">
+          <div class="grow"><div class="nm">Check-in Semanal</div><div class="sub">Enviado hoje, 10:12</div></div>
+          <span class="stack" style="width:200px; height:46px">
+            <span class="pill" id="dSent" style="background:var(--action-soft); color:var(--action)"><i style="background:var(--action)"></i>Enviado</span>
+            <span class="pill" id="dOpen" style="background:var(--warning-soft); color:var(--warning)"><i style="background:var(--warning)"></i>Aberto</span>
+            <span class="pill" id="dDone" style="background:var(--sage-soft); color:var(--sage-ink)"><i style="background:var(--success)"></i>Respondido</span></span>
+        </div>
+        <div id="answer" style="margin-top:22px; background:var(--bg); border:1px solid var(--divider); border-radius:18px; padding:18px 24px">
+          <div style="font-size:20px; color:var(--muted)">Como você dormiu esta semana?</div>
+          <div style="font-size:25px; font-weight:500; margin-top:6px">Melhor — acordei menos durante a noite.</div>
+        </div>
+      </div>
+    </div>
+    <div class="card" id="s6pt" style="left:1330px; top:290px; width:430px; height:330px; padding:24px 28px; border-radius:26px; z-index:5; box-shadow:0 50px 90px -40px rgba(36,54,71,.5)">
+      <div style="font-size:15px; letter-spacing:.16em; text-transform:uppercase; color:var(--subtle)">Página da paciente</div>
+      <div style="font-size:25px; font-weight:700; margin-top:8px">Check-in Semanal</div>
+      <div style="font-size:20px; color:var(--muted); margin-top:14px">Como você dormiu esta semana?</div>
+      <div style="display:flex; gap:10px; margin-top:14px"><span class="btn opt" id="optM" style="font-size:20px; padding:10px 18px">Melhor</span><span class="btn opt" style="font-size:20px; padding:10px 18px">Igual</span><span class="btn opt" style="font-size:20px; padding:10px 18px">Pior</span></div>
+      <div class="btn pri" id="ptsend" style="width:100%; justify-content:center; margin-top:22px; font-size:20px">Enviar respostas</div>
+    </div>
+    <div class="toast" id="s6toast" style="left:1200px; top:400px"><span class="ok"><svg class="ico" viewBox="0 0 24 24" style="stroke-width:3"><path d="M20 6 9 17l-5-5"/></svg></span><span>Formulário enviado!<small>E-mail enviado para a paciente</small></span></div>
+  </div>
+
+  <!-- 7 salas + repasses -->
+  <div class="scene" id="s7">
+    <div class="cap" id="s7c" style="top:300px"><div class="lbl">Salas e repasses</div><div class="line"></div><h1>Aluga as salas. O repasse sai calculado.</h1></div>
+    <div class="card" id="s7rooms" style="left:800px; top:110px; width:1000px; height:410px">
+      <div class="cardhead"><svg class="ico" viewBox="0 0 24 24"><path d="M13 4h3a2 2 0 0 1 2 2v14M2 20h3M13 20h9M10 12v.01M13 4.56v16.16a1 1 0 0 1-1.24.97L5 20V5.56a2 2 0 0 1 1.51-1.94l4-1A2 2 0 0 1 13 4.56Z"/></svg><h2>Reservas de salas — hoje</h2></div>
+      <div class="row" id="m1" style="top:116px; height:90px"><div class="door"></div><div class="grow"><div class="nm">Sala Infantil</div><div class="sub">09:00 – 10:00</div></div><span class="pill" style="background:var(--lav-soft); color:var(--lav-ink)"><i style="background:var(--lav-ink)"></i>Ocupada</span></div>
+      <div class="row" id="m2" style="top:210px; height:90px"><div class="door"></div><div class="grow"><div class="nm">Sala de Estudos</div><div class="sub">14:00 – 15:00 · Dra. Helena Prado</div></div>
+        <span class="stack" style="width:200px; height:44px"><span class="pill" id="m2free" style="background:var(--sage-soft); color:var(--sage-ink)"><i style="background:var(--success)"></i>Disponível</span><span class="pill" id="m2busy" style="background:var(--lav-soft); color:var(--lav-ink)"><i style="background:var(--lav-ink)"></i>Ocupada</span></span></div>
+      <div class="row" id="m3" style="top:304px; height:90px"><div class="door"></div><div class="grow"><div class="nm">Sala de Grupo</div><div class="sub">Sem reservas hoje</div></div><span class="pill" style="background:var(--sage-soft); color:var(--sage-ink)"><i style="background:var(--success)"></i>Disponível</span></div>
+    </div>
+    <div class="card" id="s7comm" style="left:800px; top:550px; width:1000px; height:410px; padding:34px 40px">
+      <div style="display:flex; align-items:center; gap:16px">
+        <svg class="ico" viewBox="0 0 24 24" style="width:38px;height:38px;color:#287EA5"><path d="M11 15h2a2 2 0 1 0 0-4h-3c-.6 0-1.1.2-1.4.6L3 17"/><path d="m7 21 1.6-1.4c.3-.4.8-.6 1.4-.6h4c1.1 0 2.1-.4 2.8-1.2l4.6-4.4a2 2 0 0 0-2.75-2.91l-4.2 3.9"/><path d="m2 16 6 6"/><circle cx="16" cy="9" r="2.9"/><circle cx="6" cy="5" r="3"/></svg>
+        <h2 style="font-size:34px; font-weight:600; flex:1">Comissões · Outubro</h2>
+        <span class="stack" style="width:150px; height:44px"><span class="pill" id="cPend" style="background:var(--warning-soft); color:var(--warning)"><i style="background:var(--warning)"></i>Pendente</span><span class="pill" id="cPaid" style="background:var(--sage-soft); color:var(--sage-ink)"><i style="background:var(--success)"></i>Pago</span></span>
+      </div>
+      <div style="display:flex; align-items:center; gap:22px; margin-top:34px">
+        <div style="width:76px;height:76px;border-radius:50%;background:var(--lav);color:var(--lav-ink);display:grid;place-items:center;font-size:28px;font-weight:600">HP</div>
+        <div style="flex:1"><div style="font-size:30px; font-weight:500">Dra. Helena Prado</div><div style="font-size:21px; color:var(--muted); margin-top:4px"><span id="nloc">12</span> locações · R$ 120,00 por locação</div></div>
+        <div style="text-align:right"><div style="font-size:19px; letter-spacing:.2em; color:var(--subtle); text-transform:uppercase">Repasse</div><div id="amt" style="font-size:58px; font-weight:700; color:var(--action); font-variant-numeric: tabular-nums">R$ 1.440,00</div></div>
+      </div>
+      <div style="height:1px; background:var(--divider); margin:34px 0 28px"></div>
+      <div style="display:flex; justify-content:flex-end; gap:18px"><span class="btn">Ver itens</span><span class="btn pri" id="paybtn">Marcar como pago</span></div>
+    </div>
+  </div>
+
+  <!-- 8 notas fiscais -->
+  <div class="scene" id="s8">
+    <div class="cap" id="s8c" style="top:320px"><div class="lbl">Notas fiscais</div><div class="line"></div><h1>Foto da nota. A IA preenche o resto.</h1></div>
+    <div class="card" id="s8card" style="left:800px; top:110px; width:1000px; height:850px">
+      <div class="cardhead"><div class="hic" style="background:var(--action-soft); color:var(--action)"><svg class="ico" viewBox="0 0 24 24"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M8 7h8M8 11h8M8 15h5"/></svg></div><h2>Registrar Nota Fiscal</h2></div>
+      <div style="display:flex; gap:36px; padding:32px 40px">
+        <div id="nfimg" style="position:relative; width:330px; height:470px; border-radius:18px; background:#fff; border:1.5px solid var(--border); overflow:hidden; box-shadow:0 20px 40px -30px rgba(36,54,71,.4); padding:26px 24px">
+          <div style="font-size:15px; font-weight:700; letter-spacing:.12em; color:var(--muted)">NFS-e</div>
+          <div style="font-size:12px; color:var(--subtle); margin-top:2px">Nota Fiscal de Serviço Eletrônica</div>
+          <div style="height:1px; background:var(--divider); margin:16px 0"></div>
+          <div class="nfl" style="width:70%"></div><div class="nfl" style="width:52%"></div><div class="nfl" style="width:80%"></div>
+          <div style="height:1px; background:var(--divider); margin:16px 0"></div>
+          <div class="nfl" style="width:60%"></div><div class="nfl" style="width:88%"></div><div class="nfl" style="width:44%"></div><div class="nfl" style="width:76%"></div>
+          <div style="height:1px; background:var(--divider); margin:16px 0"></div>
+          <div style="display:flex; justify-content:space-between; font-size:14px; color:var(--muted)"><span>Valor líquido</span><b style="color:var(--ink)">R$ 250,00</b></div>
+          <div id="scan" style="position:absolute; left:0; right:0; height:70px; background:linear-gradient(180deg, rgba(124,58,237,0) 0%, rgba(124,58,237,.18) 80%, rgba(124,58,237,.6) 100%)"></div>
+        </div>
+        <div style="flex:1">
+          <div style="display:flex; gap:18px"><div class="field" style="flex:1"><label>Número</label><div class="inp nf"><span>000318</span><span class="tag">IA</span></div></div><div class="field" style="width:200px"><label>Data Emissão</label><div class="inp nf"><span>23/10/2026</span></div></div></div>
+          <div class="field"><label>Tomador (paciente / responsável)</label><div class="inp nf"><span>Ana Martins</span><span class="tag">IA</span></div></div>
+          <div class="field"><label>Descrição do serviço</label><div class="inp nf"><span>Sessão de psicoterapia</span><span class="tag">IA</span></div></div>
+          <div style="display:flex; gap:18px"><div class="field" style="flex:1"><label>Valor dos serviços</label><div class="inp nf"><span>R$ 250,00</span></div></div><div class="field" style="flex:1"><label>Valor líquido</label><div class="inp nf"><span>R$ 250,00</span><span class="tag">IA</span></div></div></div>
+        </div>
+      </div>
+      <div style="position:absolute; left:40px; right:40px; bottom:36px; display:flex; align-items:center; justify-content:space-between">
+        <span id="nfread" class="pill" style="background:var(--ai-soft); color:var(--ai); font-size:20px"><svg class="ico" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2z"/></svg><span id="nfreadT">Lendo a nota…</span></span>
+        <span class="btn pri" id="regbtn">Registrar nota</span></div>
+    </div>
+    <div class="toast" id="s8toast" style="left:1160px; top:900px"><span class="ok"><svg class="ico" viewBox="0 0 24 24" style="stroke-width:3"><path d="M20 6 9 17l-5-5"/></svg></span><span>Nota registrada<small>Nº 000318 · Ativa</small></span></div>
+  </div>
+
+  <!-- 9 financeiro -->
+  <div class="scene" id="s9">
+    <div class="cap" id="s9c" style="top:330px"><div class="lbl">Financeiro</div><div class="line"></div><h1>Receitas, despesas e saldo, dia a dia.</h1></div>
+    <div class="card" id="s9card" style="left:800px; top:110px; width:1000px; height:850px; padding:32px 40px">
+      <div style="display:flex; align-items:flex-start; gap:16px">
+        <div class="grow"><div style="font-size:34px; font-weight:600">Fluxo de Caixa Diário</div><div style="font-size:21px; color:var(--muted); margin-top:4px">Receitas, despesas e saldo acumulado no período</div></div>
+        <span class="btn" id="csvbtn"><svg class="ico" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>Exportar CSV</span>
+      </div>
+      <div style="display:flex; gap:18px; margin-top:28px">
+        <div class="kpi"><div class="k">Receitas</div><div class="v" id="kIn" style="color:var(--success)">R$ 0</div></div>
+        <div class="kpi"><div class="k">Despesas</div><div class="v" id="kOut" style="color:var(--danger)">R$ 0</div></div>
+        <div class="kpi"><div class="k">Saldo</div><div class="v" id="kBal" style="color:var(--action)">R$ 0</div></div>
+      </div>
+      <svg id="chart" width="920" height="470" style="margin-top:26px; display:block"></svg>
+      <div style="display:flex; gap:28px; font-size:19px; color:var(--muted); margin-top:4px">
+        <span><i style="display:inline-block;width:14px;height:14px;border-radius:4px;background:#8BA798;margin-right:8px;vertical-align:-1px"></i>Receitas</span>
+        <span><i style="display:inline-block;width:14px;height:14px;border-radius:4px;background:#E2A9A4;margin-right:8px;vertical-align:-1px"></i>Despesas</span>
+        <span><i style="display:inline-block;width:22px;height:3px;background:#287EA5;margin-right:8px;vertical-align:4px"></i>Saldo acumulado</span>
+      </div>
+    </div>
+    <div class="toast" id="s9toast" style="left:1300px; top:60px"><span class="ok"><svg class="ico" viewBox="0 0 24 24" style="stroke-width:3"><path d="M20 6 9 17l-5-5"/></svg></span><span>CSV exportado<small>fluxo-de-caixa-outubro.csv</small></span></div>
+  </div>
+
+  <!-- 10 mobile -->
+  <div class="scene" id="s10">
+    <div class="cap" id="s10c" style="top:330px"><div class="lbl">No celular</div><div class="line"></div><h1>O mesmo sistema, no app Android.</h1></div>
+    <div class="phone" id="ph" style="left:1085px; top:90px">
+      <div class="scr"><div class="notch"></div><div class="sb"><span>9:41</span><span>●●● ▮</span></div>
+        <div id="pgs" class="abs" style="left:0; top:0; width:1206px; height:872px">
+          <!-- Início -->
+          <div class="pg" style="left:0; padding:64px 22px 0">
+            <div style="display:flex; align-items:center; justify-content:space-between"><span style="display:flex; align-items:center; gap:6px"><svg width="30" height="30" viewBox="0 0 48 48"><path d="M23 33 C 16 22, 24 6, 44 1 C 48 18, 40 32, 23 33 Z" fill="#9FAE96"/><path d="M11 47 C 1 36, 5 19, 22 13 C 30 29, 25 43, 11 47 Z" fill="#A99BBB"/></svg><span class="word" style="font-size:23px">Consulta<b>Psi</b></span></span>
+              <span style="width:38px;height:38px;border-radius:50%;background:var(--lav);color:var(--lav-ink);display:grid;place-items:center;font-size:15px;font-weight:600">HP</span></div>
+            <div style="font-size:31px; font-weight:700; margin-top:20px">Bom dia, Helena</div>
+            <div style="font-size:16px; color:var(--muted)">Segunda-feira, 27 de outubro</div>
+            <div class="btn pri" style="margin-top:14px; font-size:17px; padding:10px 18px">+ Nova consulta</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px">
+              <div class="m-card mk"><div class="k">Consultas hoje</div><div class="v">4</div><div class="s">3 confirmadas · 1 pendente</div></div>
+              <div class="m-card mk"><div class="k">Aguardando</div><div class="v">1</div><div class="s">Via WhatsApp</div></div>
+              <div class="m-card mk"><div class="k">Concluídas no mês</div><div class="v">18</div><div class="s" style="color:var(--success)">+20% vs. mês anterior</div></div>
+              <div class="m-card mk"><div class="k">Pacientes ativos</div><div class="v">26</div><div class="s">2 novos este mês</div></div>
+            </div>
+            <div class="m-card" style="margin-top:12px; padding:14px 16px">
+              <div style="font-size:19px; font-weight:600">Agenda de hoje</div>
+              <div class="mrow"><b>09:00</b><span style="background:#EEF3EF">Ana Martins</span></div>
+              <div class="mrow"><b>14:00</b><span style="background:var(--lav-soft)">Beatriz Lima</span></div>
+              <div class="mrow"><b>16:00</b><span style="background:#EEF3EF">Lucas Ferraz</span></div>
+            </div>
+          </div>
+          <!-- Agenda -->
+          <div class="pg" style="left:402px; padding:64px 22px 0">
+            <div style="font-size:31px; font-weight:700">Agenda</div>
+            <div style="display:flex; gap:8px; margin-top:14px" id="week">
+              <span class="wd"><small>Seg</small>27</span><span class="wd"><small>Ter</small>28</span><span class="wd"><small>Qua</small>29</span><span class="wd"><small>Qui</small>30</span><span class="wd"><small>Sex</small>31</span>
+            </div>
+            <div id="agl" style="margin-top:16px">
+              <div class="m-card ma"><b>09:00</b><div class="grow"><div class="t">Ana Martins</div><div class="d">Consulta Individual</div></div><span class="pill" style="background:var(--action-soft);color:var(--action);font-size:13px;padding:5px 10px">Confirmado</span></div>
+              <div class="m-card ma"><b>11:00</b><div class="grow"><div class="t">Lucas Ferraz</div><div class="d">Retorno</div></div><span class="pill" style="background:var(--action-soft);color:var(--action);font-size:13px;padding:5px 10px">Confirmado</span></div>
+              <div class="m-card ma"><b>14:00</b><div class="grow"><div class="t">Beatriz Lima</div><div class="d">Primeira consulta</div></div><span class="pill" style="background:var(--lav-soft);color:var(--lav-ink);font-size:13px;padding:5px 10px">Primeira sessão</span></div>
+              <div class="m-card ma"><b>16:00</b><div class="grow"><div class="t">Carla Souza</div><div class="d">Consulta Individual</div></div><span class="pill" style="background:var(--warning-soft);color:var(--warning);font-size:13px;padding:5px 10px">Aguardando</span></div>
+              <div class="m-card ma"><b>17:30</b><div class="grow"><div class="t">Sessão online</div><div class="d">Google Meet · 50 min</div></div><span class="pill" style="background:var(--success-soft);color:var(--success);font-size:13px;padding:5px 10px">Concluído</span></div>
+            </div>
+          </div>
+          <!-- Mais -->
+          <div class="pg" style="left:804px; padding:64px 22px 0">
+            <div style="font-size:31px; font-weight:700">Mais</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:18px" id="grid">
+              <div class="m-card mt"><i style="background:var(--action-soft);color:var(--action)">▶</i>Reuniões</div>
+              <div class="m-card mt"><i style="background:var(--sand-soft);color:var(--sand-ink)">▯</i>Salas</div>
+              <div class="m-card mt"><i style="background:var(--action-soft);color:var(--action)">₪</i>Notas fiscais</div>
+              <div class="m-card mt"><i style="background:var(--warning-soft);color:var(--warning)">$</i>Comissões</div>
+              <div class="m-card mt"><i style="background:var(--sage-soft);color:var(--sage-ink)">♡</i>Cuidados</div>
+              <div class="m-card mt"><i style="background:var(--lav-soft);color:var(--lav-ink)">◎</i>Psicólogas</div>
+              <div class="m-card mt"><i style="background:var(--hover);color:var(--muted)">⚿</i>Permissões</div>
+              <div class="m-card mt"><i style="background:var(--hover);color:var(--muted)">⚙</i>Configurações</div>
+            </div>
+          </div>
+        </div>
+        <div class="tabbar">
+          <div id="tb0"><svg class="ico" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Início</div>
+          <div id="tb1"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>Agenda</div>
+          <div><svg class="ico" viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M16 3.1a4 4 0 0 1 0 7.8M22 21a7 7 0 0 0-5-6.7"/></svg>Pacientes</div>
+          <div><svg class="ico" viewBox="0 0 24 24"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg>Financeiro</div>
+          <div id="tb4"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>Mais</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 11 outro -->
+  <div class="scene" id="s11">
+    <div class="abs" style="left:0; right:0; top:640px; display:flex; justify-content:center">
+      <div class="logo">
+        <svg id="leaf6" width="130" height="130" viewBox="0 0 48 48"><path d="M23 33 C 16 22, 24 6, 44 1 C 48 18, 40 32, 23 33 Z" fill="#9FAE96"/><path d="M11 47 C 1 36, 5 19, 22 13 C 30 29, 25 43, 11 47 Z" fill="#A99BBB"/><path d="M22 13 C 26 21, 27 28, 25 33 C 21 30, 20 22, 22 13 Z" fill="#E9E6EE" opacity="0.9"/></svg>
+        <div class="word" id="w6" style="font-size:112px">Consulta<b>Psi</b></div>
+      </div>
+    </div>
+    <div id="s11tag" class="abs" style="left:60px; right:60px; top:860px; text-align:center; font-size:66px; font-weight:500; letter-spacing:-0.015em">Organização também cuida.</div>
+    <div class="abs" style="left:0; right:0; top:1000px; display:flex; justify-content:center">
+      <div class="pillrow">
+        <div id="o1" class="lchip" style="background:var(--action-soft); color:var(--action)"><svg class="ico" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Web</div>
+        <div id="o2" class="lchip" style="background:var(--sage-soft); color:var(--sage-ink)"><svg class="ico" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg>App Android</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="ripple"></div>
+  <div id="touch"></div>
+  <svg id="cursor" viewBox="0 0 24 24"><path d="M4 2.5 L4 19.5 L8.6 15.4 L11.6 22 L14.6 20.7 L11.7 14.2 L18 14.2 Z" fill="#1F2937" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>
+</div>
+<style>
+  .slot { display:grid; place-items:center; height:52px; border-radius:14px; border:1.5px solid var(--border); background:#fff; font-size:19px; font-weight:500; }
+  .tab { padding: 8px 16px; border-radius: 12px; }
+  .door { width:56px; height:56px; border-radius:16px; background:var(--sand-soft); margin-right:22px; }
+  .nfl { height: 10px; border-radius: 5px; background: #EEEAE4; margin: 9px 0; }
+  .inp.nf span:first-child { white-space: nowrap; }
+  .mk { padding: 12px 14px; }
+  .mk .k { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--subtle); }
+  .mk .v { font-size: 30px; font-weight: 700; margin-top: 2px; }
+  .mk .s { font-size: 12px; color: var(--muted); }
+  .mrow { display: flex; align-items: center; gap: 12px; margin-top: 10px; font-size: 15px; }
+  .mrow b { width: 48px; font-weight: 500; }
+  .mrow span { flex: 1; padding: 10px 12px; border-radius: 12px; font-weight: 500; }
+  .wd { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 8px 0; border-radius: 14px; background: #fff; border: 1px solid var(--border); font-size: 20px; font-weight: 600; }
+  .wd small { font-size: 12px; font-weight: 500; color: var(--subtle); }
+  .wd:first-child { background: var(--action); color: #fff; border-color: var(--action); }
+  .wd:first-child small { color: rgba(255,255,255,.8); }
+  .ma { display: flex; align-items: center; gap: 12px; padding: 13px 14px; margin-bottom: 10px; }
+  .ma > b { font-size: 16px; font-weight: 600; width: 50px; }
+  .ma .t { font-size: 17px; font-weight: 500; }
+  .ma .d { font-size: 13px; color: var(--muted); }
+  .mt { padding: 18px 16px; display: flex; flex-direction: column; gap: 12px; font-size: 18px; font-weight: 500; height: 118px; }
+  .mt i { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; font-style: normal; font-size: 20px; }
+</style>
+
+<script>
+const B = 60 / 96;
+const $ = (id) => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const p = (t, a, b) => clamp((t - a) / (b - a));
+const eo = (x) => 1 - Math.pow(1 - x, 3);
+const eio = (x) => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const back = (x) => { const c = 1.6; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+const lerp = (a, b, x) => a + (b - a) * x;
+const bump = (t, t0, d = 0.2) => Math.sin(p(t, t0 - d / 2, t0 + d / 2) * Math.PI);
+
+function show(el, t, tin, tout, o = {}) {
+  if (typeof el === 'string') el = $(el);
+  const dy = o.dy ?? 30, dur = o.dur ?? 0.45, outDur = o.outDur ?? 0.25;
+  const i = eo(p(t, tin, tin + dur));
+  const out = tout == null ? 0 : eio(p(t, tout, tout + outDur));
+  const sc = o.scale ? lerp(o.scale, 1, o.bounce ? back(p(t, tin, tin + dur)) : i) : 1;
+  const ox = (o.dx ? o.dx * (1 - i) : 0) + (o.outDx ? o.outDx * out : 0);
+  el.style.opacity = (i * (1 - out)).toFixed(4);
+  el.style.transform = `translate(${ox.toFixed(2)}px, ${(dy * (1 - i) - (o.outDy ?? (o.outDx ? 0 : 24)) * out).toFixed(2)}px) scale(${sc.toFixed(4)})`;
+  return i * (1 - out);
+}
+const swap = (a, b, t, t0, d = 0.3) => { const s = eo(p(t, t0, t0 + d)); $(a).style.opacity = 1 - s; $(b).style.opacity = s; $(b).style.transform = `scale(${lerp(0.75, 1, back(p(t, t0, t0 + d))).toFixed(3)})`; return s; };
+const type = (el, text, t, t0, cps = 22) => { $(el).textContent = text.slice(0, Math.max(0, Math.floor((t - t0) * cps))); };
+const brl = (v, d = 2) => 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
+
+// scene boundaries in beats
+const SB = [0, 6, 12, 24, 32, 40, 48, 56, 64, 70, 80, 86];
+const S = SB.map(b => b * B);
+const OUT = (k) => S[k] - 0.3;
+const at = (beat) => beat * B;
+
+let P = {};
+function measure() {
+  document.querySelectorAll('#stage *').forEach(e => { if (e.style) e.style.transform = ''; });
+  const c = (id) => { const b = $(id).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; };
+  ['genbtn','slot14','solbtn','confbtn','d50','chk','mkbtn','startbtn','tabDocs','aibtn','sendbtn','optM','ptsend','paybtn','regbtn','csvbtn','tb1','tb4'].forEach(id => P[id] = c(id));
+}
+
+// cursor along keyframes [[t, [x,y]], ...]
+function track(t, keys) {
+  if (t <= keys[0][0]) return keys[0][1];
+  for (let i = 1; i < keys.length; i++) {
+    if (t <= keys[i][0]) { const k = eio(p(t, keys[i - 1][0], keys[i][0])); const a = keys[i - 1][1], b = keys[i][1]; return [lerp(a[0], b[0], k), lerp(a[1], b[1], k) - Math.sin(k * Math.PI) * 30]; }
+  }
+  return keys[keys.length - 1][1];
+}
+const V = ([x, y]) => [x - 760, y + 520];
+const off = (pt, dx, dy) => [pt[0] + dx, pt[1] + dy];
+
+// chart data (illustrative)
+const days = 14, inc = [], exp = [];
+for (let i = 0; i < days; i++) { inc.push(800 + ((i * 37) % 7) * 160 + (i % 3) * 120); exp.push(260 + ((i * 53) % 5) * 90); }
+function buildChart() {
+  const svg = $('chart'), W = 920, H = 440, max = 2000; let html = '';
+  for (let g = 0; g <= 4; g++) html += `<line x1="0" x2="${W}" y1="${H - g * H / 4}" y2="${H - g * H / 4}" stroke="#EEEAE4"/>`;
+  const bw = W / days;
+  for (let i = 0; i < days; i++) {
+    html += `<rect class="bi" data-h="${inc[i] / max * H}" x="${i * bw + 10}" width="${bw / 2 - 12}" y="${H}" height="0" rx="6" fill="#8BA798"/>`;
+    html += `<rect class="be" data-h="${exp[i] / max * H}" x="${i * bw + bw / 2}" width="${bw / 2 - 12}" y="${H}" height="0" rx="6" fill="#E2A9A4"/>`;
+  }
+  let bal = 0, pts = [];
+  for (let i = 0; i < days; i++) { bal += inc[i] - exp[i]; pts.push([i * bw + bw / 2, H - bal / 12500 * H * 0.95]); }
+  html += `<path id="bal" d="M${pts.map(q => q.map(v => v.toFixed(1)).join(' ')).join(' L')}" fill="none" stroke="#287EA5" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
+  svg.innerHTML = html;
+}
+const totIn = inc.reduce((a, b) => a + b, 0), totOut = exp.reduce((a, b) => a + b, 0);
+
+function render(t) {
+  $('bgTR').style.transform = `translate(${(Math.sin(t * 0.35) * 18).toFixed(2)}px, ${(Math.cos(t * 0.3) * 14).toFixed(2)}px) rotate(${(Math.sin(t * .2) * 1.5).toFixed(2)}deg)`;
+  $('bgBL').style.transform = `translate(${(Math.cos(t * 0.3) * 16).toFixed(2)}px, ${(Math.sin(t * 0.33) * 12).toFixed(2)}px)`;
+  for (let k = 1; k <= 11; k++) $('s' + k).style.visibility = (t >= S[k - 1] - 0.05 && t < S[k] + 0.05) ? 'visible' : 'hidden';
+  const on = (k) => t >= S[k - 1] - 0.05 && t < S[k] + 0.05;
+  let cur = null, clicks = [], taps = [];
+
+  // 1 hook
+  if (on(1)) {
+    show('s1t', t, 0, OUT(1) - 0.1, { dy: 16, dur: 0.35 });
+    ['c1','c2','c3','c4','c5'].forEach((id, i) => {
+      const el = $(id), t0 = (0.5 + i) * B, a = p(t, t0, t0 + 0.42), fly = eio(p(t, 3.1 + i * 0.03, 3.72));
+      const x0 = parseFloat(el.style.left), y0 = parseFloat(el.style.top);
+      const dx = (540 - x0) * fly, dy = (960 - y0) * fly + Math.sin(t * 1.6 + i) * 6 * (1 - fly);
+      const sc = (a <= 0 ? 0 : back(a)) * lerp(1, 0.15, fly);
+      el.style.opacity = (clamp(a * 3) * (1 - p(fly, 0.6, 1))).toFixed(4);
+      el.style.transform = `translate(-50%, -50%) translate(${dx.toFixed(2)}px, ${dy.toFixed(2)}px) rotate(${[-4, 3, -2, 4, -3][i] * (1 - fly)}deg) scale(${sc.toFixed(4)})`;
+    });
+  }
+
+  // 2 reveal
+  if (on(2)) {
+    const o2 = 1 - eio(p(t, OUT(2), OUT(2) + 0.25));
+    [['lf1', 0, '23px 33px'], ['lf2', 0.1, '11px 47px'], ['lf3', 0.22, '24px 30px']].forEach(([id, d, org]) => {
+      const x = p(t, S[1] + d, S[1] + d + 0.55), el = $(id);
+      el.style.transformOrigin = org; el.style.transformBox = 'view-box';
+      el.style.transform = `scale(${(x <= 0 ? 0 : back(x)).toFixed(4)}) rotate(${((1 - eo(x)) * -25).toFixed(2)}deg)`;
+    });
+    $('leaf').style.opacity = o2; $('leaf').style.transform = `translateY(${(-24 * (1 - o2)).toFixed(2)}px)`;
+    const w = $('s2word'), wi = eo(p(t, S[1] + 0.2, S[1] + 0.75));
+    w.style.opacity = (wi * o2).toFixed(4); w.style.clipPath = `inset(0 ${((1 - wi) * 100).toFixed(2)}% 0 0)`;
+    w.style.transform = `translate(${(-30 * (1 - wi)).toFixed(2)}px, ${(-24 * (1 - o2)).toFixed(2)}px)`;
+    show('s2tag', t, S[1] + 2 * B, OUT(2));
+    ['p1','p2','p3'].forEach((id, i) => show(id, t, S[1] + (4 + i / 2) * B, OUT(2), { scale: 0.7, bounce: true, dy: 10 }));
+  }
+
+  // 3 WhatsApp → paciente → agenda (beats 12–24)
+  if (on(3)) {
+    show('s3c', t, S[2] + 0.1, OUT(3), { dy: 0, dx: -40 });
+    show('s3steps', t, S[2] + 0.2, OUT(3), { dy: -20 });
+    const ph = [at(12), at(16), at(20)];
+    ['st1','st2','st3'].forEach((id, i) => {
+      const act = t >= ph[i] - 0.1, done = i < 2 && t >= ph[i + 1] - 0.1;
+      const s = $(id); s.style.background = act ? (done ? 'var(--action-soft)' : 'var(--action)') : '#fff';
+      s.style.color = act ? (done ? 'var(--action)' : '#fff') : 'var(--subtle)'; s.style.borderColor = act ? 'var(--action)' : 'var(--border)';
+      s.querySelector('b').style.background = act ? (done ? '#fff' : 'rgba(255,255,255,.25)') : 'var(--hover)';
+      s.querySelector('b').style.color = act ? (done ? 'var(--action)' : '#fff') : 'var(--muted)';
+    });
+    $('sb1').style.width = (eo(p(t, at(15.6), at(16.2))) * 100) + '%';
+    $('sb2').style.width = (eo(p(t, at(19.6), at(20.2))) * 100) + '%';
+    // A
+    show('s3A', t, S[2], at(15.6), { dy: 50, dur: 0.55, outDx: -120, outDur: 0.3 });
+    type('msgT', 'Olá! Estes são meus horários livres desta semana. É só escolher um.', t, S[2] + 0.5, 34);
+    $('genbtn').style.transform = `scale(${(1 - bump(t, at(14.5)) * 0.07).toFixed(3)})`;
+    show('linkbox', t, at(14.5) + 0.12, null, { dy: 14, scale: 0.95 });
+    // B phone
+    show('s3B', t, at(16), at(19.6), { dy: 60, dur: 0.5, outDx: -120, outDur: 0.3 });
+    const sel = t >= at(17) + 0.04;
+    $('slot14').style.background = sel ? 'var(--action)' : '#fff'; $('slot14').style.color = sel ? '#fff' : 'var(--ink)'; $('slot14').style.borderColor = sel ? 'var(--action)' : 'var(--border)';
+    $('slot14').style.transform = `scale(${(1 - bump(t, at(17)) * 0.08).toFixed(3)})`;
+    type('nameT', 'Beatriz Lima', t, at(17.4), 20);
+    $('solbtn').style.transform = `scale(${(1 - bump(t, at(18.5)) * 0.06).toFixed(3)})`;
+    const dn = eo(p(t, at(18.5) + 0.1, at(18.5) + 0.4));
+    $('done').style.opacity = dn; $('doneic').style.transform = `scale(${lerp(0.4, 1, back(p(t, at(18.5) + 0.1, at(18.5) + 0.5))).toFixed(3)})`;
+    taps.push([at(17), P.slot14], [at(18.5), P.solbtn]);
+    // C agenda
+    show('s3C', t, at(20), OUT(3), { dy: 0, dx: 120, dur: 0.5 });
+    const nb = eo(p(t, at(20) + 0.35, at(20) + 0.7));
+    $('c3a').style.opacity = 1 - nb; $('c3b').style.opacity = nb; $('c3b').style.transform = `translateX(${(40 * (1 - nb)).toFixed(1)}px)`;
+    $('c3dot').style.background = nb > .5 ? (t > at(22) ? '#A99BBB' : '#B7791F') : '#D6D2CB';
+    show('s3toast', t, at(20.5), OUT(3), { dy: 30, scale: 0.9 });
+    $('confbtn').style.transform = `scale(${(1 - bump(t, at(22)) * 0.08).toFixed(3)})`;
+    const ok = swap('c3wait', 'c3ok', t, at(22) + 0.06);
+    $('c3b').style.background = ok > .5 ? 'var(--lav-soft)' : 'var(--warning-soft)';
+    // cursor: A (gerar link) then C (confirmar)
+    if (t < at(16)) {
+      cur = { pt: track(t, [[S[2] + 0.9, V([1650, 1040])], [at(14.5) - 0.1, P.genbtn], [at(15.5), off(P.genbtn, 80, 90)]]), o: p(t, S[2] + 0.8, S[2] + 1) * (1 - p(t, at(15.4), at(15.6))) };
+      clicks.push([at(14.5), P.genbtn]);
+    } else if (t > at(20.4)) {
+      cur = { pt: track(t, [[at(20.6), V([1500, 1060])], [at(22) - 0.1, P.confbtn], [at(23.3), off(P.confbtn, 60, 110)]]), o: p(t, at(20.5), at(20.7)) * (1 - p(t, OUT(3), OUT(3) + .2)) };
+      clicks.push([at(22), P.confbtn]);
+    }
+  }
+
+  // 4 reuniões (beats 24–32)
+  if (on(4)) {
+    show('s4c', t, S[3] + 0.1, OUT(4), { dy: 0, dx: -40 });
+    show('s4modal', t, S[3], OUT(4), { dy: 50, dur: 0.5 });
+    const d = t >= at(25) + 0.04;
+    $('d50').style.background = d ? 'var(--action)' : '#fff'; $('d50').style.color = d ? '#fff' : 'var(--ink)'; $('d50').style.borderColor = d ? 'var(--action)' : 'var(--border)';
+    $('d50').style.transform = `scale(${(1 - bump(t, at(25)) * 0.08).toFixed(3)})`;
+    const ck = t >= at(25.5) + 0.04;
+    $('chk').style.background = ck ? 'var(--action)' : '#fff'; $('chk').style.borderColor = ck ? 'var(--action)' : 'var(--border)';
+    $('mkbtn').style.transform = `scale(${(1 - bump(t, at(26.5)) * 0.07).toFixed(3)})`;
+    show('s4meet', t, at(27), OUT(4), { dy: 40, scale: 0.97 });
+    show('mMail', t, at(27.5), null, { dy: 0, scale: 0.6, bounce: true });
+    $('startbtn').style.transform = `scale(${(1 - bump(t, at(29)) * 0.07).toFixed(3)})`;
+    swap('mSched', 'mLive', t, at(29) + 0.05);
+    const bn = eo(p(t, at(29) + 0.1, at(29) + 0.45)) * (1 - eio(p(t, OUT(4), OUT(4) + 0.25)));
+    $('banner').style.transform = `translateY(${(40 * (1 - bn)).toFixed(1)}px)`; $('banner').style.opacity = bn;
+    const el = Math.max(0, t - at(29)) * 4; // sped-up timer
+    $('timer').textContent = `⏱ 00:${String(Math.floor(el)).padStart(2, '0')}`;
+    $('livedot').style.opacity = 0.5 + 0.5 * Math.cos(t * 6);
+    cur = { pt: track(t, [[S[3] + 0.6, V([1600, 1050])], [at(25) - 0.1, P.d50], [at(25.5) - 0.08, P.chk], [at(26.5) - 0.1, P.mkbtn], [at(29) - 0.1, P.startbtn], [at(31), off(P.startbtn, -90, 100)]]), o: p(t, S[3] + 0.5, S[3] + 0.7) * (1 - p(t, OUT(4), OUT(4) + 0.2)) };
+    clicks.push([at(25), P.d50], [at(25.5), P.chk], [at(26.5), P.mkbtn], [at(29), P.startbtn]);
+  }
+
+  // 5 prontuário (beats 32–40)
+  if (on(5)) {
+    show('s5c', t, S[4] + 0.1, OUT(5), { dy: 0, dx: -40 });
+    show('s5head', t, S[4], OUT(5), { dy: 40 });
+    show('s5file', t, at(33) + 0.1, OUT(5), { dy: 30 });
+    const tb = t >= at(33);
+    $('tabDocs').style.background = tb ? 'var(--action-soft)' : 'transparent'; $('tabDocs').style.color = tb ? 'var(--action)' : 'var(--muted)'; $('tabDocs').style.fontWeight = tb ? 600 : 400;
+    $('aibtn').style.transform = `scale(${(1 + bump(t, at(34), 0.25) * 0.1).toFixed(3)})`;
+    show('s5modal', t, at(34) + 0.08, OUT(5), { dy: 40, scale: 0.96, dur: 0.4 });
+    [35, 36, 37, 38].forEach((bt, i) => {
+      const el = $('sc' + (i + 1)), f = eo(p(t, at(bt), at(bt) + 0.35));
+      el.querySelector('.body').style.opacity = f; el.querySelector('.body').style.transform = `translateY(${(10 * (1 - f)).toFixed(2)}px)`;
+      el.querySelector('.skel').style.opacity = 1 - clamp(f * 2); el.querySelector('h3').style.opacity = 0.35 + 0.65 * f;
+      el.querySelectorAll('.sk').forEach(s => s.style.backgroundPosition = `${((t * 900) % 600).toFixed(1)}px 0`);
+    });
+    cur = { pt: track(t, [[S[4] + 0.3, V([1700, 700])], [at(33) - 0.1, P.tabDocs], [at(34) - 0.1, P.aibtn], [at(35.5), off(P.aibtn, 60, 120)]]), o: p(t, S[4] + 0.2, S[4] + 0.4) * (1 - p(t, at(35.3), at(35.6))) };
+    clicks.push([at(33), P.tabDocs], [at(34), P.aibtn]);
+  }
+
+  // 6 cuidados (beats 40–48)
+  if (on(6)) {
+    show('s6c', t, S[5] + 0.1, OUT(6), { dy: 0, dx: -40 });
+    show('s6send', t, S[5], OUT(6), { dy: 40 });
+    show('s6hist', t, S[5] + B / 2, OUT(6), { dy: 50 });
+    $('sendbtn').style.transform = `scale(${(1 - bump(t, at(42)) * 0.07).toFixed(3)})`;
+    show('s6toast', t, at(42) + 0.1, at(43.6), { dy: 20, scale: 0.92, outDur: 0.2 });
+    show('dSent', t, at(42) + 0.2, null, { dy: 0, scale: 0.6, bounce: true });
+    const o1 = eo(p(t, at(43.5), at(43.5) + 0.3)), o2 = eo(p(t, at(45.5), at(45.5) + 0.3));
+    $('dSent').style.opacity = Math.min(parseFloat($('dSent').style.opacity), 1 - o1);
+    $('dOpen').style.opacity = o1 * (1 - o2); $('dOpen').style.transform = `scale(${lerp(0.75, 1, back(p(t, at(43.5), at(43.5) + 0.3))).toFixed(3)})`;
+    $('dDone').style.opacity = o2; $('dDone').style.transform = `scale(${lerp(0.75, 1, back(p(t, at(45.5), at(45.5) + 0.3))).toFixed(3)})`;
+    show('s6pt', t, at(43.5), at(45.3), { dy: 40, scale: 0.94, outDur: 0.3 });
+    const om = t >= at(44.25) + 0.03;
+    $('optM').style.background = om ? 'var(--sage-soft)' : '#fff'; $('optM').style.borderColor = om ? 'var(--sage)' : 'var(--border)'; $('optM').style.color = om ? 'var(--sage-ink)' : 'var(--ink)';
+    $('ptsend').style.transform = `scale(${(1 - bump(t, at(45)) * 0.06).toFixed(3)})`;
+    taps.push([at(44.25), P.optM], [at(45), P.ptsend]);
+    show('answer', t, at(45.5) + 0.15, null, { dy: 16 });
+    cur = { pt: track(t, [[S[5] + 0.5, V([1650, 1040])], [at(42) - 0.1, P.sendbtn], [at(43.3), off(P.sendbtn, 100, 160)]]), o: p(t, S[5] + 0.4, S[5] + 0.6) * (1 - p(t, at(43.1), at(43.4))) };
+    clicks.push([at(42), P.sendbtn]);
+  }
+
+  // 7 salas (beats 48–56)
+  if (on(7)) {
+    show('s7c', t, S[6] + 0.1, OUT(7), { dy: 0, dx: -40 });
+    show('s7rooms', t, S[6], OUT(7), { dy: 40 });
+    show('s7comm', t, S[6] + B / 2, OUT(7), { dy: 50 });
+    ['m1','m2','m3'].forEach((id, i) => show(id, t, S[6] + 0.2 + i * 0.12, null, { dy: 14, dx: 24 }));
+    swap('m2free', 'm2busy', t, at(49.5));
+    const c = eo(p(t, at(50), at(52)));
+    $('amt').textContent = brl(Math.round(1440 * c)); $('nloc').textContent = Math.round(12 * c);
+    const pay = at(53);
+    swap('cPend', 'cPaid', t, pay + 0.06);
+    $('paybtn').style.transform = `scale(${(1 - bump(t, pay) * 0.06).toFixed(3)})`;
+    cur = { pt: track(t, [[S[6] + 0.8, V([1300, 1060])], [pay - 0.1, P.paybtn], [pay + 1.2, off(P.paybtn, -120, 70)]]), o: p(t, S[6] + 0.7, S[6] + 0.9) * (1 - p(t, OUT(7), OUT(7) + 0.2)) };
+    clicks.push([pay, P.paybtn]);
+  }
+
+  // 8 notas (beats 56–64)
+  if (on(8)) {
+    show('s8c', t, S[7] + 0.1, OUT(8), { dy: 0, dx: -40 });
+    show('s8card', t, S[7], OUT(8), { dy: 50 });
+    show('nfimg', t, S[7] + 0.3, null, { dy: 30, scale: 0.9 });
+    const sc = p(t, at(57), at(59.5));
+    $('scan').style.top = (lerp(-70, 470, sc)).toFixed(1) + 'px'; $('scan').style.opacity = sc > 0 && sc < 1 ? 1 : 0;
+    document.querySelectorAll('.inp.nf').forEach((el, i) => {
+      const t0 = at(58 + i * 0.5), f = eo(p(t, t0, t0 + 0.3));
+      el.firstElementChild.style.opacity = f;
+      el.style.borderColor = f > 0 && f < 1 ? 'var(--ai)' : 'var(--border)';
+      el.style.background = f >= 1 ? '#FCFBFF' : '#fff';
+      const tg = el.querySelector('.tag'); if (tg) { tg.style.opacity = f; tg.style.transform = `scale(${lerp(0.5, 1, back(p(t, t0 + 0.1, t0 + 0.4))).toFixed(3)})`; }
+    });
+    $('nfreadT').textContent = t < at(61) ? 'Lendo a nota…' : 'Campos preenchidos pela IA';
+    $('regbtn').style.transform = `scale(${(1 - bump(t, at(62)) * 0.07).toFixed(3)})`;
+    show('s8toast', t, at(62) + 0.12, OUT(8), { dy: 30, scale: 0.92 });
+    cur = { pt: track(t, [[at(60.5), V([1350, 1060])], [at(62) - 0.1, P.regbtn], [at(63.3), off(P.regbtn, -60, 120)]]), o: p(t, at(60.4), at(60.6)) * (1 - p(t, OUT(8), OUT(8) + 0.2)) };
+    clicks.push([at(62), P.regbtn]);
+  }
+
+  // 9 financeiro (beats 64–70)
+  if (on(9)) {
+    show('s9c', t, S[8] + 0.1, OUT(9), { dy: 0, dx: -40 });
+    show('s9card', t, S[8], OUT(9), { dy: 50 });
+    const g = eo(p(t, S[8] + 0.3, at(67)));
+    $('kIn').textContent = brl(Math.round(totIn * g / 10) * 10, 0); $('kOut').textContent = brl(Math.round(totOut * g / 10) * 10, 0); $('kBal').textContent = brl(Math.round((totIn - totOut) * g / 10) * 10, 0);
+    document.querySelectorAll('#chart rect').forEach((r, i) => {
+      const k = Math.floor(i / 2), f = eo(p(t, S[8] + 0.3 + k * 0.08, S[8] + 0.75 + k * 0.08)), h = parseFloat(r.dataset.h) * f;
+      r.setAttribute('y', (440 - h).toFixed(1)); r.setAttribute('height', h.toFixed(1));
+    });
+    const bal = $('bal'), L = bal.getTotalLength(); bal.style.strokeDasharray = L; bal.style.strokeDashoffset = (L * (1 - eio(p(t, S[8] + 0.8, at(67.5))))).toFixed(1);
+    $('csvbtn').style.transform = `scale(${(1 - bump(t, at(68)) * 0.07).toFixed(3)})`;
+    show('s9toast', t, at(68) + 0.1, OUT(9), { dy: -20, scale: 0.92 });
+    cur = { pt: track(t, [[at(66), V([1400, 600])], [at(68) - 0.1, P.csvbtn], [at(69.5), off(P.csvbtn, -80, 120)]]), o: p(t, at(65.9), at(66.1)) * (1 - p(t, OUT(9), OUT(9) + 0.2)) };
+    clicks.push([at(68), P.csvbtn]);
+  }
+
+  // 10 mobile (beats 70–80)
+  if (on(10)) {
+    show('s10c', t, S[9] + 0.1, OUT(10), { dy: 0, dx: -40 });
+    const pi = eo(p(t, S[9], S[9] + 0.6)), po = eio(p(t, OUT(10), OUT(10) + 0.25));
+    $('ph').style.opacity = pi * (1 - po);
+    $('ph').style.transform = `translateY(${(120 * (1 - pi) - 30 * po).toFixed(1)}px) rotate(${(4 * (1 - pi) + Math.sin(t * 0.8) * 0.6).toFixed(2)}deg) scale(1.08)`;
+    // gentle scroll on Início, then tab changes
+    const s1 = eio(p(t, at(71.5), at(73.3)));
+    $('pgs').firstElementChild.style.transform = `translateY(${(-70 * s1).toFixed(1)}px)`;
+    const g1 = eio(p(t, at(74) + 0.05, at(74) + 0.45)), g2 = eio(p(t, at(77) + 0.05, at(77) + 0.45));
+    $('pgs').style.transform = `translateX(${(-402 * g1 - 402 * g2).toFixed(1)}px)`;
+    const tab = t < at(74) ? 0 : t < at(77) ? 1 : 4;
+    ['tb0','tb1','tb4'].forEach((id, i) => $(id).className = [0, 1, 4][i] === tab ? 'on' : '');
+    document.querySelectorAll('#agl .ma').forEach((el, i) => show(el, t, at(74) + 0.3 + i * 0.09, null, { dy: 18 }));
+    document.querySelectorAll('#grid .mt').forEach((el, i) => show(el, t, at(77) + 0.3 + i * 0.06, null, { dy: 14, scale: 0.9 }));
+    taps.push([at(74), P.tb1], [at(77), P.tb4]);
+  }
+
+  // 11 outro
+  if (on(11)) {
+    const li = p(t, S[10], S[10] + 0.6), leaf = $('leaf6');
+    leaf.style.transform = `scale(${(li <= 0 ? 0 : back(li)).toFixed(4)}) rotate(${((1 - eo(li)) * -30).toFixed(2)}deg)`; leaf.style.opacity = clamp(li * 3);
+    const wi = eo(p(t, S[10] + 0.15, S[10] + 0.7)); $('w6').style.opacity = wi; $('w6').style.clipPath = `inset(0 ${((1 - wi) * 100).toFixed(2)}% 0 0)`;
+    show('s11tag', t, S[10] + B, null);
+    show('o1', t, S[10] + 2 * B, null, { scale: 0.7, bounce: true, dy: 10 });
+    show('o2', t, S[10] + 2.5 * B, null, { scale: 0.7, bounce: true, dy: 10 });
+  }
+
+  // pointer
+  const c = $('cursor'), last = clicks.filter(k => t >= k[0]).pop();
+  if (cur && cur.o > 0) { c.style.opacity = cur.o; c.style.transform = `translate(${(cur.pt[0] - 8).toFixed(1)}px, ${(cur.pt[1] - 6).toFixed(1)}px) scale(${last && t - last[0] < 0.15 ? 0.88 : 1})`; }
+  else c.style.opacity = 0;
+  const r = $('ripple');
+  if (last && t - last[0] < 0.5) { const k = (t - last[0]) / 0.5; r.style.left = last[1][0] + 'px'; r.style.top = last[1][1] + 'px'; r.style.opacity = (1 - k) * 0.7; r.style.transform = `scale(${(0.3 + eo(k) * 1.1).toFixed(3)})`; }
+  else r.style.opacity = 0;
+  const th = $('touch'); let tv = 0;
+  for (const [t0, pt] of taps) { const k = (t - (t0 - 0.25)) / 0.6; if (k >= 0 && k <= 1) { tv = Math.sin(k * Math.PI); th.style.left = pt[0] + 'px'; th.style.top = pt[1] + 'px'; th.style.transform = `scale(${(1.2 - 0.3 * Math.sin(clamp((t - t0 + 0.08) / 0.16) * Math.PI)).toFixed(3)})`; } }
+  th.style.opacity = tv.toFixed(3);
+}
+
+window.__ready = (async () => {
+  await document.fonts.ready;
+  for (const w of [400, 500, 600, 700]) await document.fonts.load(`${w} 40px "DM Sans"`);
+  for (let k = 3; k <= 10; k++) { const sc = $('s' + k), app = document.createElement('div'); app.className = 'app'; [...sc.children].filter(e => !e.classList.contains('cap')).forEach(e => app.appendChild(e)); sc.appendChild(app); }
+  buildChart();
+  measure();
+  render(0);
+  return document.fonts.check('600 40px "DM Sans"');
+})();
+window.render = render;
+</script>
+</body>
+</html>
