@@ -79,7 +79,7 @@ export type CompanyMembership = typeof companyMemberships.$inferSelect;
 // Psychologist specific info
 export const psychologists = pgTable("psychologists", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companies.id),
+  companyId: integer("company_id").notNull().references(() => companies.id),
   userId: integer("user_id").notNull(),
   specialization: text("specialization"),
   bio: text("bio"),
@@ -148,7 +148,7 @@ export const psychologistSpecializationsRelations = relations(psychologistSpecia
 // Rooms
 export const rooms = pgTable("rooms", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companies.id),
+  companyId: integer("company_id").notNull().references(() => companies.id),
   name: text("name").notNull(),
   capacity: integer("capacity").notNull(),
   hasWifi: boolean("has_wifi").notNull().default(true),
@@ -171,7 +171,7 @@ export const insertRoomSchema = createInsertSchema(rooms).pick({
 // Appointments
 export const appointments = pgTable("appointments", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companies.id),
+  companyId: integer("company_id").notNull().references(() => companies.id),
   patientName: text("patient_name").notNull(),
   psychologistId: integer("psychologist_id").notNull(),
   roomId: integer("room_id").notNull(),
@@ -199,7 +199,7 @@ export const insertAppointmentSchema = createInsertSchema(appointments).pick({
 // Finances
 export const transactions = pgTable("transactions", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companies.id),
+  companyId: integer("company_id").notNull().references(() => companies.id),
   description: text("description").notNull(),
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
   type: text("type").notNull(), // income, expense
@@ -227,7 +227,7 @@ export const insertTransactionSchema = createInsertSchema(transactions).pick({
 // Room bookings
 export const roomBookings = pgTable("room_bookings", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companies.id),
+  companyId: integer("company_id").notNull().references(() => companies.id),
   roomId: integer("room_id").notNull(),
   psychologistId: integer("psychologist_id").notNull(),
   date: date("date").notNull(),
@@ -490,7 +490,7 @@ export const invoices = pgTable(
   "invoices",
   {
     id: serial("id").primaryKey(),
-    companyId: integer("company_id").references(() => companies.id),
+    companyId: integer("company_id").notNull().references(() => companies.id),
     psychologistId: integer("psychologist_id").notNull().references(() => users.id),
     clinicId: integer("clinic_id"),
     // Identificação da nota
@@ -586,7 +586,7 @@ export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
 // ─── Meetings (Reuniões via Google Meet) ─────────────────────────────────────
 export const meetings = pgTable("meetings", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companies.id),
+  companyId: integer("company_id").notNull().references(() => companies.id),
   psychologistId: integer("psychologist_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   patientId: integer("patient_id").notNull(), // references patients.id (defined in patient-schema.ts)
   appointmentId: integer("appointment_id"), // optional link to appointments
@@ -635,7 +635,7 @@ export type InsertMeeting = z.infer<typeof insertMeetingSchema>;
 // ─── Commission Payout Configs ───────────────────────────────────────────────
 export const commissionPayoutConfigs = pgTable("commission_payout_configs", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companies.id),
+  companyId: integer("company_id").notNull().references(() => companies.id),
   psychologistId: integer("psychologist_id").notNull().references(() => psychologists.id, { onDelete: "cascade" }),
   payoutType: text("payout_type").notNull().default("percentual"), // "percentual" | "fixed"
   payoutValue: decimal("payout_value", { precision: 10, scale: 2 }).notNull(),
@@ -660,7 +660,7 @@ export type InsertCommissionPayoutConfig = z.infer<typeof insertCommissionPayout
 // ─── Commissions ─────────────────────────────────────────────────────────────
 export const commissions = pgTable("commissions", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companies.id),
+  companyId: integer("company_id").notNull().references(() => companies.id),
   psychologistId: integer("psychologist_id").notNull().references(() => psychologists.id, { onDelete: "cascade" }),
   periodStart: date("period_start").notNull(),
   periodEnd: date("period_end").notNull(),

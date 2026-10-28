@@ -6,7 +6,7 @@ import {
   specializationAreas,
   psychologistSpecializations,
 } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import multer from "multer";
 
 const router = Router();
@@ -42,6 +42,10 @@ function calcAge(birthDate: string | null | undefined): number | null {
 
 router.use(requireAuth);
 
+// The logged-in user's psychologist profile in the active company (one per company)
+const ownProfile = (companyId: number, userId: number) =>
+  and(eq(psychologists.userId, userId), eq(psychologists.companyId, companyId));
+
 // GET /api/profile — perfil completo da psicóloga logada
 router.get("/", async (req, res) => {
   try {
@@ -52,7 +56,7 @@ router.get("/", async (req, res) => {
     const [psychData] = await db
       .select()
       .from(psychologists)
-      .where(eq(psychologists.userId, user.id));
+      .where(ownProfile(req.companyId!, user.id));
 
     let specializations: { id: number; name: string; category: string | null }[] = [];
     if (psychData) {
@@ -99,14 +103,14 @@ router.patch("/", async (req, res) => {
     if (bio !== undefined) psychUpdate.bio = bio || null;
 
     if (Object.keys(psychUpdate).length > 0) {
-      const [existing] = await db.select().from(psychologists).where(eq(psychologists.userId, user.id));
+      const [existing] = await db.select().from(psychologists).where(ownProfile(req.companyId!, user.id));
       if (existing) {
-        await db.update(psychologists).set(psychUpdate).where(eq(psychologists.userId, user.id));
+        await db.update(psychologists).set(psychUpdate).where(ownProfile(req.companyId!, user.id));
       }
     }
 
     const [updated] = await db.select().from(users).where(eq(users.id, user.id));
-    const [updatedPsych] = await db.select().from(psychologists).where(eq(psychologists.userId, user.id));
+    const [updatedPsych] = await db.select().from(psychologists).where(ownProfile(req.companyId!, user.id));
     const { password, profileImageData, ...safeUser } = updated;
     return res.json({ ...safeUser, psychologist: updatedPsych || null, age: calcAge(updated.birthDate) });
   } catch (e) {
@@ -125,7 +129,7 @@ router.put("/specializations", async (req, res) => {
       return res.status(400).json({ error: "specializationIds deve ser um array." });
     }
 
-    const [psych] = await db.select().from(psychologists).where(eq(psychologists.userId, user.id));
+    const [psych] = await db.select().from(psychologists).where(ownProfile(req.companyId!, user.id));
     if (!psych) return res.status(404).json({ error: "Perfil de psicóloga não encontrado." });
 
     await db.delete(psychologistSpecializations).where(eq(psychologistSpecializations.psychologistId, psych.id));

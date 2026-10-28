@@ -99,6 +99,23 @@ export async function resolveCompanyContext(req: Request): Promise<CompanySummar
   return active;
 }
 
+const DEFAULT_COMPANY_NAME = "Empresa 1";
+
+/**
+ * Clinic name shown to patients (care forms and e-mails). The default company keeps the
+ * CLINIC_NAME branding it had before companies existed, until someone renames it.
+ */
+export async function clinicDisplayName(companyId: number | null | undefined): Promise<string> {
+  const fallback = process.env.CLINIC_NAME || "ConsultaPsi";
+  if (!companyId) return fallback;
+  const [company] = await db
+    .select({ name: companies.name, slug: companies.slug })
+    .from(companies)
+    .where(eq(companies.id, companyId));
+  if (!company) return fallback;
+  return company.slug === DEFAULT_COMPANY_SLUG && company.name === DEFAULT_COMPANY_NAME ? fallback : company.name;
+}
+
 /** /api/user shape: the user (without password) plus their companies. */
 export async function userPayload(req: Request) {
   const { password, ...user } = req.user as User;

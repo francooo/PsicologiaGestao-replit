@@ -67,6 +67,22 @@ export function requireCompany(req: Request, res: Response, next: NextFunction) 
   next();
 }
 
+export type PublicApiRoute = { method?: string; path: RegExp };
+
+/**
+ * Gate for every /api route registered after it: clinic data needs a login with an
+ * active company. Only the routes listed (public pages, password reset, company
+ * switching...) pass without one — so a new route is protected by default.
+ */
+export function requireCompanyExcept(publicRoutes: PublicApiRoute[]) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.path.startsWith("/api/")) return next();
+    const isPublic = publicRoutes.some((r) => (!r.method || r.method === req.method) && r.path.test(req.path));
+    if (isPublic) return next();
+    requireCompany(req, res, next);
+  };
+}
+
 export function requirePlatformAdmin(req: Request, res: Response, next: NextFunction) {
   if (!req.isAuthenticated()) return res.status(401).json({ message: "Não autenticado" });
   if (!isPlatformAdmin(req.user.email)) return res.status(403).json({ message: "Acesso não autorizado" });

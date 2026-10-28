@@ -111,7 +111,7 @@ __export(schema_exports, {
   users: () => users,
   usersRelations: () => usersRelations
 });
-import { pgTable as pgTable2, text as text2, serial as serial2, integer as integer2, boolean as boolean2, date as date2, time as time2, decimal as decimal2, timestamp as timestamp2, jsonb as jsonb2, unique } from "drizzle-orm/pg-core";
+import { pgTable as pgTable2, text as text2, serial as serial2, integer as integer2, boolean as boolean2, date as date2, time as time2, decimal as decimal2, timestamp as timestamp2, jsonb as jsonb2, unique as unique2 } from "drizzle-orm/pg-core";
 import { createInsertSchema as createInsertSchema2 } from "drizzle-zod";
 import { z } from "zod";
 import { relations as relations2 } from "drizzle-orm";
@@ -125,14 +125,15 @@ var bytea = customType({
 });
 
 // shared/patient-schema.ts
-import { pgTable, text, serial, integer, boolean, date, time, timestamp, jsonb, varchar } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, date, time, timestamp, jsonb, varchar, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { relations } from "drizzle-orm";
 var patients = pgTable("patients", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companies.id),
+  companyId: integer("company_id").notNull().references(() => companies.id),
   fullName: text("full_name").notNull(),
-  cpf: text("cpf").unique(),
+  cpf: text("cpf"),
+  // unique per company (patients_company_cpf)
   birthDate: date("birth_date"),
   gender: text("gender"),
   // masculino, feminino, outro, prefiro não informar
@@ -155,7 +156,7 @@ var patients = pgTable("patients", {
   createdBy: integer("created_by").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow()
-});
+}, (t) => [unique("patients_company_cpf").on(t.companyId, t.cpf)]);
 var insertPatientSchema = createInsertSchema(patients).pick({
   fullName: true,
   cpf: true,
@@ -300,7 +301,7 @@ var insertPsychologicalAssessmentSchema = createInsertSchema(psychologicalAssess
 });
 var auditLogs = pgTable("audit_logs", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companies.id),
+  companyId: integer("company_id").notNull().references(() => companies.id),
   userId: integer("user_id").notNull().references(() => users.id),
   action: text("action").notNull(),
   // view, create, update, delete, export, print
@@ -437,7 +438,7 @@ var insertCareTemplateQuestionSchema = createInsertSchema(careTemplateQuestions)
 });
 var careDispatches = pgTable("care_dispatches", {
   id: serial("id").primaryKey(),
-  companyId: integer("company_id").references(() => companies.id),
+  companyId: integer("company_id").notNull().references(() => companies.id),
   psychologistId: integer("psychologist_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   patientId: integer("patient_id").notNull().references(() => patients.id, { onDelete: "cascade" }),
   templateId: integer("template_id").references(() => careTemplates.id, { onDelete: "set null" }),
@@ -606,11 +607,11 @@ var companyMemberships = pgTable2(
     // active, inactive
     createdAt: timestamp2("created_at").notNull().defaultNow()
   },
-  (t) => [unique("company_memberships_user_company").on(t.userId, t.companyId)]
+  (t) => [unique2("company_memberships_user_company").on(t.userId, t.companyId)]
 );
 var psychologists = pgTable2("psychologists", {
   id: serial2("id").primaryKey(),
-  companyId: integer2("company_id").references(() => companies.id),
+  companyId: integer2("company_id").notNull().references(() => companies.id),
   userId: integer2("user_id").notNull(),
   specialization: text2("specialization"),
   bio: text2("bio"),
@@ -651,7 +652,7 @@ var psychologistSpecializations = pgTable2("psychologist_specializations", {
   specializationAreaId: integer2("specialization_area_id").notNull().references(() => specializationAreas.id, { onDelete: "cascade" }),
   createdAt: timestamp2("created_at").notNull().defaultNow()
 }, (t) => [
-  unique("psych_spec_unique").on(t.psychologistId, t.specializationAreaId)
+  unique2("psych_spec_unique").on(t.psychologistId, t.specializationAreaId)
 ]);
 var psychologistSpecializationsRelations = relations2(psychologistSpecializations, ({ one }) => ({
   psychologist: one(psychologists, {
@@ -665,7 +666,7 @@ var psychologistSpecializationsRelations = relations2(psychologistSpecialization
 }));
 var rooms = pgTable2("rooms", {
   id: serial2("id").primaryKey(),
-  companyId: integer2("company_id").references(() => companies.id),
+  companyId: integer2("company_id").notNull().references(() => companies.id),
   name: text2("name").notNull(),
   capacity: integer2("capacity").notNull(),
   hasWifi: boolean2("has_wifi").notNull().default(true),
@@ -685,7 +686,7 @@ var insertRoomSchema = createInsertSchema2(rooms).pick({
 });
 var appointments = pgTable2("appointments", {
   id: serial2("id").primaryKey(),
-  companyId: integer2("company_id").references(() => companies.id),
+  companyId: integer2("company_id").notNull().references(() => companies.id),
   patientName: text2("patient_name").notNull(),
   psychologistId: integer2("psychologist_id").notNull(),
   roomId: integer2("room_id").notNull(),
@@ -711,7 +712,7 @@ var insertAppointmentSchema = createInsertSchema2(appointments).pick({
 });
 var transactions = pgTable2("transactions", {
   id: serial2("id").primaryKey(),
-  companyId: integer2("company_id").references(() => companies.id),
+  companyId: integer2("company_id").notNull().references(() => companies.id),
   description: text2("description").notNull(),
   amount: decimal2("amount", { precision: 10, scale: 2 }).notNull(),
   type: text2("type").notNull(),
@@ -737,7 +738,7 @@ var insertTransactionSchema = createInsertSchema2(transactions).pick({
 });
 var roomBookings = pgTable2("room_bookings", {
   id: serial2("id").primaryKey(),
-  companyId: integer2("company_id").references(() => companies.id),
+  companyId: integer2("company_id").notNull().references(() => companies.id),
   roomId: integer2("room_id").notNull(),
   psychologistId: integer2("psychologist_id").notNull(),
   date: date2("date").notNull(),
@@ -932,7 +933,7 @@ var invoices = pgTable2(
   "invoices",
   {
     id: serial2("id").primaryKey(),
-    companyId: integer2("company_id").references(() => companies.id),
+    companyId: integer2("company_id").notNull().references(() => companies.id),
     psychologistId: integer2("psychologist_id").notNull().references(() => users.id),
     clinicId: integer2("clinic_id"),
     // Identificação da nota
@@ -1010,7 +1011,7 @@ var invoices = pgTable2(
     createdAt: timestamp2("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp2("updated_at", { withTimezone: true }).defaultNow()
   },
-  (t) => [unique("invoices_psychologist_chave_nfe").on(t.psychologistId, t.chaveNfe)]
+  (t) => [unique2("invoices_psychologist_chave_nfe").on(t.psychologistId, t.chaveNfe)]
 );
 var insertInvoiceSchema = createInsertSchema2(invoices);
 var invoicesRelations = relations2(invoices, ({ one }) => ({
@@ -1022,7 +1023,7 @@ var invoicesRelations = relations2(invoices, ({ one }) => ({
 }));
 var meetings = pgTable2("meetings", {
   id: serial2("id").primaryKey(),
-  companyId: integer2("company_id").references(() => companies.id),
+  companyId: integer2("company_id").notNull().references(() => companies.id),
   psychologistId: integer2("psychologist_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   patientId: integer2("patient_id").notNull(),
   // references patients.id (defined in patient-schema.ts)
@@ -1067,7 +1068,7 @@ var meetingsRelations = relations2(meetings, ({ one }) => ({
 }));
 var commissionPayoutConfigs = pgTable2("commission_payout_configs", {
   id: serial2("id").primaryKey(),
-  companyId: integer2("company_id").references(() => companies.id),
+  companyId: integer2("company_id").notNull().references(() => companies.id),
   psychologistId: integer2("psychologist_id").notNull().references(() => psychologists.id, { onDelete: "cascade" }),
   payoutType: text2("payout_type").notNull().default("percentual"),
   // "percentual" | "fixed"
@@ -1087,7 +1088,7 @@ var insertCommissionPayoutConfigSchema = createInsertSchema2(commissionPayoutCon
 });
 var commissions = pgTable2("commissions", {
   id: serial2("id").primaryKey(),
-  companyId: integer2("company_id").references(() => companies.id),
+  companyId: integer2("company_id").notNull().references(() => companies.id),
   psychologistId: integer2("psychologist_id").notNull().references(() => psychologists.id, { onDelete: "cascade" }),
   periodStart: date2("period_start").notNull(),
   periodEnd: date2("period_end").notNull(),
@@ -1133,6 +1134,10 @@ var db2 = drizzle(pool, { schema: schema_exports });
 // server/storage.ts
 import { eq, and, gte, lte, sql, desc, ilike, or, getTableColumns } from "drizzle-orm";
 var PostgresSessionStore = connectPg(session);
+function withoutCompany(data) {
+  const { companyId: _ignored, ...rest } = data;
+  return rest;
+}
 var { imageData: _invoiceImageDataColumn, ...invoiceListColumns } = getTableColumns(invoices);
 var { profileImageData: _userProfileImageDataColumn, ...userColumns } = getTableColumns(users);
 var DatabaseStorage = class {
@@ -1171,8 +1176,10 @@ var DatabaseStorage = class {
     const [deletedUser] = await db2.delete(users).where(eq(users.id, id)).returning();
     return !!deletedUser;
   }
-  async getAllUsers() {
-    return await db2.select(userColumns).from(users);
+  /** Members of the company, with `role` = their role there. */
+  async getAllUsers(companyId) {
+    const rows = await db2.select({ user: userColumns, role: companyMemberships.role }).from(companyMemberships).innerJoin(users, eq(companyMemberships.userId, users.id)).where(and(eq(companyMemberships.companyId, companyId), eq(companyMemberships.status, "active")));
+    return rows.map((r) => ({ ...r.user, role: r.role }));
   }
   async getUserByEmail(email) {
     const [user] = await db2.select(userColumns).from(users).where(eq(users.email, email));
@@ -1227,161 +1234,175 @@ var DatabaseStorage = class {
     return !!updatedUser;
   }
   // Psychologist methods
-  async getPsychologist(id) {
+  async getPsychologist(companyId, id) {
+    const [psych] = await db2.select().from(psychologists).where(and(eq(psychologists.id, id), eq(psychologists.companyId, companyId)));
+    return psych;
+  }
+  /**
+   * Unscoped lookup for public pages (quick booking link), which have no logged-in
+   * company: the psychologist's companyId is what scopes everything after it.
+   */
+  async getPsychologistForPublicPage(id) {
     const [psych] = await db2.select().from(psychologists).where(eq(psychologists.id, id));
     return psych;
   }
-  async getPsychologistByUserId(userId) {
-    const [psych] = await db2.select().from(psychologists).where(eq(psychologists.userId, userId));
+  async getPsychologistByUserId(companyId, userId) {
+    const [psych] = await db2.select().from(psychologists).where(and(eq(psychologists.userId, userId), eq(psychologists.companyId, companyId)));
     return psych;
   }
-  async createPsychologist(psychologist) {
+  async createPsychologist(companyId, psychologist) {
     const [newPsych] = await db2.insert(psychologists).values({
       ...psychologist,
+      companyId,
       hourlyRate: psychologist.hourlyRate.toString()
     }).returning();
     return newPsych;
   }
-  async updatePsychologist(id, data) {
-    const [updated] = await db2.update(psychologists).set(data).where(eq(psychologists.id, id)).returning();
+  async updatePsychologist(companyId, id, data) {
+    const [updated] = await db2.update(psychologists).set(withoutCompany(data)).where(and(eq(psychologists.id, id), eq(psychologists.companyId, companyId))).returning();
     return updated;
   }
-  async deletePsychologist(id) {
-    const [deleted] = await db2.delete(psychologists).where(eq(psychologists.id, id)).returning();
+  async deletePsychologist(companyId, id) {
+    const [deleted] = await db2.delete(psychologists).where(and(eq(psychologists.id, id), eq(psychologists.companyId, companyId))).returning();
     return !!deleted;
   }
-  async getAllPsychologists() {
-    return await db2.select().from(psychologists);
+  async getAllPsychologists(companyId) {
+    return await db2.select().from(psychologists).where(eq(psychologists.companyId, companyId));
   }
   // Room methods
-  async getRoom(id) {
-    const [room] = await db2.select().from(rooms).where(eq(rooms.id, id));
+  async getRoom(companyId, id) {
+    const [room] = await db2.select().from(rooms).where(and(eq(rooms.id, id), eq(rooms.companyId, companyId)));
     return room;
   }
-  async createRoom(room) {
-    const [newRoom] = await db2.insert(rooms).values(room).returning();
+  async createRoom(companyId, room) {
+    const [newRoom] = await db2.insert(rooms).values({ ...room, companyId }).returning();
     return newRoom;
   }
-  async updateRoom(id, data) {
-    const [updated] = await db2.update(rooms).set(data).where(eq(rooms.id, id)).returning();
+  async updateRoom(companyId, id, data) {
+    const [updated] = await db2.update(rooms).set(withoutCompany(data)).where(and(eq(rooms.id, id), eq(rooms.companyId, companyId))).returning();
     return updated;
   }
-  async deleteRoom(id) {
-    const [deleted] = await db2.delete(rooms).where(eq(rooms.id, id)).returning();
+  async deleteRoom(companyId, id) {
+    const [deleted] = await db2.delete(rooms).where(and(eq(rooms.id, id), eq(rooms.companyId, companyId))).returning();
     return !!deleted;
   }
-  async getAllRooms() {
-    return await db2.select().from(rooms);
+  async getAllRooms(companyId) {
+    return await db2.select().from(rooms).where(eq(rooms.companyId, companyId));
   }
   // Appointment methods
-  async getAppointment(id) {
-    const [appt] = await db2.select().from(appointments).where(eq(appointments.id, id));
+  async getAppointment(companyId, id) {
+    const [appt] = await db2.select().from(appointments).where(and(eq(appointments.id, id), eq(appointments.companyId, companyId)));
     return appt;
   }
-  async createAppointment(appointment) {
-    const [newAppt] = await db2.insert(appointments).values(appointment).returning();
+  async createAppointment(companyId, appointment) {
+    const [newAppt] = await db2.insert(appointments).values({ ...appointment, companyId }).returning();
     return newAppt;
   }
-  async updateAppointment(id, data) {
-    const [updated] = await db2.update(appointments).set(data).where(eq(appointments.id, id)).returning();
+  async updateAppointment(companyId, id, data) {
+    const [updated] = await db2.update(appointments).set(withoutCompany(data)).where(and(eq(appointments.id, id), eq(appointments.companyId, companyId))).returning();
     return updated;
   }
-  async deleteAppointment(id) {
-    const [deleted] = await db2.delete(appointments).where(eq(appointments.id, id)).returning();
+  async deleteAppointment(companyId, id) {
+    const [deleted] = await db2.delete(appointments).where(and(eq(appointments.id, id), eq(appointments.companyId, companyId))).returning();
     return !!deleted;
   }
-  async getAllAppointments() {
-    return await db2.select().from(appointments);
+  async getAllAppointments(companyId) {
+    return await db2.select().from(appointments).where(eq(appointments.companyId, companyId));
   }
-  async getAppointmentsByPsychologistId(psychologistId) {
-    return await db2.select().from(appointments).where(eq(appointments.psychologistId, psychologistId));
+  async getAppointmentsByPsychologistId(companyId, psychologistId) {
+    return await db2.select().from(appointments).where(and(eq(appointments.psychologistId, psychologistId), eq(appointments.companyId, companyId)));
   }
-  async getAppointmentsByDate(date3) {
-    const all = await this.getAllAppointments();
+  async getAppointmentsByDate(companyId, date3) {
+    const all = await this.getAllAppointments(companyId);
     const dateString = date3.toISOString().split("T")[0];
     return all.filter((a) => new Date(a.date).toISOString().split("T")[0] === dateString);
   }
-  async getAppointmentsByDateRange(startDate, endDate) {
+  async getAppointmentsByDateRange(companyId, startDate, endDate) {
     return await db2.select().from(appointments).where(and(
+      eq(appointments.companyId, companyId),
       gte(appointments.date, startDate.toISOString()),
       lte(appointments.date, endDate.toISOString())
     ));
   }
-  async getAppointmentsByPsychologistIdAndDateRange(psychologistId, startDate, endDate) {
+  async getAppointmentsByPsychologistIdAndDateRange(companyId, psychologistId, startDate, endDate) {
     return await db2.select().from(appointments).where(and(
+      eq(appointments.companyId, companyId),
       eq(appointments.psychologistId, psychologistId),
       gte(appointments.date, startDate.toISOString()),
       lte(appointments.date, endDate.toISOString())
     ));
   }
   // Transaction methods
-  async getTransaction(id) {
-    const [tx] = await db2.select().from(transactions).where(eq(transactions.id, id));
+  async getTransaction(companyId, id) {
+    const [tx] = await db2.select().from(transactions).where(and(eq(transactions.id, id), eq(transactions.companyId, companyId)));
     return tx;
   }
-  async createTransaction(transaction) {
+  async createTransaction(companyId, transaction) {
     const [newTx] = await db2.insert(transactions).values({
       ...transaction,
+      companyId,
       amount: transaction.amount.toString()
     }).returning();
     return newTx;
   }
-  async updateTransaction(id, data) {
-    const [updated] = await db2.update(transactions).set(data).where(eq(transactions.id, id)).returning();
+  async updateTransaction(companyId, id, data) {
+    const [updated] = await db2.update(transactions).set(withoutCompany(data)).where(and(eq(transactions.id, id), eq(transactions.companyId, companyId))).returning();
     return updated;
   }
-  async deleteTransaction(id) {
-    const [deleted] = await db2.delete(transactions).where(eq(transactions.id, id)).returning();
+  async deleteTransaction(companyId, id) {
+    const [deleted] = await db2.delete(transactions).where(and(eq(transactions.id, id), eq(transactions.companyId, companyId))).returning();
     return !!deleted;
   }
-  async getAllTransactions() {
-    return await db2.select().from(transactions);
+  async getAllTransactions(companyId) {
+    return await db2.select().from(transactions).where(eq(transactions.companyId, companyId));
   }
-  async getTransactionsByType(type) {
-    return await db2.select().from(transactions).where(eq(transactions.type, type));
+  async getTransactionsByType(companyId, type) {
+    return await db2.select().from(transactions).where(and(eq(transactions.type, type), eq(transactions.companyId, companyId)));
   }
-  async getTransactionsByDateRange(startDate, endDate) {
+  async getTransactionsByDateRange(companyId, startDate, endDate) {
     return await db2.select().from(transactions).where(and(
+      eq(transactions.companyId, companyId),
       gte(transactions.date, startDate.toISOString()),
       lte(transactions.date, endDate.toISOString())
     ));
   }
   // RoomBooking methods
-  async getRoomBooking(id) {
-    const [booking] = await db2.select().from(roomBookings).where(eq(roomBookings.id, id));
+  async getRoomBooking(companyId, id) {
+    const [booking] = await db2.select().from(roomBookings).where(and(eq(roomBookings.id, id), eq(roomBookings.companyId, companyId)));
     return booking;
   }
-  async createRoomBooking(booking) {
-    const [newBooking] = await db2.insert(roomBookings).values(booking).returning();
+  async createRoomBooking(companyId, booking) {
+    const [newBooking] = await db2.insert(roomBookings).values({ ...booking, companyId }).returning();
     return newBooking;
   }
-  async updateRoomBooking(id, data) {
-    const [updated] = await db2.update(roomBookings).set(data).where(eq(roomBookings.id, id)).returning();
+  async updateRoomBooking(companyId, id, data) {
+    const [updated] = await db2.update(roomBookings).set(withoutCompany(data)).where(and(eq(roomBookings.id, id), eq(roomBookings.companyId, companyId))).returning();
     return updated;
   }
-  async deleteRoomBooking(id) {
-    const [deleted] = await db2.delete(roomBookings).where(eq(roomBookings.id, id)).returning();
+  async deleteRoomBooking(companyId, id) {
+    const [deleted] = await db2.delete(roomBookings).where(and(eq(roomBookings.id, id), eq(roomBookings.companyId, companyId))).returning();
     return !!deleted;
   }
-  async getAllRoomBookings() {
-    return await db2.select().from(roomBookings);
+  async getAllRoomBookings(companyId) {
+    return await db2.select().from(roomBookings).where(eq(roomBookings.companyId, companyId));
   }
-  async getRoomBookingsByRoomId(roomId) {
-    return await db2.select().from(roomBookings).where(eq(roomBookings.roomId, roomId));
+  async getRoomBookingsByRoomId(companyId, roomId) {
+    return await db2.select().from(roomBookings).where(and(eq(roomBookings.roomId, roomId), eq(roomBookings.companyId, companyId)));
   }
-  async getRoomBookingsByDate(date3) {
-    const all = await this.getAllRoomBookings();
+  async getRoomBookingsByDate(companyId, date3) {
+    const all = await this.getAllRoomBookings(companyId);
     const dateString = date3.toISOString().split("T")[0];
     return all.filter((b) => new Date(b.date).toISOString().split("T")[0] === dateString);
   }
-  async getRoomBookingsByDateRange(startDate, endDate) {
+  async getRoomBookingsByDateRange(companyId, startDate, endDate) {
     return await db2.select().from(roomBookings).where(and(
+      eq(roomBookings.companyId, companyId),
       gte(roomBookings.date, startDate.toISOString()),
       lte(roomBookings.date, endDate.toISOString())
     ));
   }
-  async checkRoomAvailability(roomId, date3, startTime, endTime) {
-    const bookings = await this.getRoomBookingsByDate(date3);
+  async checkRoomAvailability(companyId, roomId, date3, startTime, endTime) {
+    const bookings = await this.getRoomBookingsByDate(companyId, date3);
     const hasOverlap = bookings.some((booking) => {
       if (booking.roomId !== roomId) return false;
       return startTime < booking.endTime && endTime > booking.startTime;
@@ -1432,24 +1453,24 @@ var DatabaseStorage = class {
     return await db2.select().from(rolePermissions).where(eq(rolePermissions.role, role));
   }
   // Invoice methods (NFS-e)
-  async getInvoice(id) {
-    const [invoice] = await db2.select().from(invoices).where(eq(invoices.id, id));
+  async getInvoice(companyId, id) {
+    const [invoice] = await db2.select().from(invoices).where(and(eq(invoices.id, id), eq(invoices.companyId, companyId)));
     return invoice;
   }
-  async createInvoice(invoice) {
-    const [newInvoice] = await db2.insert(invoices).values(invoice).returning();
+  async createInvoice(companyId, invoice) {
+    const [newInvoice] = await db2.insert(invoices).values({ ...invoice, companyId }).returning();
     return newInvoice;
   }
-  async updateInvoice(id, data) {
-    const [updated] = await db2.update(invoices).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(invoices.id, id)).returning();
+  async updateInvoice(companyId, id, data) {
+    const [updated] = await db2.update(invoices).set({ ...withoutCompany(data), updatedAt: /* @__PURE__ */ new Date() }).where(and(eq(invoices.id, id), eq(invoices.companyId, companyId))).returning();
     return updated;
   }
-  async deleteInvoice(id) {
-    const [deleted] = await db2.delete(invoices).where(eq(invoices.id, id)).returning();
+  async deleteInvoice(companyId, id) {
+    const [deleted] = await db2.delete(invoices).where(and(eq(invoices.id, id), eq(invoices.companyId, companyId))).returning();
     return !!deleted;
   }
-  async getInvoicesByUserId(psychologistId, opts) {
-    const conditions = [eq(invoices.psychologistId, psychologistId)];
+  async getInvoicesByUserId(companyId, psychologistId, opts) {
+    const conditions = [eq(invoices.companyId, companyId), eq(invoices.psychologistId, psychologistId)];
     if (opts?.dataEmissaoFrom) conditions.push(gte(invoices.dataEmissao, opts.dataEmissaoFrom));
     if (opts?.dataEmissaoTo) conditions.push(lte(invoices.dataEmissao, opts.dataEmissaoTo));
     if (opts?.status) conditions.push(eq(invoices.status, opts.status));
@@ -1466,8 +1487,8 @@ var DatabaseStorage = class {
     const rows = await query;
     return { invoices: rows, total };
   }
-  async getInvoicesSummary(psychologistId, opts) {
-    const conditions = [eq(invoices.psychologistId, psychologistId)];
+  async getInvoicesSummary(companyId, psychologistId, opts) {
+    const conditions = [eq(invoices.companyId, companyId), eq(invoices.psychologistId, psychologistId)];
     if (opts?.dataEmissaoFrom) conditions.push(gte(invoices.dataEmissao, opts.dataEmissaoFrom));
     if (opts?.dataEmissaoTo) conditions.push(lte(invoices.dataEmissao, opts.dataEmissaoTo));
     if (opts?.status) conditions.push(eq(invoices.status, opts.status));
@@ -1479,17 +1500,17 @@ var DatabaseStorage = class {
     }).from(invoices).where(whereClause);
     return { totalCount: row?.totalCount ?? 0, sumValorServicos: row?.sumValorServicos ?? "0", sumValorLiquido: row?.sumValorLiquido ?? "0" };
   }
-  async getAllInvoices() {
-    return await db2.select().from(invoices);
+  async getAllInvoices(companyId) {
+    return await db2.select().from(invoices).where(eq(invoices.companyId, companyId));
   }
-  async getInvoicesByReferenceMonth(_referenceMonth) {
-    return await db2.select().from(invoices);
+  async getInvoicesByReferenceMonth(companyId, _referenceMonth) {
+    return await db2.select().from(invoices).where(eq(invoices.companyId, companyId));
   }
-  async getInvoiceByUserAndMonth(_userId, _referenceMonth) {
+  async getInvoiceByUserAndMonth(_companyId, _userId, _referenceMonth) {
     return void 0;
   }
-  async getInvoicesAdmin(opts) {
-    const conditions = [];
+  async getInvoicesAdmin(companyId, opts) {
+    const conditions = [eq(invoices.companyId, companyId)];
     if (opts?.psychologistId != null) conditions.push(eq(invoices.psychologistId, opts.psychologistId));
     if (opts?.dataEmissaoFrom) conditions.push(gte(invoices.dataEmissao, opts.dataEmissaoFrom));
     if (opts?.dataEmissaoTo) conditions.push(lte(invoices.dataEmissao, opts.dataEmissaoTo));
@@ -1507,8 +1528,8 @@ var DatabaseStorage = class {
     const invoicesWithUsers = result.map((r) => ({ ...r.invoices, user: r.users }));
     return { invoices: invoicesWithUsers, total: totalCount };
   }
-  async getInvoicesSummaryAdmin(opts) {
-    const conditions = [];
+  async getInvoicesSummaryAdmin(companyId, opts) {
+    const conditions = [eq(invoices.companyId, companyId)];
     if (opts?.psychologistId != null) conditions.push(eq(invoices.psychologistId, opts.psychologistId));
     if (opts?.dataEmissaoFrom) conditions.push(gte(invoices.dataEmissao, opts.dataEmissaoFrom));
     if (opts?.dataEmissaoTo) conditions.push(lte(invoices.dataEmissao, opts.dataEmissaoTo));
@@ -1517,39 +1538,36 @@ var DatabaseStorage = class {
     const [row] = await db2.select({ totalCount: sql`count(*)::int`, sumValorServicos: sql`coalesce(sum(${invoices.valorServicos})::text, '0')`, sumValorLiquido: sql`coalesce(sum(${invoices.valorLiquido})::text, '0')` }).from(invoices).where(whereClause);
     return { totalCount: row?.totalCount ?? 0, sumValorServicos: row?.sumValorServicos ?? "0", sumValorLiquido: row?.sumValorLiquido ?? "0" };
   }
-  async getInvoiceWithUser(id) {
-    const result = await db2.select().from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).where(eq(invoices.id, id));
+  async getInvoiceWithUser(companyId, id) {
+    const result = await db2.select().from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).where(and(eq(invoices.id, id), eq(invoices.companyId, companyId)));
     if (result.length === 0) return void 0;
     return { ...result[0].invoices, user: result[0].users };
   }
-  async getAllInvoicesWithUsers() {
-    const result = await db2.select().from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).orderBy(desc(invoices.dataUpload));
+  async getAllInvoicesWithUsers(companyId) {
+    const result = await db2.select().from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).where(eq(invoices.companyId, companyId)).orderBy(desc(invoices.dataUpload));
     return result.map((r) => ({ ...r.invoices, user: r.users }));
   }
   // Patient Record System Implementation
   // Patients
-  async getPatient(id) {
-    const [patient] = await db2.select().from(patients).where(eq(patients.id, id));
+  async getPatient(companyId, id) {
+    const [patient] = await db2.select().from(patients).where(and(eq(patients.id, id), eq(patients.companyId, companyId)));
     return patient;
   }
-  async getPatientByCpf(cpf) {
-    const [patient] = await db2.select().from(patients).where(eq(patients.cpf, cpf));
+  async getPatientByCpf(companyId, cpf) {
+    const [patient] = await db2.select().from(patients).where(and(eq(patients.cpf, cpf), eq(patients.companyId, companyId)));
     return patient;
   }
-  async createPatient(patient) {
-    const [newPatient] = await db2.insert(patients).values(patient).returning();
+  async createPatient(companyId, patient) {
+    const [newPatient] = await db2.insert(patients).values({ ...patient, companyId }).returning();
     return newPatient;
   }
-  async updatePatient(id, data) {
-    const [updated] = await db2.update(patients).set(data).where(eq(patients.id, id)).returning();
+  async updatePatient(companyId, id, data) {
+    const [updated] = await db2.update(patients).set(withoutCompany(data)).where(and(eq(patients.id, id), eq(patients.companyId, companyId))).returning();
     return updated;
   }
-  async listPatients(activeOnly = true) {
-    let query = db2.select().from(patients);
-    if (activeOnly) {
-      return await db2.select().from(patients).where(eq(patients.status, "active"));
-    }
-    return await query;
+  async listPatients(companyId, activeOnly = true) {
+    const ofCompany = eq(patients.companyId, companyId);
+    return await db2.select().from(patients).where(activeOnly ? and(ofCompany, eq(patients.status, "active")) : ofCompany);
   }
   // Medical Records
   async getMedicalRecordByPatientId(patientId) {
@@ -1625,8 +1643,8 @@ var DatabaseStorage = class {
     return await db2.select().from(psychologicalAssessments).where(eq(psychologicalAssessments.patientId, patientId));
   }
   // Audit & History
-  async createAuditLog(log2) {
-    const [newLog] = await db2.insert(auditLogs).values(log2).returning();
+  async createAuditLog(companyId, log2) {
+    const [newLog] = await db2.insert(auditLogs).values({ ...log2, companyId }).returning();
     return newLog;
   }
   async listAuditLogsByPatientId(patientId) {
@@ -1636,10 +1654,10 @@ var DatabaseStorage = class {
     return await db2.select().from(sessionHistory).where(eq(sessionHistory.sessionId, sessionId)).orderBy(sql`${sessionHistory.version} DESC`);
   }
   // Patient Transfers
-  async transferPatient(data) {
+  async transferPatient(companyId, data) {
     let transfer;
     await db2.transaction(async (tx) => {
-      await tx.update(patients).set({ psychologistId: data.toPsychologistId }).where(eq(patients.id, data.patientId));
+      await tx.update(patients).set({ psychologistId: data.toPsychologistId }).where(and(eq(patients.id, data.patientId), eq(patients.companyId, companyId)));
       const [newTransfer] = await tx.insert(patientTransfers).values({
         patientId: data.patientId,
         fromPsychologistId: data.fromPsychologistId,
@@ -1654,15 +1672,14 @@ var DatabaseStorage = class {
   async listTransfersByPatientId(patientId) {
     return await db2.select().from(patientTransfers).where(eq(patientTransfers.patientId, patientId)).orderBy(sql`${patientTransfers.createdAt} DESC`);
   }
-  async listCommissionPayoutConfigs(psychologistId) {
-    if (psychologistId !== void 0) {
-      return await db2.select().from(commissionPayoutConfigs).where(eq(commissionPayoutConfigs.psychologistId, psychologistId)).orderBy(sql`${commissionPayoutConfigs.validFrom} DESC`);
-    }
-    return await db2.select().from(commissionPayoutConfigs).orderBy(sql`${commissionPayoutConfigs.validFrom} DESC`);
+  async listCommissionPayoutConfigs(companyId, psychologistId) {
+    const ofCompany = eq(commissionPayoutConfigs.companyId, companyId);
+    return await db2.select().from(commissionPayoutConfigs).where(psychologistId !== void 0 ? and(ofCompany, eq(commissionPayoutConfigs.psychologistId, psychologistId)) : ofCompany).orderBy(sql`${commissionPayoutConfigs.validFrom} DESC`);
   }
-  async getActiveCommissionPayoutConfig(psychologistId, forDate) {
+  async getActiveCommissionPayoutConfig(companyId, psychologistId, forDate) {
     const results = await db2.select().from(commissionPayoutConfigs).where(
       and(
+        eq(commissionPayoutConfigs.companyId, companyId),
         eq(commissionPayoutConfigs.psychologistId, psychologistId),
         lte(commissionPayoutConfigs.validFrom, forDate),
         or(
@@ -1673,16 +1690,16 @@ var DatabaseStorage = class {
     ).orderBy(sql`${commissionPayoutConfigs.validFrom} DESC`).limit(1);
     return results[0];
   }
-  async createCommissionPayoutConfig(data) {
-    const [config] = await db2.insert(commissionPayoutConfigs).values(data).returning();
+  async createCommissionPayoutConfig(companyId, data) {
+    const [config] = await db2.insert(commissionPayoutConfigs).values({ ...data, companyId }).returning();
     return config;
   }
-  async updateCommissionPayoutConfig(id, data) {
-    const [updated] = await db2.update(commissionPayoutConfigs).set(data).where(eq(commissionPayoutConfigs.id, id)).returning();
+  async updateCommissionPayoutConfig(companyId, id, data) {
+    const [updated] = await db2.update(commissionPayoutConfigs).set(withoutCompany(data)).where(and(eq(commissionPayoutConfigs.id, id), eq(commissionPayoutConfigs.companyId, companyId))).returning();
     return updated;
   }
-  async listCommissions(filters) {
-    const conditions = [];
+  async listCommissions(companyId, filters) {
+    const conditions = [eq(commissions.companyId, companyId)];
     if (filters?.psychologistId) conditions.push(eq(commissions.psychologistId, filters.psychologistId));
     if (filters?.status) conditions.push(eq(commissions.status, filters.status));
     if (filters?.exactPeriod) {
@@ -1692,25 +1709,23 @@ var DatabaseStorage = class {
       if (filters?.periodStart) conditions.push(gte(commissions.periodStart, filters.periodStart));
       if (filters?.periodEnd) conditions.push(lte(commissions.periodEnd, filters.periodEnd));
     }
-    if (conditions.length > 0) {
-      return await db2.select().from(commissions).where(and(...conditions)).orderBy(sql`${commissions.createdAt} DESC`);
-    }
-    return await db2.select().from(commissions).orderBy(sql`${commissions.createdAt} DESC`);
+    return await db2.select().from(commissions).where(and(...conditions)).orderBy(sql`${commissions.createdAt} DESC`);
   }
-  async getCommission(id) {
-    const [c] = await db2.select().from(commissions).where(eq(commissions.id, id));
+  async getCommission(companyId, id) {
+    const [c] = await db2.select().from(commissions).where(and(eq(commissions.id, id), eq(commissions.companyId, companyId)));
     return c;
   }
-  async createCommission(data) {
+  async createCommission(companyId, data) {
     const [c] = await db2.insert(commissions).values({
       ...data,
+      companyId,
       createdAt: /* @__PURE__ */ new Date(),
       updatedAt: /* @__PURE__ */ new Date()
     }).returning();
     return c;
   }
-  async updateCommission(id, data) {
-    const [updated] = await db2.update(commissions).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(commissions.id, id)).returning();
+  async updateCommission(companyId, id, data) {
+    const [updated] = await db2.update(commissions).set({ ...withoutCompany(data), updatedAt: /* @__PURE__ */ new Date() }).where(and(eq(commissions.id, id), eq(commissions.companyId, companyId))).returning();
     return updated;
   }
   async listCommissionItems(commissionId) {
@@ -1720,13 +1735,14 @@ var DatabaseStorage = class {
     if (items.length === 0) return [];
     return await db2.insert(commissionItems).values(items).returning();
   }
-  async getCommissionDashboard(month) {
+  async getCommissionDashboard(companyId, month) {
     const [year, mon] = month.split("-");
     const periodStart = `${year}-${mon}-01`;
     const lastDay = new Date(parseInt(year), parseInt(mon), 0).getDate();
     const periodEnd = `${year}-${mon}-${lastDay.toString().padStart(2, "0")}`;
     const rows = await db2.select().from(commissions).where(
       and(
+        eq(commissions.companyId, companyId),
         gte(commissions.periodStart, periodStart),
         lte(commissions.periodEnd, periodEnd)
       )
@@ -1812,6 +1828,14 @@ async function resolveCompanyContext(req) {
   req.user.role = active?.role ?? NO_COMPANY_ROLE;
   return active;
 }
+var DEFAULT_COMPANY_NAME = "Empresa 1";
+async function clinicDisplayName(companyId) {
+  const fallback = process.env.CLINIC_NAME || "ConsultaPsi";
+  if (!companyId) return fallback;
+  const [company] = await db2.select({ name: companies.name, slug: companies.slug }).from(companies).where(eq3(companies.id, companyId));
+  if (!company) return fallback;
+  return company.slug === DEFAULT_COMPANY_SLUG && company.name === DEFAULT_COMPANY_NAME ? fallback : company.name;
+}
 async function userPayload(req) {
   const { password, ...user } = req.user;
   const companiesList = await listUserCompanies(user.id);
@@ -1863,6 +1887,14 @@ function requireCompany(req, res, next) {
   }
   next();
 }
+function requireCompanyExcept(publicRoutes) {
+  return (req, res, next) => {
+    if (!req.path.startsWith("/api/")) return next();
+    const isPublic = publicRoutes.some((r) => (!r.method || r.method === req.method) && r.path.test(req.path));
+    if (isPublic) return next();
+    requireCompany(req, res, next);
+  };
+}
 
 // server/auth.ts
 var scryptAsync = promisify(scrypt);
@@ -1884,19 +1916,20 @@ function isAllowedMobileRedirect(url) {
   return typeof url === "string" && MOBILE_REDIRECT_PREFIXES.some((p) => url.startsWith(p));
 }
 async function ensurePsychologistProfile(req) {
-  if (!req.user || req.user.role !== "psychologist") return;
-  const existingProfile = await storage.getPsychologistByUserId(req.user.id);
+  if (!req.user || req.user.role !== "psychologist" || !req.companyId) return;
+  const companyId = req.companyId;
+  const existingProfile = await storage.getPsychologistByUserId(companyId, req.user.id);
   if (existingProfile) return;
-  const newProfile = await storage.createPsychologist({
+  const newProfile = await storage.createPsychologist(companyId, {
     userId: req.user.id,
     specialization: null,
     bio: null,
     hourlyRate: 0
   });
-  const allAppointments = await storage.getAllAppointments();
+  const allAppointments = await storage.getAllAppointments(companyId);
   const orphaned = allAppointments.filter((a) => a.psychologistId === 0);
   for (const appt of orphaned) {
-    await storage.updateAppointment(appt.id, { psychologistId: newProfile.id });
+    await storage.updateAppointment(companyId, appt.id, { psychologistId: newProfile.id });
   }
 }
 function setupAuth(app) {
@@ -2074,7 +2107,7 @@ function setupAuth(app) {
       });
       if (isAdminCaller) await upsertMembership(user.id, req.companyId, role);
       if (isAdminCaller && role === "psychologist" && req.body.hourlyRate) {
-        await storage.createPsychologist({
+        await storage.createPsychologist(req.companyId, {
           userId: user.id,
           specialization: req.body.specialization || "",
           bio: req.body.bio || "",
@@ -2141,13 +2174,13 @@ function setupAuth(app) {
       next(error);
     }
   });
-  app.get("/api/users", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+  app.get("/api/users", requireCompany, async (req, res) => {
     try {
-      if (req.user.role !== "admin" && req.user.role !== "psychologist" && req.user.role !== "manager") {
+      const role = req.user.role;
+      if (role !== "admin" && role !== "psychologist" && role !== "manager") {
         return res.status(403).json({ message: "Acesso n\xE3o autorizado" });
       }
-      const users2 = await storage.getAllUsers();
+      const users2 = await storage.getAllUsers(req.companyId);
       const safeUsers = users2.map((user) => {
         const { password, ...safeUser } = user;
         return safeUser;
@@ -3306,7 +3339,7 @@ async function checkPatientAccess(req, res, next) {
     if (!patientId || isNaN(patientId)) {
       return res.status(400).json({ message: "ID de paciente inv\xE1lido" });
     }
-    const patient = await storage.getPatient(patientId);
+    const patient = await storage.getPatient(req.companyId, patientId);
     if (!patient) {
       return res.status(404).json({ message: "Paciente n\xE3o encontrado" });
     }
@@ -3315,14 +3348,14 @@ async function checkPatientAccess(req, res, next) {
       return next();
     }
     if (user.role === "psychologist") {
-      const psychologist = await storage.getPsychologistByUserId(user.id);
+      const psychologist = await storage.getPsychologistByUserId(req.companyId, user.id);
       const psychologistId = psychologist?.id ?? -1;
       if (isPatientOwned(patient, psychologistId, user.id)) {
         req.patient = patient;
         return next();
       }
     }
-    await storage.createAuditLog({
+    await storage.createAuditLog(req.companyId, {
       userId: user.id,
       action: "access_denied",
       resourceType: "patient_record",
@@ -3368,14 +3401,14 @@ router2.get("/", async (req, res) => {
   try {
     const user = req.user;
     const activeOnly = req.query.active !== "false";
-    let patientsList = await storage.listPatients(activeOnly);
+    let patientsList = await storage.listPatients(req.companyId, activeOnly);
     if (user.role === "psychologist") {
-      const psychologist = await storage.getPsychologistByUserId(user.id);
+      const psychologist = await storage.getPsychologistByUserId(req.companyId, user.id);
       const psychologistId = psychologist?.id ?? -1;
       patientsList = patientsList.filter((p) => isPatientOwned(p, psychologistId, user.id));
     }
     if (user.role === "admin") {
-      const allPsychologists = await db2.select({ id: psychologists.id, fullName: users.fullName }).from(psychologists).innerJoin(users, eq6(psychologists.userId, users.id));
+      const allPsychologists = await db2.select({ id: psychologists.id, fullName: users.fullName }).from(psychologists).innerJoin(users, eq6(psychologists.userId, users.id)).where(eq6(psychologists.companyId, req.companyId));
       const psychologistNames = {};
       for (const row of allPsychologists) {
         psychologistNames[row.id] = row.fullName;
@@ -3405,13 +3438,16 @@ router2.post("/", async (req, res) => {
     const userId = req.user.id;
     const userRole = req.user.role;
     let psychologistId = data.psychologistId ?? null;
+    if (psychologistId && !await storage.getPsychologist(req.companyId, psychologistId)) {
+      return res.status(400).json({ message: "Psic\xF3logo n\xE3o encontrado." });
+    }
     if (!psychologistId && userRole === "psychologist") {
-      const psychRecord = await storage.getPsychologistByUserId(userId);
+      const psychRecord = await storage.getPsychologistByUserId(req.companyId, userId);
       if (psychRecord) psychologistId = psychRecord.id;
     }
     const patientData = { ...data, createdBy: userId, psychologistId };
-    const patient = await storage.createPatient(patientData);
-    await storage.createAuditLog({
+    const patient = await storage.createPatient(req.companyId, patientData);
+    await storage.createAuditLog(req.companyId, {
       userId,
       action: "create",
       resourceType: "patient",
@@ -3434,11 +3470,11 @@ router2.put("/:id", checkPatientAccess, async (req, res) => {
     const id = parseInt(req.params.id);
     const userId = req.user.id;
     const data = insertPatientSchema.partial().parse(req.body);
-    const patient = await storage.updatePatient(id, data);
+    const patient = await storage.updatePatient(req.companyId, id, data);
     if (!patient) {
       return res.status(404).json({ message: "Paciente n\xE3o encontrado" });
     }
-    await storage.createAuditLog({
+    await storage.createAuditLog(req.companyId, {
       userId,
       action: "update",
       resourceType: "patient",
@@ -3461,7 +3497,7 @@ router2.get("/:id/medical-record", checkPatientAccess, async (req, res) => {
     const patientId = parseInt(req.params.id);
     const userId = req.user.id;
     const record = await storage.getMedicalRecordByPatientId(patientId);
-    await storage.createAuditLog({
+    await storage.createAuditLog(req.companyId, {
       userId,
       action: "view",
       resourceType: "medical_record",
@@ -3488,7 +3524,7 @@ router2.post("/:id/medical-record", checkPatientAccess, async (req, res) => {
     } else {
       record = await storage.createMedicalRecord(data);
     }
-    await storage.createAuditLog({
+    await storage.createAuditLog(req.companyId, {
       userId,
       action: existing ? "update" : "create",
       resourceType: "medical_record",
@@ -3536,7 +3572,7 @@ router2.post("/:id/sessions", checkPatientAccess, async (req, res) => {
     const userId = req.user.id;
     const data = insertClinicalSessionSchema.parse({ ...req.body, patientId });
     const session3 = await storage.createSession(data);
-    await storage.createAuditLog({
+    await storage.createAuditLog(req.companyId, {
       userId,
       action: "create",
       resourceType: "clinical_session",
@@ -3559,12 +3595,12 @@ router2.put("/sessions/:sessionId", checkSessionAccess, async (req, res) => {
   try {
     const sessionId = parseInt(req.params.sessionId);
     const userId = req.user.id;
-    const data = insertClinicalSessionSchema.partial().parse(req.body);
+    const { patientId: _patientId, ...data } = insertClinicalSessionSchema.partial().parse(req.body);
     const oldSession = await storage.getSession(sessionId);
     if (!oldSession) return res.status(404).json({ message: "Sess\xE3o n\xE3o encontrada" });
     const updateData = { ...data, editedBy: userId, version: (oldSession.version || 1) + 1 };
     const session3 = await storage.updateSession(sessionId, updateData);
-    await storage.createAuditLog({
+    await storage.createAuditLog(req.companyId, {
       userId,
       action: "update",
       resourceType: "clinical_session",
@@ -3586,7 +3622,7 @@ router2.patch("/sessions/:sessionId/archive", checkSessionAccess, async (req, re
     const session3 = await storage.getSession(sessionId);
     if (!session3) return res.status(404).json({ message: "Sess\xE3o n\xE3o encontrada" });
     const updated = await storage.updateSession(sessionId, { isActive: false, editedBy: userId });
-    await storage.createAuditLog({
+    await storage.createAuditLog(req.companyId, {
       userId,
       action: "archive",
       resourceType: "clinical_session",
@@ -3628,7 +3664,7 @@ router2.post("/:id/documents", checkPatientAccess, uploadSingle("file"), async (
       uploadedBy: userId
     };
     const doc = await storage.createDocument(docData);
-    await storage.createAuditLog({
+    await storage.createAuditLog(req.companyId, {
       userId,
       action: "upload",
       resourceType: "document",
@@ -3654,7 +3690,7 @@ router2.get("/documents/:docId/download", checkDocumentAccess, async (req, res) 
     if (!doc.fileData) {
       return res.status(404).json({ message: "Arquivo n\xE3o encontrado" });
     }
-    await storage.createAuditLog({
+    await storage.createAuditLog(req.companyId, {
       userId,
       action: "download",
       resourceType: "document",
@@ -3695,7 +3731,7 @@ router2.post("/documents/:docId/summarize", checkDocumentAccess, async (req, res
     }
     const { summary, model } = await summarizeDocument(doc.fileData, doc.mimeType, doc.documentName);
     const saved = await storage.saveDocumentSummary(docId, summary, model);
-    await storage.createAuditLog({
+    await storage.createAuditLog(req.companyId, {
       userId: user.id,
       action: wantsRefresh ? "ai_summary_refresh" : "ai_summary",
       resourceType: "document",
@@ -3728,7 +3764,7 @@ router2.delete("/documents/:docId", checkDocumentAccess, async (req, res) => {
     const doc = await storage.getDocument(docId);
     if (!doc) return res.status(404).json({ message: "Documento n\xE3o encontrado" });
     await storage.deleteDocument(docId);
-    await storage.createAuditLog({
+    await storage.createAuditLog(req.companyId, {
       userId,
       action: "delete",
       resourceType: "document",
@@ -3758,7 +3794,7 @@ router2.post("/:id/assessments", checkPatientAccess, async (req, res) => {
     const userId = req.user.id;
     const data = insertPsychologicalAssessmentSchema.parse({ ...req.body, patientId });
     const assessment = await storage.createAssessment(data);
-    await storage.createAuditLog({
+    await storage.createAuditLog(req.companyId, {
       userId,
       action: "create",
       resourceType: "assessment",
@@ -3789,7 +3825,7 @@ router2.patch("/:id/transfer", async (req, res) => {
   try {
     const user = req.user;
     if (user.role !== "admin") {
-      await storage.createAuditLog({
+      await storage.createAuditLog(req.companyId, {
         userId: user.id,
         action: "transfer_denied",
         resourceType: "patient_record",
@@ -3807,23 +3843,23 @@ router2.patch("/:id/transfer", async (req, res) => {
     if (!toPsychologistId) {
       return res.status(400).json({ message: "toPsychologistId \xE9 obrigat\xF3rio." });
     }
-    const patient = await storage.getPatient(patientId);
+    const patient = await storage.getPatient(req.companyId, patientId);
     if (!patient) return res.status(404).json({ message: "Paciente n\xE3o encontrado." });
-    const targetPsychologist = await storage.getPsychologist(toPsychologistId);
+    const targetPsychologist = await storage.getPsychologist(req.companyId, toPsychologistId);
     if (!targetPsychologist) {
       return res.status(400).json({ message: "Psic\xF3logo de destino n\xE3o encontrado." });
     }
     if (patient.psychologistId === toPsychologistId) {
       return res.status(400).json({ message: "O paciente j\xE1 est\xE1 vinculado a este psic\xF3logo." });
     }
-    const result = await storage.transferPatient({
+    const result = await storage.transferPatient(req.companyId, {
       patientId,
       fromPsychologistId: patient.psychologistId ?? null,
       toPsychologistId,
       transferredByAdminId: user.id,
       reason: reason || null
     });
-    await storage.createAuditLog({
+    await storage.createAuditLog(req.companyId, {
       userId: user.id,
       action: "patient_transfer",
       resourceType: "patient",
@@ -3851,6 +3887,9 @@ router2.get("/:id/transfers", async (req, res) => {
       return res.status(403).json({ message: "Acesso negado.", code: "FORBIDDEN" });
     }
     const patientId = parseInt(req.params.id);
+    if (!await storage.getPatient(req.companyId, patientId)) {
+      return res.status(404).json({ message: "Paciente n\xE3o encontrado." });
+    }
     const transfers = await storage.listTransfersByPatientId(patientId);
     res.json(transfers);
   } catch (error) {
@@ -3861,15 +3900,15 @@ var patient_records_default = router2;
 
 // server/routes/meetings.ts
 import { Router as Router3 } from "express";
-import { eq as eq7, and as and6, gte as gte2, lte as lte2, desc as desc2 } from "drizzle-orm";
+import { eq as eq7, and as and7, gte as gte2, lte as lte2, desc as desc2 } from "drizzle-orm";
 import { z as z3 } from "zod";
 var router3 = Router3();
 function requireAuth2(req, res, next) {
   if (!req.isAuthenticated()) return res.status(401).json({ error: "N\xE3o autenticado" });
   next();
 }
-function canAccessMeeting(user, meeting) {
-  return meeting.psychologistId === user.id;
+function canAccessMeeting(req, meeting) {
+  return meeting.psychologistId === req.user?.id && meeting.companyId === req.companyId;
 }
 function handleGoogleError(res, error) {
   if (isGoogleTokenExpired(error)) {
@@ -3887,6 +3926,7 @@ router3.get("/", requireAuth2, async (req, res) => {
     const { status, dateFrom, dateTo, patientId } = req.query;
     const conditions = [];
     conditions.push(eq7(meetings.psychologistId, user.id));
+    conditions.push(eq7(meetings.companyId, req.companyId));
     if (status && status !== "all") {
       conditions.push(eq7(meetings.status, status));
     }
@@ -3923,7 +3963,7 @@ router3.get("/", requireAuth2, async (req, res) => {
       patientPhone: patients.phone,
       patientPhotoUrl: patients.photoUrl
     }).from(meetings).leftJoin(patients, eq7(meetings.patientId, patients.id)).orderBy(desc2(meetings.scheduledAt));
-    const rows = conditions.length > 0 ? await baseQuery.where(and6(...conditions)) : await baseQuery;
+    const rows = conditions.length > 0 ? await baseQuery.where(and7(...conditions)) : await baseQuery;
     const today = /* @__PURE__ */ new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -3940,11 +3980,11 @@ router3.get("/", requireAuth2, async (req, res) => {
 });
 router3.get("/:id", requireAuth2, async (req, res) => {
   try {
-    const user = req.user;
     const id = parseInt(req.params.id);
     const rows = await db2.select({
       id: meetings.id,
       psychologistId: meetings.psychologistId,
+      companyId: meetings.companyId,
       patientId: meetings.patientId,
       title: meetings.title,
       description: meetings.description,
@@ -3967,7 +4007,7 @@ router3.get("/:id", requireAuth2, async (req, res) => {
     }).from(meetings).leftJoin(patients, eq7(meetings.patientId, patients.id)).where(eq7(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
-    if (!canAccessMeeting(user, meeting)) {
+    if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: "Acesso negado" });
     }
     res.json(meeting);
@@ -3989,7 +4029,7 @@ router3.post("/", requireAuth2, async (req, res) => {
     const user = req.user;
     const body = createSchema.parse(req.body);
     const psychologistId = user.id;
-    const patientRows = await db2.select().from(patients).where(eq7(patients.id, body.patientId));
+    const patientRows = await db2.select().from(patients).where(and7(eq7(patients.id, body.patientId), eq7(patients.companyId, req.companyId)));
     if (!patientRows.length) return res.status(404).json({ error: "Paciente n\xE3o encontrado" });
     const patient = patientRows[0];
     const scheduledAt = new Date(body.scheduledAt);
@@ -4021,6 +4061,7 @@ router3.post("/", requireAuth2, async (req, res) => {
       }
     }
     const [meeting] = await db2.insert(meetings).values({
+      companyId: req.companyId,
       psychologistId,
       patientId: body.patientId,
       appointmentId: body.appointmentId ?? null,
@@ -4078,12 +4119,11 @@ router3.post("/", requireAuth2, async (req, res) => {
 });
 router3.patch("/:id", requireAuth2, async (req, res) => {
   try {
-    const user = req.user;
     const id = parseInt(req.params.id);
     const rows = await db2.select().from(meetings).where(eq7(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
-    if (!canAccessMeeting(user, meeting)) {
+    if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: "Acesso negado" });
     }
     const { title, description, scheduledAt, durationMinutes } = req.body;
@@ -4124,12 +4164,11 @@ router3.patch("/:id", requireAuth2, async (req, res) => {
 });
 router3.post("/:id/start", requireAuth2, async (req, res) => {
   try {
-    const user = req.user;
     const id = parseInt(req.params.id);
     const rows = await db2.select().from(meetings).where(eq7(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
-    if (!canAccessMeeting(user, meeting)) {
+    if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: "Acesso negado" });
     }
     const [updated] = await db2.update(meetings).set({ status: "active", startedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq7(meetings.id, id)).returning();
@@ -4140,12 +4179,11 @@ router3.post("/:id/start", requireAuth2, async (req, res) => {
 });
 router3.post("/:id/end", requireAuth2, async (req, res) => {
   try {
-    const user = req.user;
     const id = parseInt(req.params.id);
     const rows = await db2.select().from(meetings).where(eq7(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
-    if (!canAccessMeeting(user, meeting)) {
+    if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: "Acesso negado" });
     }
     const endedAt = /* @__PURE__ */ new Date();
@@ -4166,12 +4204,11 @@ router3.post("/:id/end", requireAuth2, async (req, res) => {
 });
 router3.patch("/:id/notes", requireAuth2, async (req, res) => {
   try {
-    const user = req.user;
     const id = parseInt(req.params.id);
     const rows = await db2.select().from(meetings).where(eq7(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
-    if (!canAccessMeeting(user, meeting)) {
+    if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: "Acesso negado" });
     }
     const [updated] = await db2.update(meetings).set({ notes: req.body.notes, updatedAt: /* @__PURE__ */ new Date() }).where(eq7(meetings.id, id)).returning();
@@ -4187,7 +4224,7 @@ router3.post("/:id/send-link", requireAuth2, async (req, res) => {
     const rows = await db2.select().from(meetings).where(eq7(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
-    if (!canAccessMeeting(user, meeting)) {
+    if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: "Acesso negado" });
     }
     if (!meeting.meetLink) return res.status(400).json({ error: "Sem link do Meet" });
@@ -4222,12 +4259,11 @@ router3.post("/:id/send-link", requireAuth2, async (req, res) => {
 });
 router3.delete("/:id", requireAuth2, async (req, res) => {
   try {
-    const user = req.user;
     const id = parseInt(req.params.id);
     const rows = await db2.select().from(meetings).where(eq7(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
-    if (!canAccessMeeting(user, meeting)) {
+    if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: "Acesso negado" });
     }
     if (meeting.googleEventId) {
@@ -4250,7 +4286,7 @@ var meetings_default = router3;
 
 // server/routes/profile.ts
 import { Router as Router4 } from "express";
-import { eq as eq8 } from "drizzle-orm";
+import { and as and8, eq as eq8 } from "drizzle-orm";
 import multer2 from "multer";
 var router4 = Router4();
 var avatarUpload = multer2({
@@ -4277,12 +4313,13 @@ function calcAge(birthDate) {
   return age;
 }
 router4.use(requireAuth3);
+var ownProfile = (companyId, userId) => and8(eq8(psychologists.userId, userId), eq8(psychologists.companyId, companyId));
 router4.get("/", async (req, res) => {
   try {
     const user = req.user;
     const [userData] = await db2.select().from(users).where(eq8(users.id, user.id));
     if (!userData) return res.status(404).json({ error: "Usu\xE1rio n\xE3o encontrado." });
-    const [psychData] = await db2.select().from(psychologists).where(eq8(psychologists.userId, user.id));
+    const [psychData] = await db2.select().from(psychologists).where(ownProfile(req.companyId, user.id));
     let specializations = [];
     if (psychData) {
       const rows = await db2.select({ id: specializationAreas.id, name: specializationAreas.name, category: specializationAreas.category }).from(psychologistSpecializations).innerJoin(specializationAreas, eq8(psychologistSpecializations.specializationAreaId, specializationAreas.id)).where(eq8(psychologistSpecializations.psychologistId, psychData.id));
@@ -4315,13 +4352,13 @@ router4.patch("/", async (req, res) => {
     if (crpNumber !== void 0) psychUpdate.crpNumber = crpNumber || null;
     if (bio !== void 0) psychUpdate.bio = bio || null;
     if (Object.keys(psychUpdate).length > 0) {
-      const [existing] = await db2.select().from(psychologists).where(eq8(psychologists.userId, user.id));
+      const [existing] = await db2.select().from(psychologists).where(ownProfile(req.companyId, user.id));
       if (existing) {
-        await db2.update(psychologists).set(psychUpdate).where(eq8(psychologists.userId, user.id));
+        await db2.update(psychologists).set(psychUpdate).where(ownProfile(req.companyId, user.id));
       }
     }
     const [updated] = await db2.select().from(users).where(eq8(users.id, user.id));
-    const [updatedPsych] = await db2.select().from(psychologists).where(eq8(psychologists.userId, user.id));
+    const [updatedPsych] = await db2.select().from(psychologists).where(ownProfile(req.companyId, user.id));
     const { password, profileImageData, ...safeUser } = updated;
     return res.json({ ...safeUser, psychologist: updatedPsych || null, age: calcAge(updated.birthDate) });
   } catch (e) {
@@ -4336,7 +4373,7 @@ router4.put("/specializations", async (req, res) => {
     if (!Array.isArray(specializationIds)) {
       return res.status(400).json({ error: "specializationIds deve ser um array." });
     }
-    const [psych] = await db2.select().from(psychologists).where(eq8(psychologists.userId, user.id));
+    const [psych] = await db2.select().from(psychologists).where(ownProfile(req.companyId, user.id));
     if (!psych) return res.status(404).json({ error: "Perfil de psic\xF3loga n\xE3o encontrado." });
     await db2.delete(psychologistSpecializations).where(eq8(psychologistSpecializations.psychologistId, psych.id));
     if (specializationIds.length > 0) {
@@ -4426,7 +4463,7 @@ var specialization_areas_default = router5;
 
 // server/routes/admin-psychologists.ts
 import { Router as Router6 } from "express";
-import { eq as eq10, and as and7, sql as sql3 } from "drizzle-orm";
+import { eq as eq10, and as and9, ne, sql as sql3 } from "drizzle-orm";
 var router6 = Router6();
 function requireAdmin2(req, res, next) {
   if (!req.isAuthenticated()) return res.status(401).json({ error: "N\xE3o autenticado." });
@@ -4452,13 +4489,40 @@ function monthsAgo(dateStr) {
   const now = /* @__PURE__ */ new Date();
   return (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
 }
+async function findPsych(companyId, id) {
+  const [psych] = await db2.select().from(psychologists).where(and9(eq10(psychologists.id, id), eq10(psychologists.companyId, companyId)));
+  return psych;
+}
+async function findUserInCompany(companyId, userId) {
+  const [row] = await db2.select({ user: users, membershipStatus: companyMemberships.status }).from(users).leftJoin(
+    companyMemberships,
+    and9(eq10(companyMemberships.userId, users.id), eq10(companyMemberships.companyId, companyId))
+  ).where(eq10(users.id, userId));
+  if (!row) return void 0;
+  const { password, ...safeUser } = row.user;
+  return { ...safeUser, status: row.membershipStatus ?? "inactive" };
+}
+async function isInOtherCompany(companyId, userId) {
+  const [other] = await db2.select({ id: companyMemberships.id }).from(companyMemberships).where(and9(eq10(companyMemberships.userId, userId), ne(companyMemberships.companyId, companyId))).limit(1);
+  return !!other;
+}
+async function setStatusInCompany(companyId, userId, status) {
+  await db2.update(companyMemberships).set({ status }).where(and9(eq10(companyMemberships.userId, userId), eq10(companyMemberships.companyId, companyId)));
+  if (status === "active") {
+    await db2.update(users).set({ status: "active" }).where(eq10(users.id, userId));
+  }
+}
 async function getSpecializationsForPsych(psychId) {
   return db2.select({ id: specializationAreas.id, name: specializationAreas.name, category: specializationAreas.category }).from(psychologistSpecializations).innerJoin(specializationAreas, eq10(psychologistSpecializations.specializationAreaId, specializationAreas.id)).where(eq10(psychologistSpecializations.psychologistId, psychId));
 }
 router6.get("/", async (req, res) => {
   try {
     const { search, status, specializationId } = req.query;
-    let psychList = await db2.select({ psych: psychologists, user: users }).from(psychologists).innerJoin(users, eq10(psychologists.userId, users.id)).orderBy(users.fullName);
+    const rows = await db2.select({ psych: psychologists, user: users, membershipStatus: companyMemberships.status }).from(psychologists).innerJoin(users, eq10(psychologists.userId, users.id)).leftJoin(
+      companyMemberships,
+      and9(eq10(companyMemberships.userId, users.id), eq10(companyMemberships.companyId, req.companyId))
+    ).where(eq10(psychologists.companyId, req.companyId)).orderBy(users.fullName);
+    let psychList = rows.map((r) => ({ psych: r.psych, user: { ...r.user, status: r.membershipStatus ?? "inactive" } }));
     if (search) {
       const lower = search.toLowerCase();
       psychList = psychList.filter(
@@ -4476,7 +4540,7 @@ router6.get("/", async (req, res) => {
         if (specializationId && !specs.some((s) => s.id === parseInt(specializationId))) {
           return null;
         }
-        const activePatientsCount = await db2.select({ count: sql3`count(*)` }).from(patients).where(and7(eq10(patients.psychologistId, psych.id), eq10(patients.status, "active")));
+        const activePatientsCount = await db2.select({ count: sql3`count(*)` }).from(patients).where(and9(eq10(patients.psychologistId, psych.id), eq10(patients.status, "active")));
         const sessionsCount = await db2.select({ count: sql3`count(*)` }).from(clinicalSessions).where(eq10(clinicalSessions.psychologistId, psych.id));
         const { password, ...safeUser } = user;
         return {
@@ -4499,17 +4563,16 @@ router6.get("/", async (req, res) => {
 router6.get("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [psych] = await db2.select().from(psychologists).where(eq10(psychologists.id, id));
+    const psych = await findPsych(req.companyId, id);
     if (!psych) return res.status(404).json({ error: "Psic\xF3loga n\xE3o encontrada." });
-    const [user] = await db2.select().from(users).where(eq10(users.id, psych.userId));
+    const user = await findUserInCompany(req.companyId, psych.userId);
     if (!user) return res.status(404).json({ error: "Usu\xE1rio n\xE3o encontrado." });
     const specs = await getSpecializationsForPsych(psych.id);
-    const activePatientsCount = await db2.select({ count: sql3`count(*)` }).from(patients).where(and7(eq10(patients.psychologistId, psych.id), eq10(patients.status, "active")));
+    const activePatientsCount = await db2.select({ count: sql3`count(*)` }).from(patients).where(and9(eq10(patients.psychologistId, psych.id), eq10(patients.status, "active")));
     const sessionsCount = await db2.select({ count: sql3`count(*)` }).from(clinicalSessions).where(eq10(clinicalSessions.psychologistId, psych.id));
-    const { password, ...safeUser } = user;
     return res.json({
       ...psych,
-      user: safeUser,
+      user,
       age: calcAge2(user.birthDate),
       specializations: specs,
       activePatientsCount: Number(activePatientsCount[0]?.count ?? 0),
@@ -4524,16 +4587,24 @@ router6.get("/:id", async (req, res) => {
 router6.patch("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [psych] = await db2.select().from(psychologists).where(eq10(psychologists.id, id));
+    const companyId = req.companyId;
+    const psych = await findPsych(companyId, id);
     if (!psych) return res.status(404).json({ error: "Psic\xF3loga n\xE3o encontrada." });
     const { fullName, email, birthDate, status, phone, crpNumber, bio, startedAtClinic } = req.body;
     const userUpdate = {};
     if (fullName !== void 0) userUpdate.fullName = fullName;
     if (email !== void 0) userUpdate.email = email;
     if (birthDate !== void 0) userUpdate.birthDate = birthDate || null;
-    if (status !== void 0) userUpdate.status = status;
     if (Object.keys(userUpdate).length > 0) {
+      if (await isInOtherCompany(companyId, psych.userId)) {
+        return res.status(409).json({
+          error: "Esta psic\xF3loga tamb\xE9m atende em outra cl\xEDnica: nome, e-mail e nascimento s\xF3 podem ser alterados por ela, em Meu Perfil."
+        });
+      }
       await db2.update(users).set(userUpdate).where(eq10(users.id, psych.userId));
+    }
+    if (status !== void 0) {
+      await setStatusInCompany(companyId, psych.userId, status === "active" ? "active" : "inactive");
     }
     const psychUpdate = {};
     if (phone !== void 0) psychUpdate.phone = phone || null;
@@ -4543,13 +4614,12 @@ router6.patch("/:id", async (req, res) => {
     if (Object.keys(psychUpdate).length > 0) {
       await db2.update(psychologists).set(psychUpdate).where(eq10(psychologists.id, id));
     }
-    const [updatedUser] = await db2.select().from(users).where(eq10(users.id, psych.userId));
-    const [updatedPsych] = await db2.select().from(psychologists).where(eq10(psychologists.id, id));
+    const updatedUser = await findUserInCompany(companyId, psych.userId);
+    const updatedPsych = await findPsych(companyId, id);
     const specs = await getSpecializationsForPsych(id);
-    const { password, ...safeUser } = updatedUser;
     return res.json({
       ...updatedPsych,
-      user: safeUser,
+      user: updatedUser,
       age: calcAge2(updatedUser.birthDate),
       specializations: specs
     });
@@ -4565,7 +4635,7 @@ router6.put("/:id/specializations", async (req, res) => {
     if (!Array.isArray(specializationIds)) {
       return res.status(400).json({ error: "specializationIds deve ser um array." });
     }
-    const [psych] = await db2.select().from(psychologists).where(eq10(psychologists.id, id));
+    const psych = await findPsych(req.companyId, id);
     if (!psych) return res.status(404).json({ error: "Psic\xF3loga n\xE3o encontrada." });
     await db2.delete(psychologistSpecializations).where(eq10(psychologistSpecializations.psychologistId, id));
     if (specializationIds.length > 0) {
@@ -4583,12 +4653,12 @@ router6.put("/:id/specializations", async (req, res) => {
 router6.post("/:id/toggle-active", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [psych] = await db2.select().from(psychologists).where(eq10(psychologists.id, id));
+    const psych = await findPsych(req.companyId, id);
     if (!psych) return res.status(404).json({ error: "Psic\xF3loga n\xE3o encontrada." });
-    const [user] = await db2.select().from(users).where(eq10(users.id, psych.userId));
+    const user = await findUserInCompany(req.companyId, psych.userId);
     if (!user) return res.status(404).json({ error: "Usu\xE1rio n\xE3o encontrado." });
     const newStatus = user.status === "active" ? "inactive" : "active";
-    await db2.update(users).set({ status: newStatus }).where(eq10(users.id, psych.userId));
+    await setStatusInCompany(req.companyId, psych.userId, newStatus);
     return res.json({ status: newStatus, isActive: newStatus === "active" });
   } catch (e) {
     console.error("POST /api/admin/psychologists/:id/toggle-active error:", e);
@@ -4600,7 +4670,7 @@ var admin_psychologists_default = router6;
 // server/routes/admin-access.ts
 import { Router as Router7 } from "express";
 import { z as z4 } from "zod";
-import { and as and8, desc as desc3, eq as eq11, isNull as isNull2, ne, sql as sql4 } from "drizzle-orm";
+import { and as and10, desc as desc3, eq as eq11, isNull as isNull2, ne as ne2, sql as sql4 } from "drizzle-orm";
 var router7 = Router7();
 var adminColumns = {
   id: users.id,
@@ -4611,12 +4681,12 @@ var adminColumns = {
   avatarUrl: users.avatarUrl
 };
 var emailSchema = z4.object({ email: z4.string().trim().email("Informe um e-mail v\xE1lido.") });
-var isCompanyAdmin = (companyId) => and8(eq11(companyMemberships.companyId, companyId), eq11(companyMemberships.role, "admin"), eq11(companyMemberships.status, "active"));
+var isCompanyAdmin = (companyId) => and10(eq11(companyMemberships.companyId, companyId), eq11(companyMemberships.role, "admin"), eq11(companyMemberships.status, "active"));
 router7.get("/admins", requireCompany, requireAdmin, async (req, res) => {
   const companyId = req.companyId;
   try {
     const admins = await db2.select(adminColumns).from(companyMemberships).innerJoin(users, eq11(companyMemberships.userId, users.id)).where(isCompanyAdmin(companyId)).orderBy(users.fullName);
-    const invites = await db2.select({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt }).from(accessInvites).where(and8(isNull2(accessInvites.acceptedAt), eq11(accessInvites.role, "admin"), eq11(accessInvites.companyId, companyId))).orderBy(desc3(accessInvites.createdAt));
+    const invites = await db2.select({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt }).from(accessInvites).where(and10(isNull2(accessInvites.acceptedAt), eq11(accessInvites.role, "admin"), eq11(accessInvites.companyId, companyId))).orderBy(desc3(accessInvites.createdAt));
     res.json({ admins, invites });
   } catch (error) {
     console.error("GET /api/admin/admins:", error);
@@ -4631,14 +4701,14 @@ router7.post("/admins", requireCompany, requireAdmin, async (req, res) => {
   try {
     const [existing] = await db2.select(adminColumns).from(users).where(sql4`lower(${users.email}) = ${email}`).limit(1);
     if (existing) {
-      const [current] = await db2.select({ id: companyMemberships.id }).from(companyMemberships).where(and8(isCompanyAdmin(companyId), eq11(companyMemberships.userId, existing.id)));
+      const [current] = await db2.select({ id: companyMemberships.id }).from(companyMemberships).where(and10(isCompanyAdmin(companyId), eq11(companyMemberships.userId, existing.id)));
       if (current) return res.status(409).json({ message: "Este e-mail j\xE1 \xE9 administrador." });
       await upsertMembership(existing.id, companyId, "admin");
       await db2.update(users).set({ status: "active" }).where(eq11(users.id, existing.id));
       return res.status(200).json({ type: "promoted", admin: { ...existing, status: "active" } });
     }
-    const sameInvite = and8(sql4`lower(${accessInvites.email}) = ${email}`, eq11(accessInvites.companyId, companyId));
-    const [pending] = await db2.select({ id: accessInvites.id }).from(accessInvites).where(and8(sameInvite, isNull2(accessInvites.acceptedAt))).limit(1);
+    const sameInvite = and10(sql4`lower(${accessInvites.email}) = ${email}`, eq11(accessInvites.companyId, companyId));
+    const [pending] = await db2.select({ id: accessInvites.id }).from(accessInvites).where(and10(sameInvite, isNull2(accessInvites.acceptedAt))).limit(1);
     if (pending) return res.status(409).json({ message: "Este e-mail j\xE1 est\xE1 pr\xE9-autorizado." });
     await db2.delete(accessInvites).where(sameInvite);
     const [invite] = await db2.insert(accessInvites).values({ email, role: "admin", companyId, invitedByUserId: req.user.id }).returning({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt });
@@ -4654,9 +4724,9 @@ router7.delete("/admins/:userId", requireCompany, requireAdmin, async (req, res)
   if (!Number.isInteger(userId)) return res.status(400).json({ message: "Usu\xE1rio inv\xE1lido." });
   if (userId === req.user.id) return res.status(400).json({ message: "Voc\xEA n\xE3o pode remover o seu pr\xF3prio acesso de administrador." });
   try {
-    const [target] = await db2.select({ id: companyMemberships.id }).from(companyMemberships).where(and8(isCompanyAdmin(companyId), eq11(companyMemberships.userId, userId)));
+    const [target] = await db2.select({ id: companyMemberships.id }).from(companyMemberships).where(and10(isCompanyAdmin(companyId), eq11(companyMemberships.userId, userId)));
     if (!target) return res.status(404).json({ message: "Administrador n\xE3o encontrado." });
-    const [{ count: count3 }] = await db2.select({ count: sql4`count(*)::int` }).from(companyMemberships).innerJoin(users, eq11(companyMemberships.userId, users.id)).where(and8(isCompanyAdmin(companyId), eq11(users.status, "active"), ne(users.id, userId)));
+    const [{ count: count3 }] = await db2.select({ count: sql4`count(*)::int` }).from(companyMemberships).innerJoin(users, eq11(companyMemberships.userId, users.id)).where(and10(isCompanyAdmin(companyId), eq11(users.status, "active"), ne2(users.id, userId)));
     if (count3 === 0) return res.status(400).json({ message: "A empresa precisa de pelo menos um administrador." });
     await db2.update(companyMemberships).set({ role: "psychologist" }).where(eq11(companyMemberships.id, target.id));
     res.status(204).end();
@@ -4669,7 +4739,7 @@ router7.delete("/invites/:id", requireCompany, requireAdmin, async (req, res) =>
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ message: "Convite inv\xE1lido." });
   try {
-    const deleted = await db2.delete(accessInvites).where(and8(eq11(accessInvites.id, id), eq11(accessInvites.companyId, req.companyId), isNull2(accessInvites.acceptedAt))).returning({ id: accessInvites.id });
+    const deleted = await db2.delete(accessInvites).where(and10(eq11(accessInvites.id, id), eq11(accessInvites.companyId, req.companyId), isNull2(accessInvites.acceptedAt))).returning({ id: accessInvites.id });
     if (deleted.length === 0) return res.status(404).json({ message: "Convite n\xE3o encontrado." });
     res.status(204).end();
   } catch (error) {
@@ -4717,7 +4787,7 @@ var companies_default = router8;
 
 // server/routes/care-templates.ts
 import { Router as Router9 } from "express";
-import { eq as eq12, or as or2, isNull as isNull3, and as and9, count } from "drizzle-orm";
+import { eq as eq12, or as or2, isNull as isNull3, and as and11, count } from "drizzle-orm";
 import { z as z6 } from "zod";
 var router9 = Router9();
 var checkAuth2 = (req, res, next) => {
@@ -4725,10 +4795,10 @@ var checkAuth2 = (req, res, next) => {
   next();
 };
 router9.use(checkAuth2);
+var ownTemplate = (req) => and11(eq12(careTemplates.psychologistId, req.user.id), eq12(careTemplates.companyId, req.companyId));
 router9.get("/", async (req, res) => {
   try {
-    const userId = req.user.id;
-    const templates = await db2.select().from(careTemplates).where(or2(eq12(careTemplates.psychologistId, userId), isNull3(careTemplates.psychologistId)));
+    const templates = await db2.select().from(careTemplates).where(or2(ownTemplate(req), isNull3(careTemplates.psychologistId)));
     const result = await Promise.all(
       templates.map(async (t) => {
         const questions = await db2.select().from(careTemplateQuestions).where(eq12(careTemplateQuestions.templateId, t.id)).orderBy(careTemplateQuestions.orderIndex);
@@ -4750,7 +4820,7 @@ router9.post("/", async (req, res) => {
       psychologistId: userId,
       isDefault: false
     });
-    const [template] = await db2.insert(careTemplates).values(templateData).returning();
+    const [template] = await db2.insert(careTemplates).values({ ...templateData, companyId: req.companyId }).returning();
     if (Array.isArray(questions) && questions.length > 0) {
       const qs = questions.map(
         (q, i) => insertCareTemplateQuestionSchema.parse({ ...q, templateId: template.id, orderIndex: q.orderIndex ?? i })
@@ -4767,12 +4837,11 @@ router9.post("/", async (req, res) => {
 });
 router9.get("/:id", async (req, res) => {
   try {
-    const userId = req.user.id;
     const id = parseInt(req.params.id);
     const [template] = await db2.select().from(careTemplates).where(
-      and9(
+      and11(
         eq12(careTemplates.id, id),
-        or2(eq12(careTemplates.psychologistId, userId), isNull3(careTemplates.psychologistId))
+        or2(ownTemplate(req), isNull3(careTemplates.psychologistId))
       )
     );
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
@@ -4785,9 +4854,8 @@ router9.get("/:id", async (req, res) => {
 });
 router9.patch("/:id", async (req, res) => {
   try {
-    const userId = req.user.id;
     const id = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(and9(eq12(careTemplates.id, id), eq12(careTemplates.psychologistId, userId)));
+    const [template] = await db2.select().from(careTemplates).where(and11(eq12(careTemplates.id, id), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
     const editableSchema = z6.object({
       title: z6.string().min(1).max(100).optional(),
@@ -4804,9 +4872,8 @@ router9.patch("/:id", async (req, res) => {
 });
 router9.delete("/:id", async (req, res) => {
   try {
-    const userId = req.user.id;
     const id = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(and9(eq12(careTemplates.id, id), eq12(careTemplates.psychologistId, userId)));
+    const [template] = await db2.select().from(careTemplates).where(and11(eq12(careTemplates.id, id), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
     const [{ value: dispatchCount }] = await db2.select({ value: count() }).from(careDispatches).where(eq12(careDispatches.templateId, id));
     if (Number(dispatchCount) > 0) {
@@ -4823,9 +4890,8 @@ router9.delete("/:id", async (req, res) => {
 });
 router9.put("/:id/questions", async (req, res) => {
   try {
-    const userId = req.user.id;
     const templateId = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(and9(eq12(careTemplates.id, templateId), eq12(careTemplates.psychologistId, userId)));
+    const [template] = await db2.select().from(careTemplates).where(and11(eq12(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
     const questionsSchema = z6.array(
       insertCareTemplateQuestionSchema.omit({ templateId: true }).extend({ orderIndex: z6.number().int() })
@@ -4851,9 +4917,8 @@ router9.put("/:id/questions", async (req, res) => {
 });
 router9.post("/:id/questions", async (req, res) => {
   try {
-    const userId = req.user.id;
     const templateId = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(and9(eq12(careTemplates.id, templateId), eq12(careTemplates.psychologistId, userId)));
+    const [template] = await db2.select().from(careTemplates).where(and11(eq12(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
     const data = insertCareTemplateQuestionSchema.parse({ ...req.body, templateId });
     const [q] = await db2.insert(careTemplateQuestions).values(data).returning();
@@ -4866,14 +4931,13 @@ router9.post("/:id/questions", async (req, res) => {
 });
 router9.patch("/:id/questions/:qId", async (req, res) => {
   try {
-    const userId = req.user.id;
     const templateId = parseInt(req.params.id);
     const qId = parseInt(req.params.qId);
-    const [template] = await db2.select().from(careTemplates).where(and9(eq12(careTemplates.id, templateId), eq12(careTemplates.psychologistId, userId)));
+    const [template] = await db2.select().from(careTemplates).where(and11(eq12(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
     const editableQuestionSchema = insertCareTemplateQuestionSchema.omit({ templateId: true }).partial();
     const data = editableQuestionSchema.parse(req.body);
-    const [updated] = await db2.update(careTemplateQuestions).set(data).where(and9(eq12(careTemplateQuestions.id, qId), eq12(careTemplateQuestions.templateId, templateId))).returning();
+    const [updated] = await db2.update(careTemplateQuestions).set(data).where(and11(eq12(careTemplateQuestions.id, qId), eq12(careTemplateQuestions.templateId, templateId))).returning();
     if (!updated) return res.status(404).json({ message: "Pergunta n\xE3o encontrada" });
     res.json(updated);
   } catch (e) {
@@ -4884,12 +4948,11 @@ router9.patch("/:id/questions/:qId", async (req, res) => {
 });
 router9.delete("/:id/questions/:qId", async (req, res) => {
   try {
-    const userId = req.user.id;
     const templateId = parseInt(req.params.id);
     const qId = parseInt(req.params.qId);
-    const [template] = await db2.select().from(careTemplates).where(and9(eq12(careTemplates.id, templateId), eq12(careTemplates.psychologistId, userId)));
+    const [template] = await db2.select().from(careTemplates).where(and11(eq12(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    await db2.delete(careTemplateQuestions).where(and9(eq12(careTemplateQuestions.id, qId), eq12(careTemplateQuestions.templateId, templateId)));
+    await db2.delete(careTemplateQuestions).where(and11(eq12(careTemplateQuestions.id, qId), eq12(careTemplateQuestions.templateId, templateId)));
     res.sendStatus(204);
   } catch (e) {
     console.error(e);
@@ -4900,7 +4963,7 @@ var care_templates_default = router9;
 
 // server/routes/care-dispatch.ts
 import { Router as Router10 } from "express";
-import { eq as eq13, desc as desc4, count as count2, and as and10, or as or3, isNull as isNull4 } from "drizzle-orm";
+import { eq as eq13, desc as desc4, count as count2, and as and12, or as or3, isNull as isNull4 } from "drizzle-orm";
 
 // server/lib/validate-email.ts
 function isValidEmail(email) {
@@ -4923,7 +4986,7 @@ async function sendCareFormEmail(params) {
       console.warn("sendCareFormEmail: no Gmail client \u2014 user not connected to Google");
       return false;
     }
-    const clinicName = process.env.CLINIC_NAME || "ConsultaPsi";
+    const clinicName = params.clinicName;
     const firstName = params.patientName.split(" ")[0];
     const expiryStr = params.tokenExpiresAt.toLocaleDateString("pt-BR", {
       day: "2-digit",
@@ -5041,18 +5104,24 @@ function substituteVariables(text3, patientName, psychologistName) {
   const firstName = patientName.split(" ")[0];
   return text3.replace(/\{patient_name\}/g, firstName).replace(/\{patient_full_name\}/g, patientName).replace(/\{psychologist_name\}/g, psychologistName);
 }
-async function canAccessPatient(user, patientRow) {
+async function canAccessPatient(req, patientRow) {
+  const user = req.user;
   if (user.role === "admin") return true;
   if (user.role === "psychologist") {
-    const [psychRow] = await db2.select().from(psychologists).where(eq13(psychologists.userId, user.id));
+    const [psychRow] = await db2.select().from(psychologists).where(and12(eq13(psychologists.userId, user.id), eq13(psychologists.companyId, req.companyId)));
     const psychId = psychRow?.id ?? -1;
     return patientRow.psychologistId === psychId || patientRow.createdBy === user.id;
   }
   return false;
 }
-function canAccessDispatch(user, dispatch) {
-  if (user.role === "admin") return true;
-  return dispatch.psychologistId === user.id;
+async function findPatient(companyId, patientId) {
+  const [patient] = await db2.select().from(patients).where(and12(eq13(patients.id, patientId), eq13(patients.companyId, companyId)));
+  return patient;
+}
+function canAccessDispatch(req, dispatch) {
+  if (dispatch.companyId !== req.companyId) return false;
+  if (req.user.role === "admin") return true;
+  return dispatch.psychologistId === req.user.id;
 }
 router10.post("/patients/:patientId/dispatch", async (req, res) => {
   try {
@@ -5060,9 +5129,9 @@ router10.post("/patients/:patientId/dispatch", async (req, res) => {
     const patientId = parseInt(req.params.patientId);
     const { template_id, subject, custom_message, override_questions } = req.body;
     if (!template_id) return res.status(400).json({ message: "template_id \xE9 obrigat\xF3rio" });
-    const [patient] = await db2.select().from(patients).where(eq13(patients.id, patientId));
+    const patient = await findPatient(req.companyId, patientId);
     if (!patient) return res.status(404).json({ message: "Paciente n\xE3o encontrado" });
-    const authorized = await canAccessPatient(user, patient);
+    const authorized = await canAccessPatient(req, patient);
     if (!authorized) {
       return res.status(403).json({
         message: "Acesso negado. Voc\xEA n\xE3o possui permiss\xE3o para acessar este paciente.",
@@ -5078,9 +5147,12 @@ router10.post("/patients/:patientId/dispatch", async (req, res) => {
     const [psychUser] = await db2.select().from(users).where(eq13(users.id, user.id));
     if (!psychUser) return res.status(400).json({ message: "Usu\xE1rio n\xE3o encontrado" });
     const [template] = await db2.select().from(careTemplates).where(
-      and10(
+      and12(
         eq13(careTemplates.id, parseInt(template_id)),
-        or3(eq13(careTemplates.psychologistId, user.id), isNull4(careTemplates.psychologistId))
+        or3(
+          and12(eq13(careTemplates.psychologistId, user.id), eq13(careTemplates.companyId, req.companyId)),
+          isNull4(careTemplates.psychologistId)
+        )
       )
     );
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
@@ -5114,6 +5186,7 @@ router10.post("/patients/:patientId/dispatch", async (req, res) => {
     const firstName = patient.fullName.split(" ")[0];
     const finalSubject = subject?.trim() || `Check-in \u2014 ${firstName}`;
     const [dispatch] = await db2.insert(careDispatches).values({
+      companyId: req.companyId,
       psychologistId: user.id,
       patientId,
       templateId: template.id,
@@ -5144,6 +5217,7 @@ router10.post("/patients/:patientId/dispatch", async (req, res) => {
       patientEmail: patient.email,
       psychologistName: psychName,
       psychologistEmail: psychUser.email,
+      clinicName: await clinicDisplayName(req.companyId),
       subject: finalSubject,
       customMessage: custom_message ?? null,
       questions: renderedQuestions,
@@ -5169,18 +5243,17 @@ router10.post("/patients/:patientId/dispatch", async (req, res) => {
 });
 router10.get("/patients/:patientId/dispatches", async (req, res) => {
   try {
-    const user = req.user;
     const patientId = parseInt(req.params.patientId);
-    const [patient] = await db2.select().from(patients).where(eq13(patients.id, patientId));
+    const patient = await findPatient(req.companyId, patientId);
     if (!patient) return res.status(404).json({ message: "Paciente n\xE3o encontrado" });
-    const authorized = await canAccessPatient(user, patient);
+    const authorized = await canAccessPatient(req, patient);
     if (!authorized) {
       return res.status(403).json({
         message: "Acesso negado.",
         code: "FORBIDDEN"
       });
     }
-    const dispatches = await db2.select().from(careDispatches).where(eq13(careDispatches.patientId, patientId)).orderBy(desc4(careDispatches.sentAt));
+    const dispatches = await db2.select().from(careDispatches).where(and12(eq13(careDispatches.patientId, patientId), eq13(careDispatches.companyId, req.companyId))).orderBy(desc4(careDispatches.sentAt));
     const now = /* @__PURE__ */ new Date();
     const result = await Promise.all(
       dispatches.map(async (d) => {
@@ -5200,11 +5273,10 @@ router10.get("/patients/:patientId/dispatches", async (req, res) => {
 });
 router10.get("/dispatches/:dispatchId/responses", async (req, res) => {
   try {
-    const user = req.user;
     const dispatchId = parseInt(req.params.dispatchId);
     const [dispatch] = await db2.select().from(careDispatches).where(eq13(careDispatches.id, dispatchId));
     if (!dispatch) return res.status(404).json({ message: "Envio n\xE3o encontrado" });
-    if (!canAccessDispatch(user, dispatch)) {
+    if (!canAccessDispatch(req, dispatch)) {
       return res.status(403).json({
         message: "Acesso negado.",
         code: "FORBIDDEN"
@@ -5257,7 +5329,7 @@ router11.get("/respond/:token", async (req, res) => {
     const questions = await db2.select().from(careDispatchQuestions).where(eq14(careDispatchQuestions.dispatchId, dispatch.id)).orderBy(careDispatchQuestions.orderIndex);
     const [patient] = await db2.select({ firstName: patients.fullName }).from(patients).where(eq14(patients.id, dispatch.patientId));
     const [psychUser] = await db2.select({ fullName: users.fullName, username: users.username }).from(users).where(eq14(users.id, dispatch.psychologistId));
-    const clinicName = process.env.CLINIC_NAME || "ConsultaPsi";
+    const clinicName = await clinicDisplayName(dispatch.companyId);
     const patientFirstName = patient?.firstName?.split(" ")[0] ?? "Paciente";
     const psychologistName = psychUser?.fullName || psychUser?.username || "sua psic\xF3loga";
     return res.json({
@@ -5350,7 +5422,7 @@ var care_public_default = router11;
 
 // server/routes/commissions.ts
 import { Router as Router12 } from "express";
-import { eq as eq15, and as and11, gte as gte3, lte as lte3 } from "drizzle-orm";
+import { eq as eq15, and as and13, gte as gte3, lte as lte3 } from "drizzle-orm";
 import { z as z9 } from "zod";
 var router12 = Router12();
 function adminOnly(req, res, next) {
@@ -5365,7 +5437,7 @@ function hoursFromTime(start, end) {
   const [eh, em] = end.split(":").map(Number);
   return Math.max(0, (eh * 60 + em - (sh * 60 + sm)) / 60);
 }
-async function calcCommissionPreview(psychologistId, periodStart, periodEnd) {
+async function calcCommissionPreview(companyId, psychologistId, periodStart, periodEnd) {
   const bookings = await db2.select({
     id: roomBookings.id,
     date: roomBookings.date,
@@ -5375,13 +5447,14 @@ async function calcCommissionPreview(psychologistId, periodStart, periodEnd) {
     roomName: rooms.name,
     roomHourlyRate: rooms.hourlyRate
   }).from(roomBookings).leftJoin(rooms, eq15(roomBookings.roomId, rooms.id)).where(
-    and11(
+    and13(
+      eq15(roomBookings.companyId, companyId),
       eq15(roomBookings.psychologistId, psychologistId),
       gte3(roomBookings.date, periodStart),
       lte3(roomBookings.date, periodEnd)
     )
   );
-  const allConfigs = await storage.listCommissionPayoutConfigs(psychologistId);
+  const allConfigs = await storage.listCommissionPayoutConfigs(companyId, psychologistId);
   function configForDate(bookingDate) {
     return allConfigs.find((c) => {
       const after = c.validFrom <= bookingDate;
@@ -5416,7 +5489,7 @@ async function calcCommissionPreview(psychologistId, periodStart, periodEnd) {
 router12.get("/dashboard", async (req, res) => {
   try {
     const month = req.query.month || (/* @__PURE__ */ new Date()).toISOString().slice(0, 7);
-    const data = await storage.getCommissionDashboard(month);
+    const data = await storage.getCommissionDashboard(req.companyId, month);
     res.json(data);
   } catch (e) {
     res.status(500).json({ message: "Erro ao buscar dashboard" });
@@ -5425,7 +5498,7 @@ router12.get("/dashboard", async (req, res) => {
 router12.get("/", async (req, res) => {
   try {
     const { psychologistId, status, periodStart, periodEnd } = req.query;
-    const list = await storage.listCommissions({
+    const list = await storage.listCommissions(req.companyId, {
       psychologistId: psychologistId ? parseInt(psychologistId) : void 0,
       status,
       periodStart,
@@ -5433,7 +5506,7 @@ router12.get("/", async (req, res) => {
     });
     const enriched = await Promise.all(
       list.map(async (c) => {
-        const psych = await storage.getPsychologist(c.psychologistId);
+        const psych = await storage.getPsychologist(req.companyId, c.psychologistId);
         const user = psych ? await storage.getUser(psych.userId) : null;
         return { ...c, psychologistName: user?.fullName ?? null };
       })
@@ -5450,6 +5523,7 @@ router12.get("/preview", async (req, res) => {
       return res.status(400).json({ message: "Par\xE2metros obrigat\xF3rios: psychologistId, periodStart, periodEnd" });
     }
     const preview = await calcCommissionPreview(
+      req.companyId,
       parseInt(psychologistId),
       periodStart,
       periodEnd
@@ -5461,9 +5535,9 @@ router12.get("/preview", async (req, res) => {
 });
 router12.get("/:id", async (req, res) => {
   try {
-    const c = await storage.getCommission(parseInt(req.params.id));
+    const c = await storage.getCommission(req.companyId, parseInt(req.params.id));
     if (!c) return res.status(404).json({ message: "Comissionamento n\xE3o encontrado" });
-    const psych = await storage.getPsychologist(c.psychologistId);
+    const psych = await storage.getPsychologist(req.companyId, c.psychologistId);
     const user = psych ? await storage.getUser(psych.userId) : null;
     res.json({ ...c, psychologistName: user?.fullName ?? null });
   } catch (e) {
@@ -5472,7 +5546,9 @@ router12.get("/:id", async (req, res) => {
 });
 router12.get("/:id/items", async (req, res) => {
   try {
-    const items = await storage.listCommissionItems(parseInt(req.params.id));
+    const c = await storage.getCommission(req.companyId, parseInt(req.params.id));
+    if (!c) return res.status(404).json({ message: "Comissionamento n\xE3o encontrado" });
+    const items = await storage.listCommissionItems(c.id);
     res.json(items);
   } catch (e) {
     res.status(500).json({ message: "Erro ao buscar itens" });
@@ -5486,17 +5562,21 @@ router12.post("/generate", async (req, res) => {
       periodEnd: z9.string()
     });
     const { psychologistId, periodStart, periodEnd } = schema.parse(req.body);
-    const existing = await storage.listCommissions({ psychologistId, exactPeriod: { periodStart, periodEnd } });
+    if (!await storage.getPsychologist(req.companyId, psychologistId)) {
+      return res.status(400).json({ message: "Psic\xF3loga n\xE3o encontrada." });
+    }
+    const existing = await storage.listCommissions(req.companyId, { psychologistId, exactPeriod: { periodStart, periodEnd } });
     if (existing.length > 0) {
       return res.status(409).json({ message: "J\xE1 existe um comissionamento para este per\xEDodo e psic\xF3loga." });
     }
     const { items, totalRoomsValue, totalRepasse, totalBookings } = await calcCommissionPreview(
+      req.companyId,
       psychologistId,
       periodStart,
       periodEnd
     );
     const adminId = req.user.id;
-    const commission = await storage.createCommission({
+    const commission = await storage.createCommission(req.companyId, {
       psychologistId,
       periodStart,
       periodEnd,
@@ -5535,10 +5615,10 @@ router12.patch("/:id/pay", async (req, res) => {
       paymentNotes: z9.string().optional()
     });
     const data = schema.parse(req.body);
-    const c = await storage.getCommission(parseInt(req.params.id));
+    const c = await storage.getCommission(req.companyId, parseInt(req.params.id));
     if (!c) return res.status(404).json({ message: "Comissionamento n\xE3o encontrado" });
     if (c.status === "cancelled") return res.status(400).json({ message: "N\xE3o \xE9 poss\xEDvel pagar um comissionamento cancelado." });
-    const updated = await storage.updateCommission(c.id, { ...data, status: "paid" });
+    const updated = await storage.updateCommission(req.companyId, c.id, { ...data, status: "paid" });
     res.json(updated);
   } catch (e) {
     if (e instanceof z9.ZodError) return res.status(400).json({ message: e.errors[0].message });
@@ -5547,10 +5627,10 @@ router12.patch("/:id/pay", async (req, res) => {
 });
 router12.patch("/:id/cancel", async (req, res) => {
   try {
-    const c = await storage.getCommission(parseInt(req.params.id));
+    const c = await storage.getCommission(req.companyId, parseInt(req.params.id));
     if (!c) return res.status(404).json({ message: "Comissionamento n\xE3o encontrado" });
     if (c.status === "paid") return res.status(400).json({ message: "N\xE3o \xE9 poss\xEDvel cancelar um comissionamento j\xE1 pago." });
-    const updated = await storage.updateCommission(c.id, { status: "cancelled" });
+    const updated = await storage.updateCommission(req.companyId, c.id, { status: "cancelled" });
     res.json(updated);
   } catch (e) {
     res.status(500).json({ message: "Erro ao cancelar comissionamento" });
@@ -5563,11 +5643,12 @@ commissionConfigsRouter.get("/", async (req, res) => {
   try {
     const { psychologistId } = req.query;
     const configs = await storage.listCommissionPayoutConfigs(
+      req.companyId,
       psychologistId ? parseInt(psychologistId) : void 0
     );
     const enriched = await Promise.all(
       configs.map(async (c) => {
-        const psych = await storage.getPsychologist(c.psychologistId);
+        const psych = await storage.getPsychologist(req.companyId, c.psychologistId);
         const user = psych ? await storage.getUser(psych.userId) : null;
         return { ...c, psychologistName: user?.fullName ?? null };
       })
@@ -5587,7 +5668,10 @@ commissionConfigsRouter.post("/", async (req, res) => {
       validUntil: z9.string().nullable().optional()
     });
     const data = schema.parse(req.body);
-    const config = await storage.createCommissionPayoutConfig({
+    if (!await storage.getPsychologist(req.companyId, data.psychologistId)) {
+      return res.status(400).json({ message: "Psic\xF3loga n\xE3o encontrada." });
+    }
+    const config = await storage.createCommissionPayoutConfig(req.companyId, {
       ...data,
       validUntil: data.validUntil ?? null
     });
@@ -5612,7 +5696,7 @@ commissionConfigsRouter.put("/:id", async (req, res) => {
       ...parsed.validFrom !== void 0 && { validFrom: parsed.validFrom },
       ...parsed.validUntil !== void 0 && { validUntil: parsed.validUntil }
     };
-    const updated = await storage.updateCommissionPayoutConfig(parseInt(req.params.id), updateData);
+    const updated = await storage.updateCommissionPayoutConfig(req.companyId, parseInt(req.params.id), updateData);
     if (!updated) return res.status(404).json({ message: "Configura\xE7\xE3o n\xE3o encontrada" });
     res.json(updated);
   } catch (e) {
@@ -5642,6 +5726,22 @@ var upload2 = multer3({
 var requireStaff = requireRole("admin", "receptionist");
 async function registerRoutes(app) {
   setupAuth(app);
+  app.use(requireCompanyExcept([
+    { method: "GET", path: /^\/api\/psychologists\/\d+$/ },
+    // quick-booking page
+    { method: "POST", path: /^\/api\/appointments\/quick-book$/ },
+    { method: "GET", path: /^\/api\/users\/\d+\/photo$/ },
+    // <img> tags
+    { method: "POST", path: /^\/api\/recover-password$/ },
+    { method: "GET", path: /^\/api\/reset-password\/[^/]+$/ },
+    { method: "POST", path: /^\/api\/reset-password$/ },
+    { path: /^\/api\/companies\// },
+    // choosing the company itself
+    { path: /^\/api\/care\/respond\// },
+    // patient form link (scoped by its token)
+    { method: "GET", path: /^\/api\/google-calendar\/auth\/callback$/ }
+    // OAuth redirect
+  ]));
   const handleZodError = (error) => {
     if (error instanceof ZodError) {
       const validationError = fromZodError(error);
@@ -5649,12 +5749,22 @@ async function registerRoutes(app) {
     }
     return { message: "An unexpected error occurred" };
   };
+  async function foreignReference(companyId, refs) {
+    if (refs.roomId !== void 0 && !await storage.getRoom(companyId, Number(refs.roomId))) {
+      return "Sala n\xE3o encontrada.";
+    }
+    if (refs.psychologistId !== void 0 && !await storage.getPsychologist(companyId, Number(refs.psychologistId))) {
+      return "Psic\xF3loga n\xE3o encontrada.";
+    }
+    return null;
+  }
   app.get("/api/psychologists", requireAuth, async (req, res) => {
     try {
-      const psychologists2 = await storage.getAllPsychologists();
+      const psychologists2 = await storage.getAllPsychologists(req.companyId);
+      const members = new Map((await storage.getAllUsers(req.companyId)).map((u) => [u.id, u]));
       const result = await Promise.all(
         psychologists2.map(async (psych) => {
-          const user = await storage.getUser(psych.userId);
+          const user = members.get(psych.userId) ?? await storage.getUser(psych.userId);
           return {
             ...psych,
             user: user ? {
@@ -5676,7 +5786,8 @@ async function registerRoutes(app) {
   });
   app.get("/api/psychologists/:id", async (req, res) => {
     try {
-      const psychologist = await storage.getPsychologist(parseInt(req.params.id));
+      const id = parseInt(req.params.id);
+      const psychologist = req.companyId ? await storage.getPsychologist(req.companyId, id) : await storage.getPsychologistForPublicPage(id);
       if (!psychologist) {
         return res.status(404).json({ message: "Psychologist not found" });
       }
@@ -5700,7 +5811,7 @@ async function registerRoutes(app) {
   app.post("/api/psychologists", requireStaff, async (req, res) => {
     try {
       const data = insertPsychologistSchema.parse(req.body);
-      const psychologist = await storage.createPsychologist(data);
+      const psychologist = await storage.createPsychologist(req.companyId, data);
       res.status(201).json(psychologist);
     } catch (error) {
       if (error instanceof ZodError) {
@@ -5736,7 +5847,7 @@ async function registerRoutes(app) {
       if (isNaN(psychologistId)) {
         return res.status(400).json({ message: "ID da psic\xF3loga inv\xE1lido" });
       }
-      const psychologist = await storage.getPsychologist(psychologistId);
+      const psychologist = await storage.getPsychologist(req.companyId, psychologistId);
       if (!psychologist) {
         console.error("Psychologist not found:", psychologistId);
         return res.status(404).json({ message: "Psic\xF3loga n\xE3o encontrada" });
@@ -5787,8 +5898,8 @@ async function registerRoutes(app) {
   app.put("/api/psychologists/:id", requireStaff, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const { profileImage, ...psychologistData } = req.body;
-      const updatedPsychologist = await storage.updatePsychologist(id, psychologistData);
+      const { profileImage, userId: _userId, ...psychologistData } = req.body;
+      const updatedPsychologist = await storage.updatePsychologist(req.companyId, id, psychologistData);
       if (!updatedPsychologist) {
         return res.status(404).json({ message: "Psychologist not found" });
       }
@@ -5803,7 +5914,7 @@ async function registerRoutes(app) {
   app.delete("/api/psychologists/:id", requireStaff, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const result = await storage.deletePsychologist(id);
+      const result = await storage.deletePsychologist(req.companyId, id);
       if (!result) {
         return res.status(404).json({ message: "Psychologist not found" });
       }
@@ -5814,7 +5925,7 @@ async function registerRoutes(app) {
   });
   app.get("/api/rooms", requireAuth, async (req, res) => {
     try {
-      const rooms2 = await storage.getAllRooms();
+      const rooms2 = await storage.getAllRooms(req.companyId);
       res.json(rooms2);
     } catch (error) {
       res.status(500).json({ message: "Error fetching rooms" });
@@ -5822,7 +5933,7 @@ async function registerRoutes(app) {
   });
   app.get("/api/rooms/:id", requireAuth, async (req, res) => {
     try {
-      const room = await storage.getRoom(parseInt(req.params.id));
+      const room = await storage.getRoom(req.companyId, parseInt(req.params.id));
       if (!room) {
         return res.status(404).json({ message: "Room not found" });
       }
@@ -5834,7 +5945,7 @@ async function registerRoutes(app) {
   app.post("/api/rooms", requireAdmin, async (req, res) => {
     try {
       const data = insertRoomSchema.parse(req.body);
-      const room = await storage.createRoom(data);
+      const room = await storage.createRoom(req.companyId, data);
       res.status(201).json(room);
     } catch (error) {
       if (error instanceof ZodError) {
@@ -5846,7 +5957,7 @@ async function registerRoutes(app) {
   app.put("/api/rooms/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const updatedRoom = await storage.updateRoom(id, req.body);
+      const updatedRoom = await storage.updateRoom(req.companyId, id, req.body);
       if (!updatedRoom) {
         return res.status(404).json({ message: "Room not found" });
       }
@@ -5858,7 +5969,7 @@ async function registerRoutes(app) {
   app.delete("/api/rooms/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const result = await storage.deleteRoom(id);
+      const result = await storage.deleteRoom(req.companyId, id);
       if (!result) {
         return res.status(404).json({ message: "Room not found" });
       }
@@ -5873,7 +5984,7 @@ async function registerRoutes(app) {
       const date3 = new Date(req.query.date);
       const startTime = req.query.startTime;
       const endTime = req.query.endTime;
-      const isAvailable = await storage.checkRoomAvailability(roomId, date3, startTime, endTime);
+      const isAvailable = await storage.checkRoomAvailability(req.companyId, roomId, date3, startTime, endTime);
       res.json({ available: isAvailable });
     } catch (error) {
       res.status(500).json({ message: "Error checking room availability" });
@@ -5885,7 +5996,7 @@ async function registerRoutes(app) {
       const user = req.user;
       let psychologistFilter = null;
       if (user?.role === "psychologist") {
-        const psychProfile = await storage.getPsychologistByUserId(user.id);
+        const psychProfile = await storage.getPsychologistByUserId(req.companyId, user.id);
         if (!psychProfile) {
           return res.json([]);
         }
@@ -5895,28 +6006,32 @@ async function registerRoutes(app) {
       }
       if (psychologistFilter && req.query.startDate && req.query.endDate) {
         appointments3 = await storage.getAppointmentsByPsychologistIdAndDateRange(
+          req.companyId,
           psychologistFilter,
           new Date(req.query.startDate),
           new Date(req.query.endDate)
         );
       } else if (psychologistFilter && req.query.date) {
         const dateAppts = await storage.getAppointmentsByDate(
+          req.companyId,
           new Date(req.query.date)
         );
         appointments3 = dateAppts.filter((a) => a.psychologistId === psychologistFilter);
       } else if (psychologistFilter) {
-        appointments3 = await storage.getAppointmentsByPsychologistId(psychologistFilter);
+        appointments3 = await storage.getAppointmentsByPsychologistId(req.companyId, psychologistFilter);
       } else if (req.query.date) {
         appointments3 = await storage.getAppointmentsByDate(
+          req.companyId,
           new Date(req.query.date)
         );
       } else if (req.query.startDate && req.query.endDate) {
         appointments3 = await storage.getAppointmentsByDateRange(
+          req.companyId,
           new Date(req.query.startDate),
           new Date(req.query.endDate)
         );
       } else {
-        appointments3 = await storage.getAllAppointments();
+        appointments3 = await storage.getAllAppointments(req.companyId);
       }
       const now = /* @__PURE__ */ new Date();
       await Promise.all(
@@ -5926,16 +6041,16 @@ async function registerRoutes(app) {
           const [endHour, endMin] = a.endTime.split(":").map(Number);
           const endDatetime = new Date(year, month - 1, day, endHour, endMin, 0);
           if (endDatetime < now) {
-            await storage.updateAppointment(a.id, { status: "completed" });
+            await storage.updateAppointment(req.companyId, a.id, { status: "completed" });
             a.status = "completed";
           }
         })
       );
       const result = await Promise.all(
         appointments3.map(async (appointment) => {
-          const psychologist = await storage.getPsychologist(appointment.psychologistId);
+          const psychologist = await storage.getPsychologist(req.companyId, appointment.psychologistId);
           const psychologistUser = psychologist ? await storage.getUser(psychologist.userId) : null;
-          const room = await storage.getRoom(appointment.roomId);
+          const room = await storage.getRoom(req.companyId, appointment.roomId);
           return {
             ...appointment,
             psychologist: psychologist ? {
@@ -5957,13 +6072,13 @@ async function registerRoutes(app) {
   });
   app.get("/api/appointments/:id", requireAuth, async (req, res) => {
     try {
-      const appointment = await storage.getAppointment(parseInt(req.params.id));
+      const appointment = await storage.getAppointment(req.companyId, parseInt(req.params.id));
       if (!appointment) {
         return res.status(404).json({ message: "Appointment not found" });
       }
-      const psychologist = await storage.getPsychologist(appointment.psychologistId);
+      const psychologist = await storage.getPsychologist(req.companyId, appointment.psychologistId);
       const psychologistUser = psychologist ? await storage.getUser(psychologist.userId) : null;
-      const room = await storage.getRoom(appointment.roomId);
+      const room = await storage.getRoom(req.companyId, appointment.roomId);
       res.json({
         ...appointment,
         psychologist: psychologist ? {
@@ -5985,14 +6100,17 @@ async function registerRoutes(app) {
       const user = req.user;
       let body = { ...req.body };
       if (user?.role === "psychologist") {
-        const psychProfile = await storage.getPsychologistByUserId(user.id);
+        const psychProfile = await storage.getPsychologistByUserId(req.companyId, user.id);
         if (!psychProfile) {
           return res.status(400).json({ message: "Perfil de psic\xF3loga n\xE3o encontrado. Pe\xE7a ao administrador para criar seu perfil." });
         }
         body.psychologistId = psychProfile.id;
       }
       const data = insertAppointmentSchema.parse(body);
+      const foreign = await foreignReference(req.companyId, data);
+      if (foreign) return res.status(400).json({ message: foreign });
       const isRoomAvailable = await storage.checkRoomAvailability(
+        req.companyId,
         data.roomId,
         new Date(data.date),
         data.startTime,
@@ -6001,8 +6119,8 @@ async function registerRoutes(app) {
       if (!isRoomAvailable) {
         return res.status(409).json({ message: "Room is not available for the specified time" });
       }
-      const appointment = await storage.createAppointment(data);
-      await storage.createRoomBooking({
+      const appointment = await storage.createAppointment(req.companyId, data);
+      await storage.createRoomBooking(req.companyId, {
         roomId: data.roomId,
         psychologistId: data.psychologistId,
         date: data.date,
@@ -6028,13 +6146,18 @@ async function registerRoutes(app) {
       if (!date3 || !startTime || !endTime || !patientName || !psychologistId) {
         return res.status(400).json({ message: "Missing required fields" });
       }
-      const psychologist = await storage.getPsychologist(parseInt(psychologistId));
-      if (!psychologist) {
+      const psychologist = await storage.getPsychologistForPublicPage(parseInt(psychologistId));
+      if (!psychologist?.companyId) {
         return res.status(404).json({ message: "Psychologist not found" });
       }
+      const companyId = psychologist.companyId;
+      const room = roomId ? await storage.getRoom(companyId, parseInt(roomId)) : (await storage.getAllRooms(companyId)).sort((a, b) => a.id - b.id)[0];
+      if (!room) {
+        return res.status(404).json({ message: "Sala n\xE3o encontrada." });
+      }
       const isRoomAvailable = await storage.checkRoomAvailability(
-        roomId || 1,
-        // Default to room 1 if not specified
+        companyId,
+        room.id,
         new Date(date3),
         startTime,
         endTime
@@ -6044,7 +6167,7 @@ async function registerRoutes(app) {
           message: "A sala n\xE3o est\xE1 dispon\xEDvel neste hor\xE1rio. Por favor, escolha outro hor\xE1rio."
         });
       }
-      const existingAppointments = await storage.getAppointmentsByDate(date3);
+      const existingAppointments = await storage.getAppointmentsByDate(companyId, new Date(date3));
       const isTimeSlotTaken = existingAppointments.some((app2) => {
         if (app2.psychologistId !== parseInt(psychologistId)) return false;
         const appStart = timeToMinutes(app2.startTime);
@@ -6063,15 +6186,14 @@ async function registerRoutes(app) {
         startTime,
         endTime,
         patientName,
-        psychologistId: parseInt(psychologistId),
-        roomId: roomId || 1,
-        // Default to room 1 if not specified
+        psychologistId: psychologist.id,
+        roomId: room.id,
         status: "pending-confirmation",
         // Special status for quick bookings
         notes: notes || ""
       };
-      const appointment = await storage.createAppointment(appointmentData);
-      await storage.createRoomBooking({
+      const appointment = await storage.createAppointment(companyId, appointmentData);
+      await storage.createRoomBooking(companyId, {
         roomId: appointmentData.roomId,
         psychologistId: appointmentData.psychologistId,
         date: appointmentData.date,
@@ -6092,7 +6214,9 @@ async function registerRoutes(app) {
   app.put("/api/appointments/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const updatedAppointment = await storage.updateAppointment(id, req.body);
+      const foreign = await foreignReference(req.companyId, req.body);
+      if (foreign) return res.status(400).json({ message: foreign });
+      const updatedAppointment = await storage.updateAppointment(req.companyId, id, req.body);
       if (!updatedAppointment) {
         return res.status(404).json({ message: "Appointment not found" });
       }
@@ -6104,7 +6228,7 @@ async function registerRoutes(app) {
   app.delete("/api/appointments/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const result = await storage.deleteAppointment(id);
+      const result = await storage.deleteAppointment(req.companyId, id);
       if (!result) {
         return res.status(404).json({ message: "Appointment not found" });
       }
@@ -6121,14 +6245,15 @@ async function registerRoutes(app) {
       const user = req.user;
       let transactions2;
       if (req.query.type) {
-        transactions2 = await storage.getTransactionsByType(req.query.type);
+        transactions2 = await storage.getTransactionsByType(req.companyId, req.query.type);
       } else if (req.query.startDate && req.query.endDate) {
         transactions2 = await storage.getTransactionsByDateRange(
+          req.companyId,
           new Date(req.query.startDate),
           new Date(req.query.endDate)
         );
       } else {
-        transactions2 = await storage.getAllTransactions();
+        transactions2 = await storage.getAllTransactions(req.companyId);
       }
       if (user.role !== "admin") {
         transactions2 = transactions2.filter((transaction) => transaction.responsibleId === user.id);
@@ -6138,7 +6263,7 @@ async function registerRoutes(app) {
           const responsible = await storage.getUser(transaction.responsibleId);
           let relatedAppointment = null;
           if (transaction.relatedAppointmentId) {
-            relatedAppointment = await storage.getAppointment(transaction.relatedAppointmentId);
+            relatedAppointment = await storage.getAppointment(req.companyId, transaction.relatedAppointmentId);
           }
           return {
             ...transaction,
@@ -6163,7 +6288,7 @@ async function registerRoutes(app) {
         return res.status(401).json({ message: "Unauthorized" });
       }
       const user = req.user;
-      const transaction = await storage.getTransaction(parseInt(req.params.id));
+      const transaction = await storage.getTransaction(req.companyId, parseInt(req.params.id));
       if (!transaction) {
         return res.status(404).json({ message: "Transaction not found" });
       }
@@ -6173,7 +6298,7 @@ async function registerRoutes(app) {
       const responsible = await storage.getUser(transaction.responsibleId);
       let relatedAppointment = null;
       if (transaction.relatedAppointmentId) {
-        relatedAppointment = await storage.getAppointment(transaction.relatedAppointmentId);
+        relatedAppointment = await storage.getAppointment(req.companyId, transaction.relatedAppointmentId);
       }
       res.json({
         ...transaction,
@@ -6199,7 +6324,7 @@ async function registerRoutes(app) {
         ...req.body,
         responsibleId: user.id
       });
-      const transaction = await storage.createTransaction(data);
+      const transaction = await storage.createTransaction(req.companyId, data);
       res.status(201).json(transaction);
     } catch (error) {
       if (error instanceof ZodError) {
@@ -6214,14 +6339,14 @@ async function registerRoutes(app) {
         return res.status(401).json({ message: "Unauthorized" });
       }
       const id = parseInt(req.params.id);
-      const existingTransaction = await storage.getTransaction(id);
+      const existingTransaction = await storage.getTransaction(req.companyId, id);
       if (!existingTransaction) {
         return res.status(404).json({ message: "Transaction not found" });
       }
       if (existingTransaction.responsibleId !== req.user.id && req.user.role !== "admin") {
         return res.status(403).json({ message: "Forbidden: You can only update your own transactions" });
       }
-      const updatedTransaction = await storage.updateTransaction(id, req.body);
+      const updatedTransaction = await storage.updateTransaction(req.companyId, id, req.body);
       res.json(updatedTransaction);
     } catch (error) {
       res.status(500).json({ message: "Error updating transaction" });
@@ -6233,14 +6358,14 @@ async function registerRoutes(app) {
         return res.status(401).json({ message: "Unauthorized" });
       }
       const id = parseInt(req.params.id);
-      const existingTransaction = await storage.getTransaction(id);
+      const existingTransaction = await storage.getTransaction(req.companyId, id);
       if (!existingTransaction) {
         return res.status(404).json({ message: "Transaction not found" });
       }
       if (existingTransaction.responsibleId !== req.user.id && req.user.role !== "admin") {
         return res.status(403).json({ message: "Forbidden: You can only delete your own transactions" });
       }
-      const result = await storage.deleteTransaction(id);
+      const result = await storage.deleteTransaction(req.companyId, id);
       res.sendStatus(204);
     } catch (error) {
       res.status(500).json({ message: "Error deleting transaction" });
@@ -6255,7 +6380,7 @@ async function registerRoutes(app) {
       const today = /* @__PURE__ */ new Date();
       const lastMonth = new Date(today);
       lastMonth.setMonth(today.getMonth() - 1);
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId, {
         description: "Consulta - Pedro Santos",
         amount: 150,
         date: (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
@@ -6263,7 +6388,7 @@ async function registerRoutes(app) {
         category: "Consulta",
         responsibleId: user.id
       });
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId, {
         description: "Consulta - Maria Oliveira",
         amount: 150,
         date: (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
@@ -6271,7 +6396,7 @@ async function registerRoutes(app) {
         category: "Consulta",
         responsibleId: user.id
       });
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId, {
         description: "Avalia\xE7\xE3o - Jo\xE3o Pereira",
         amount: 200,
         date: new Date(today.getFullYear(), today.getMonth(), today.getDate() - 5).toISOString().split("T")[0],
@@ -6279,7 +6404,7 @@ async function registerRoutes(app) {
         category: "Avalia\xE7\xE3o",
         responsibleId: user.id
       });
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId, {
         description: "Workshop de Mindfulness",
         amount: 500,
         date: new Date(today.getFullYear(), today.getMonth(), today.getDate() - 10).toISOString().split("T")[0],
@@ -6287,7 +6412,7 @@ async function registerRoutes(app) {
         category: "Workshop",
         responsibleId: user.id
       });
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId, {
         description: "Aluguel do Consult\xF3rio",
         amount: 2500,
         date: new Date(today.getFullYear(), today.getMonth(), 5).toISOString().split("T")[0],
@@ -6295,7 +6420,7 @@ async function registerRoutes(app) {
         category: "Aluguel",
         responsibleId: user.id
       });
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId, {
         description: "Conta de Luz",
         amount: 320,
         date: new Date(today.getFullYear(), today.getMonth(), 7).toISOString().split("T")[0],
@@ -6303,7 +6428,7 @@ async function registerRoutes(app) {
         category: "Luz",
         responsibleId: user.id
       });
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId, {
         description: "Internet",
         amount: 150,
         date: new Date(today.getFullYear(), today.getMonth(), 8).toISOString().split("T")[0],
@@ -6311,7 +6436,7 @@ async function registerRoutes(app) {
         category: "Internet",
         responsibleId: user.id
       });
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId, {
         description: "Material de Escrit\xF3rio",
         amount: 230,
         date: new Date(today.getFullYear(), today.getMonth(), 12).toISOString().split("T")[0],
@@ -6319,7 +6444,7 @@ async function registerRoutes(app) {
         category: "Material de Escrit\xF3rio",
         responsibleId: user.id
       });
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId, {
         description: "Consulta - Carlos Silva",
         amount: 150,
         date: new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 15).toISOString().split("T")[0],
@@ -6327,7 +6452,7 @@ async function registerRoutes(app) {
         category: "Consulta",
         responsibleId: user.id
       });
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId, {
         description: "Consulta - Ana Rodrigues",
         amount: 150,
         date: new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 18).toISOString().split("T")[0],
@@ -6335,7 +6460,7 @@ async function registerRoutes(app) {
         category: "Consulta",
         responsibleId: user.id
       });
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId, {
         description: "Sess\xE3o em Grupo - Ansiedade",
         amount: 400,
         date: new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 22).toISOString().split("T")[0],
@@ -6343,7 +6468,7 @@ async function registerRoutes(app) {
         category: "Sess\xE3o em Grupo",
         responsibleId: user.id
       });
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId, {
         description: "Aluguel do Consult\xF3rio",
         amount: 2500,
         date: new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 5).toISOString().split("T")[0],
@@ -6351,7 +6476,7 @@ async function registerRoutes(app) {
         category: "Aluguel",
         responsibleId: user.id
       });
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId, {
         description: "Conta de Luz",
         amount: 290,
         date: new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 7).toISOString().split("T")[0],
@@ -6359,7 +6484,7 @@ async function registerRoutes(app) {
         category: "Luz",
         responsibleId: user.id
       });
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId, {
         description: "Internet",
         amount: 150,
         date: new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 9).toISOString().split("T")[0],
@@ -6376,21 +6501,22 @@ async function registerRoutes(app) {
     try {
       let bookings;
       if (req.query.roomId) {
-        bookings = await storage.getRoomBookingsByRoomId(parseInt(req.query.roomId));
+        bookings = await storage.getRoomBookingsByRoomId(req.companyId, parseInt(req.query.roomId));
       } else if (req.query.date) {
-        bookings = await storage.getRoomBookingsByDate(new Date(req.query.date));
+        bookings = await storage.getRoomBookingsByDate(req.companyId, new Date(req.query.date));
       } else if (req.query.startDate && req.query.endDate) {
         bookings = await storage.getRoomBookingsByDateRange(
+          req.companyId,
           new Date(req.query.startDate),
           new Date(req.query.endDate)
         );
       } else {
-        bookings = await storage.getAllRoomBookings();
+        bookings = await storage.getAllRoomBookings(req.companyId);
       }
       const result = await Promise.all(
         bookings.map(async (booking) => {
-          const room = await storage.getRoom(booking.roomId);
-          const psychologist = await storage.getPsychologist(booking.psychologistId);
+          const room = await storage.getRoom(req.companyId, booking.roomId);
+          const psychologist = await storage.getPsychologist(req.companyId, booking.psychologistId);
           const psychologistUser = psychologist ? await storage.getUser(psychologist.userId) : null;
           return {
             ...booking,
@@ -6413,12 +6539,12 @@ async function registerRoutes(app) {
   });
   app.get("/api/room-bookings/:id", requireAuth, async (req, res) => {
     try {
-      const booking = await storage.getRoomBooking(parseInt(req.params.id));
+      const booking = await storage.getRoomBooking(req.companyId, parseInt(req.params.id));
       if (!booking) {
         return res.status(404).json({ message: "Room booking not found" });
       }
-      const room = await storage.getRoom(booking.roomId);
-      const psychologist = await storage.getPsychologist(booking.psychologistId);
+      const room = await storage.getRoom(req.companyId, booking.roomId);
+      const psychologist = await storage.getPsychologist(req.companyId, booking.psychologistId);
       const psychologistUser = psychologist ? await storage.getUser(psychologist.userId) : null;
       res.json({
         ...booking,
@@ -6439,7 +6565,10 @@ async function registerRoutes(app) {
   app.post("/api/room-bookings", requireAuth, async (req, res) => {
     try {
       const data = insertRoomBookingSchema.parse(req.body);
+      const foreign = await foreignReference(req.companyId, data);
+      if (foreign) return res.status(400).json({ message: foreign });
       const isRoomAvailable = await storage.checkRoomAvailability(
+        req.companyId,
         data.roomId,
         new Date(data.date),
         data.startTime,
@@ -6448,7 +6577,7 @@ async function registerRoutes(app) {
       if (!isRoomAvailable) {
         return res.status(409).json({ message: "Room is not available for the specified time" });
       }
-      const booking = await storage.createRoomBooking(data);
+      const booking = await storage.createRoomBooking(req.companyId, data);
       res.status(201).json(booking);
     } catch (error) {
       if (error instanceof ZodError) {
@@ -6460,7 +6589,9 @@ async function registerRoutes(app) {
   app.put("/api/room-bookings/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const updatedBooking = await storage.updateRoomBooking(id, req.body);
+      const foreign = await foreignReference(req.companyId, req.body);
+      if (foreign) return res.status(400).json({ message: foreign });
+      const updatedBooking = await storage.updateRoomBooking(req.companyId, id, req.body);
       if (!updatedBooking) {
         return res.status(404).json({ message: "Room booking not found" });
       }
@@ -6472,7 +6603,7 @@ async function registerRoutes(app) {
   app.delete("/api/room-bookings/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const result = await storage.deleteRoomBooking(id);
+      const result = await storage.deleteRoomBooking(req.companyId, id);
       if (!result) {
         return res.status(404).json({ message: "Room booking not found" });
       }
@@ -6553,7 +6684,7 @@ async function registerRoutes(app) {
       if (!psychologistId || !startDate || !endDate) {
         return res.status(400).json({ message: "Missing required fields" });
       }
-      const psychologist = await storage.getPsychologist(parseInt(psychologistId));
+      const psychologist = await storage.getPsychologist(req.companyId, parseInt(psychologistId));
       if (!psychologist) {
         return res.status(404).json({ message: "Psychologist not found" });
       }
@@ -6562,6 +6693,7 @@ async function registerRoutes(app) {
         return res.status(404).json({ message: "Psychologist user not found" });
       }
       const appointments3 = await storage.getAppointmentsByDateRange(
+        req.companyId,
         new Date(startDate),
         new Date(endDate)
       );
@@ -6623,7 +6755,7 @@ async function registerRoutes(app) {
       if (req.body.psychologistId) {
         console.log("Updating psychologist photo, ID:", req.body.psychologistId);
         const psychologistId = parseInt(req.body.psychologistId);
-        const psychologist = await storage.getPsychologist(psychologistId);
+        const psychologist = await storage.getPsychologist(req.companyId, psychologistId);
         if (!psychologist) {
           console.error("Psychologist not found:", psychologistId);
           return res.status(404).json({ message: "Psic\xF3loga n\xE3o encontrada" });
@@ -6798,23 +6930,6 @@ async function registerRoutes(app) {
       res.status(500).json({ message: "Erro ao redefinir senha" });
     }
   });
-  app.post("/api/appointments/quick-book", async (req, res) => {
-    try {
-      const appointmentData = req.body;
-      if (!appointmentData.date || !appointmentData.startTime || !appointmentData.endTime || !appointmentData.patientName || !appointmentData.psychologistId) {
-        return res.status(400).json({ message: "Dados incompletos para agendamento" });
-      }
-      const newAppointment = await storage.createAppointment({
-        ...appointmentData,
-        status: "pending-confirmation"
-        // Status especial para agendamentos via WhatsApp
-      });
-      res.status(201).json(newAppointment);
-    } catch (error) {
-      console.error("Erro no agendamento r\xE1pido:", error);
-      res.status(500).json({ message: "Erro ao processar agendamento" });
-    }
-  });
   app.post("/api/whatsapp/share-availability", async (req, res) => {
     try {
       if (!req.isAuthenticated()) {
@@ -6830,7 +6945,7 @@ async function registerRoutes(app) {
       if (!phoneNumber || !psychologistId || !startDate || !endDate) {
         return res.status(400).json({ message: "Missing required fields" });
       }
-      const psychologist = await storage.getPsychologist(parseInt(psychologistId));
+      const psychologist = await storage.getPsychologist(req.companyId, parseInt(psychologistId));
       if (!psychologist) {
         return res.status(404).json({ message: "Psychologist not found" });
       }
@@ -6840,7 +6955,7 @@ async function registerRoutes(app) {
       }
       const start = new Date(startDate);
       const end = new Date(endDate);
-      const appointments3 = await storage.getAppointmentsByDateRange(start, end);
+      const appointments3 = await storage.getAppointmentsByDateRange(req.companyId, start, end);
       const psychologistAppointments = appointments3.filter((app2) => app2.psychologistId === parseInt(psychologistId));
       const availableTimes = calculateAvailableSlots(start, end, psychologistAppointments, psychologist);
       const message = await formatWhatsAppMessage(
@@ -6949,7 +7064,7 @@ async function registerRoutes(app) {
       }
       const valorLiquido = body.valor_liquido != null ? Number(body.valor_liquido) : null;
       const valorServicos = body.valor_servicos != null ? Number(body.valor_servicos) : null;
-      const invoice = await storage.createInvoice({
+      const invoice = await storage.createInvoice(req.companyId, {
         psychologistId,
         clinicId: body.clinic_id ?? null,
         chaveNfe: body.chave_nfe ?? null,
@@ -7022,7 +7137,7 @@ async function registerRoutes(app) {
       const dataEmissaoTo = req.query.data_emissao_to;
       const status = req.query.status;
       const search = req.query.search;
-      const result = await storage.getInvoicesByUserId(user.id, { limit, offset, dataEmissaoFrom, dataEmissaoTo, status, search });
+      const result = await storage.getInvoicesByUserId(req.companyId, user.id, { limit, offset, dataEmissaoFrom, dataEmissaoTo, status, search });
       res.set("Cache-Control", "private, no-store, no-cache, max-age=0, must-revalidate");
       res.json(result);
     } catch (error) {
@@ -7039,7 +7154,7 @@ async function registerRoutes(app) {
       const dataEmissaoFrom = req.query.data_emissao_from;
       const dataEmissaoTo = req.query.data_emissao_to;
       const status = req.query.status;
-      const summary = await storage.getInvoicesSummary(user.id, { dataEmissaoFrom, dataEmissaoTo, status });
+      const summary = await storage.getInvoicesSummary(req.companyId, user.id, { dataEmissaoFrom, dataEmissaoTo, status });
       res.json(summary);
     } catch (error) {
       console.error("Error fetching invoice summary:", error);
@@ -7054,7 +7169,7 @@ async function registerRoutes(app) {
       const user = req.user;
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) return res.status(400).json({ message: "ID inv\xE1lido" });
-      const invoice = await storage.getInvoice(id);
+      const invoice = await storage.getInvoice(req.companyId, id);
       if (!invoice) return res.status(404).json({ message: "Nota fiscal n\xE3o encontrada" });
       if (invoice.psychologistId !== user.id && user.role !== "admin") {
         return res.status(403).json({ message: "Acesso negado" });
@@ -7074,13 +7189,13 @@ async function registerRoutes(app) {
       const user = req.user;
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) return res.status(400).json({ message: "ID inv\xE1lido" });
-      const invoice = await storage.getInvoice(id);
+      const invoice = await storage.getInvoice(req.companyId, id);
       if (!invoice) return res.status(404).json({ message: "Nota fiscal n\xE3o encontrada" });
       if (invoice.psychologistId !== user.id) {
         return res.status(403).json({ message: "Apenas a psic\xF3loga que registrou pode editar." });
       }
       const body = req.body;
-      const updated = await storage.updateInvoice(id, {
+      const updated = await storage.updateInvoice(req.companyId, id, {
         numeroNota: body.numero_nota,
         serie: body.serie,
         dataEmissao: body.data_emissao,
@@ -7113,7 +7228,7 @@ async function registerRoutes(app) {
       const user = req.user;
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) return res.status(400).json({ message: "ID inv\xE1lido" });
-      const invoice = await storage.getInvoice(id);
+      const invoice = await storage.getInvoice(req.companyId, id);
       if (!invoice) return res.status(404).json({ message: "Nota fiscal n\xE3o encontrada" });
       if (invoice.psychologistId !== user.id && user.role !== "admin") {
         return res.status(403).json({ message: "Acesso negado" });
@@ -7122,7 +7237,7 @@ async function registerRoutes(app) {
       if (!status || !["ativa", "cancelada", "pendente"].includes(status)) {
         return res.status(400).json({ message: "Status inv\xE1lido. Use: ativa, cancelada ou pendente." });
       }
-      const updated = await storage.updateInvoice(id, { status });
+      const updated = await storage.updateInvoice(req.companyId, id, { status });
       const { imageData: _invoiceImageData, ...updatedResponse } = updated ?? {};
       res.json(updatedResponse);
     } catch (error) {
@@ -7146,7 +7261,7 @@ async function registerRoutes(app) {
       const dataEmissaoTo = req.query.data_emissao_to;
       const status = req.query.status;
       const search = req.query.search;
-      const result = await storage.getInvoicesAdmin({ limit, offset, psychologistId, dataEmissaoFrom, dataEmissaoTo, status, search });
+      const result = await storage.getInvoicesAdmin(req.companyId, { limit, offset, psychologistId, dataEmissaoFrom, dataEmissaoTo, status, search });
       res.json(result);
     } catch (error) {
       console.error("Error fetching admin invoices:", error);
@@ -7166,7 +7281,7 @@ async function registerRoutes(app) {
       const dataEmissaoFrom = req.query.data_emissao_from;
       const dataEmissaoTo = req.query.data_emissao_to;
       const status = req.query.status;
-      const summary = await storage.getInvoicesSummaryAdmin({ psychologistId, dataEmissaoFrom, dataEmissaoTo, status });
+      const summary = await storage.getInvoicesSummaryAdmin(req.companyId, { psychologistId, dataEmissaoFrom, dataEmissaoTo, status });
       res.json(summary);
     } catch (error) {
       console.error("Error fetching admin invoice summary:", error);
@@ -7186,7 +7301,7 @@ async function registerRoutes(app) {
       const dataEmissaoFrom = req.query.data_emissao_from;
       const dataEmissaoTo = req.query.data_emissao_to;
       const status = req.query.status;
-      const { invoices: invoices2 } = await storage.getInvoicesAdmin({ limit: 1e4, offset: 0, psychologistId, dataEmissaoFrom, dataEmissaoTo, status });
+      const { invoices: invoices2 } = await storage.getInvoicesAdmin(req.companyId, { limit: 1e4, offset: 0, psychologistId, dataEmissaoFrom, dataEmissaoTo, status });
       const headers = ["Chave NF-e", "N\xFAmero", "S\xE9rie", "Data Emiss\xE3o", "Psic\xF3loga", "Tomador", "Valor L\xEDquido", "Status", "Registrada em"];
       const rows = invoices2.map((inv) => [
         inv.chaveNfe ?? "",
@@ -7225,9 +7340,9 @@ async function registerRoutes(app) {
       const dataEmissaoFrom = `${year}-${String(month).padStart(2, "0")}-01`;
       const lastDay = new Date(year, month, 0).getDate();
       const dataEmissaoTo = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-      const { invoices: invoices2 } = await storage.getInvoicesAdmin({ limit: 1e4, offset: 0, dataEmissaoFrom, dataEmissaoTo });
+      const { invoices: invoices2 } = await storage.getInvoicesAdmin(req.companyId, { limit: 1e4, offset: 0, dataEmissaoFrom, dataEmissaoTo });
       const psychologistIdsWithInvoice = new Set(invoices2.map((inv) => inv.psychologistId));
-      const allUsers = await storage.getAllUsers();
+      const allUsers = await storage.getAllUsers(req.companyId);
       const nonAdminUsers = allUsers.filter((u) => u.role !== "admin");
       const sent = nonAdminUsers.filter((u) => psychologistIdsWithInvoice.has(u.id)).map((u) => ({ id: u.id, fullName: u.fullName, email: u.email, role: u.role }));
       const pending = nonAdminUsers.filter((u) => !psychologistIdsWithInvoice.has(u.id)).map((u) => ({ id: u.id, fullName: u.fullName, email: u.email, role: u.role }));
@@ -7245,7 +7360,7 @@ async function registerRoutes(app) {
       const user = req.user;
       const invoiceId = parseInt(req.params.id, 10);
       if (isNaN(invoiceId)) return res.status(400).json({ message: "ID inv\xE1lido" });
-      const invoice = await storage.getInvoice(invoiceId);
+      const invoice = await storage.getInvoice(req.companyId, invoiceId);
       if (!invoice) return res.status(404).json({ message: "Nota fiscal n\xE3o encontrada" });
       if (invoice.psychologistId !== user.id && user.role !== "admin") {
         return res.status(403).json({ message: "Acesso negado" });
@@ -7269,7 +7384,7 @@ async function registerRoutes(app) {
       const user = req.user;
       const invoiceId = parseInt(req.params.id, 10);
       if (isNaN(invoiceId)) return res.status(400).json({ message: "ID inv\xE1lido" });
-      const invoice = await storage.getInvoice(invoiceId);
+      const invoice = await storage.getInvoice(req.companyId, invoiceId);
       if (!invoice) return res.status(404).json({ message: "Nota fiscal n\xE3o encontrada" });
       if (invoice.psychologistId !== user.id && user.role !== "admin") {
         return res.status(403).json({ message: "Acesso negado" });
@@ -7296,12 +7411,12 @@ async function registerRoutes(app) {
       const user = req.user;
       const invoiceId = parseInt(req.params.id, 10);
       if (isNaN(invoiceId)) return res.status(400).json({ message: "ID inv\xE1lido" });
-      const invoice = await storage.getInvoice(invoiceId);
+      const invoice = await storage.getInvoice(req.companyId, invoiceId);
       if (!invoice) return res.status(404).json({ message: "Nota fiscal n\xE3o encontrada" });
       if (invoice.psychologistId !== user.id) {
         return res.status(403).json({ message: "Acesso negado. Voc\xEA s\xF3 pode excluir suas pr\xF3prias notas." });
       }
-      await storage.deleteInvoice(invoiceId);
+      await storage.deleteInvoice(req.companyId, invoiceId);
       res.json({ message: "Nota fiscal exclu\xEDda com sucesso" });
     } catch (error) {
       console.error("Error deleting invoice:", error);
@@ -7653,6 +7768,40 @@ async function migrateCompanies() {
       [DEFAULT_COMPANY_SLUG]
     );
   });
+  await runOnce("company_id_required", async (client) => {
+    const { rows } = await client.query(`SELECT id FROM companies WHERE slug = $1`, [DEFAULT_COMPANY_SLUG]);
+    const companyId = Number(rows[0].id);
+    if (tables.includes("care_templates")) {
+      await client.query(
+        `UPDATE care_templates SET company_id = $1 WHERE company_id IS NULL AND psychologist_id IS NOT NULL`,
+        [companyId]
+      );
+    }
+    for (const table of tables.filter((t) => t !== "care_templates")) {
+      await client.query(`UPDATE ${table} SET company_id = $1 WHERE company_id IS NULL`, [companyId]);
+      await client.query(`ALTER TABLE ${table} ALTER COLUMN company_id DROP DEFAULT`);
+      await client.query(`ALTER TABLE ${table} ALTER COLUMN company_id SET NOT NULL`);
+    }
+  });
+  if (tables.includes("patients")) {
+    await runOnce("patients_cpf_per_company", async (client) => {
+      const { rows } = await client.query(
+        `SELECT c.conname FROM pg_constraint c
+           JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+         WHERE c.conrelid = 'patients'::regclass AND c.contype = 'u'
+           AND array_length(c.conkey, 1) = 1 AND a.attname = 'cpf'`
+      );
+      for (const { conname } of rows) {
+        await client.query(`ALTER TABLE patients DROP CONSTRAINT "${conname}"`);
+      }
+      const { rows: existing } = await client.query(
+        `SELECT 1 FROM pg_constraint WHERE conrelid = 'patients'::regclass AND conname = 'patients_company_cpf'`
+      );
+      if (existing.length === 0) {
+        await client.query(`ALTER TABLE patients ADD CONSTRAINT patients_company_cpf UNIQUE (company_id, cpf)`);
+      }
+    });
+  }
 }
 async function runOnce(name, migrate) {
   const { rows: done } = await pool.query(`SELECT 1 FROM app_migrations WHERE name = $1`, [name]);

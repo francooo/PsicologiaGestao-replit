@@ -5,9 +5,10 @@ import {
   psychologists,
   specializationAreas,
   psychologistSpecializations,
+  companyMemberships,
 } from "@shared/schema";
 import { patients, clinicalSessions } from "@shared/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, ne, sql } from "drizzle-orm";
 
 const router = Router();
 
@@ -39,6 +40,53 @@ function monthsAgo(dateStr: string | null | undefined): number | null {
   return (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
 }
 
+// Psychologist profiles are per company; the user's status here is their membership's.
+async function findPsych(companyId: number, id: number) {
+  const [psych] = await db
+    .select()
+    .from(psychologists)
+    .where(and(eq(psychologists.id, id), eq(psychologists.companyId, companyId)));
+  return psych;
+}
+
+async function findUserInCompany(companyId: number, userId: number) {
+  const [row] = await db
+    .select({ user: users, membershipStatus: companyMemberships.status })
+    .from(users)
+    .leftJoin(
+      companyMemberships,
+      and(eq(companyMemberships.userId, users.id), eq(companyMemberships.companyId, companyId))
+    )
+    .where(eq(users.id, userId));
+  if (!row) return undefined;
+  const { password, ...safeUser } = row.user;
+  return { ...safeUser, status: row.membershipStatus ?? "inactive" };
+}
+
+/** Name/e-mail belong to the person's account: another clinic's admin must not change them. */
+async function isInOtherCompany(companyId: number, userId: number) {
+  const [other] = await db
+    .select({ id: companyMemberships.id })
+    .from(companyMemberships)
+    .where(and(eq(companyMemberships.userId, userId), ne(companyMemberships.companyId, companyId)))
+    .limit(1);
+  return !!other;
+}
+
+/**
+ * (De)activates the person in this company only. Activating also re-enables the account,
+ * which may have been deactivated before companies existed.
+ */
+async function setStatusInCompany(companyId: number, userId: number, status: "active" | "inactive") {
+  await db
+    .update(companyMemberships)
+    .set({ status })
+    .where(and(eq(companyMemberships.userId, userId), eq(companyMemberships.companyId, companyId)));
+  if (status === "active") {
+    await db.update(users).set({ status: "active" }).where(eq(users.id, userId));
+  }
+}
+
 async function getSpecializationsForPsych(psychId: number) {
   return db
     .select({ id: specializationAreas.id, name: specializationAreas.name, category: specializationAreas.category })
@@ -52,11 +100,17 @@ router.get("/", async (req, res) => {
   try {
     const { search, status, specializationId } = req.query as Record<string, string>;
 
-    let psychList = await db
-      .select({ psych: psychologists, user: users })
+    const rows = await db
+      .select({ psych: psychologists, user: users, membershipStatus: companyMemberships.status })
       .from(psychologists)
       .innerJoin(users, eq(psychologists.userId, users.id))
+      .leftJoin(
+        companyMemberships,
+        and(eq(companyMemberships.userId, users.id), eq(companyMemberships.companyId, req.companyId!))
+      )
+      .where(eq(psychologists.companyId, req.companyId!))
       .orderBy(users.fullName);
+    let psychList = rows.map((r) => ({ psych: r.psych, user: { ...r.user, status: r.membershipStatus ?? "inactive" } }));
 
     if (search) {
       const lower = search.toLowerCase();
@@ -115,10 +169,10 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [psych] = await db.select().from(psychologists).where(eq(psychologists.id, id));
+    const psych = await findPsych(req.companyId!, id);
     if (!psych) return res.status(404).json({ error: "Psicóloga não encontrada." });
 
-    const [user] = await db.select().from(users).where(eq(users.id, psych.userId));
+    const user = await findUserInCompany(req.companyId!, psych.userId);
     if (!user) return res.status(404).json({ error: "Usuário não encontrado." });
 
     const specs = await getSpecializationsForPsych(psych.id);
@@ -133,10 +187,9 @@ router.get("/:id", async (req, res) => {
       .from(clinicalSessions)
       .where(eq(clinicalSessions.psychologistId, psych.id));
 
-    const { password, ...safeUser } = user;
     return res.json({
       ...psych,
-      user: safeUser,
+      user,
       age: calcAge(user.birthDate),
       specializations: specs,
       activePatientsCount: Number(activePatientsCount[0]?.count ?? 0),
@@ -153,19 +206,27 @@ router.get("/:id", async (req, res) => {
 router.patch("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [psych] = await db.select().from(psychologists).where(eq(psychologists.id, id));
+    const companyId = req.companyId!;
+    const psych = await findPsych(companyId, id);
     if (!psych) return res.status(404).json({ error: "Psicóloga não encontrada." });
 
     const { fullName, email, birthDate, status, phone, crpNumber, bio, startedAtClinic } = req.body;
 
-    // Update users table
+    // Update users table (the account, shared by every clinic the person is in)
     const userUpdate: Record<string, any> = {};
     if (fullName !== undefined) userUpdate.fullName = fullName;
     if (email !== undefined) userUpdate.email = email;
     if (birthDate !== undefined) userUpdate.birthDate = birthDate || null;
-    if (status !== undefined) userUpdate.status = status;
     if (Object.keys(userUpdate).length > 0) {
+      if (await isInOtherCompany(companyId, psych.userId)) {
+        return res.status(409).json({
+          error: "Esta psicóloga também atende em outra clínica: nome, e-mail e nascimento só podem ser alterados por ela, em Meu Perfil.",
+        });
+      }
       await db.update(users).set(userUpdate).where(eq(users.id, psych.userId));
+    }
+    if (status !== undefined) {
+      await setStatusInCompany(companyId, psych.userId, status === "active" ? "active" : "inactive");
     }
 
     // Update psychologists table
@@ -178,14 +239,13 @@ router.patch("/:id", async (req, res) => {
       await db.update(psychologists).set(psychUpdate).where(eq(psychologists.id, id));
     }
 
-    const [updatedUser] = await db.select().from(users).where(eq(users.id, psych.userId));
-    const [updatedPsych] = await db.select().from(psychologists).where(eq(psychologists.id, id));
+    const updatedUser = (await findUserInCompany(companyId, psych.userId))!;
+    const updatedPsych = await findPsych(companyId, id);
     const specs = await getSpecializationsForPsych(id);
 
-    const { password, ...safeUser } = updatedUser;
     return res.json({
       ...updatedPsych,
-      user: safeUser,
+      user: updatedUser,
       age: calcAge(updatedUser.birthDate),
       specializations: specs,
     });
@@ -205,7 +265,7 @@ router.put("/:id/specializations", async (req, res) => {
       return res.status(400).json({ error: "specializationIds deve ser um array." });
     }
 
-    const [psych] = await db.select().from(psychologists).where(eq(psychologists.id, id));
+    const psych = await findPsych(req.companyId!, id);
     if (!psych) return res.status(404).json({ error: "Psicóloga não encontrada." });
 
     await db.delete(psychologistSpecializations).where(eq(psychologistSpecializations.psychologistId, id));
@@ -228,14 +288,14 @@ router.put("/:id/specializations", async (req, res) => {
 router.post("/:id/toggle-active", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [psych] = await db.select().from(psychologists).where(eq(psychologists.id, id));
+    const psych = await findPsych(req.companyId!, id);
     if (!psych) return res.status(404).json({ error: "Psicóloga não encontrada." });
 
-    const [user] = await db.select().from(users).where(eq(users.id, psych.userId));
+    const user = await findUserInCompany(req.companyId!, psych.userId);
     if (!user) return res.status(404).json({ error: "Usuário não encontrado." });
 
     const newStatus = user.status === "active" ? "inactive" : "active";
-    await db.update(users).set({ status: newStatus }).where(eq(users.id, psych.userId));
+    await setStatusInCompany(req.companyId!, psych.userId, newStatus);
 
     return res.json({ status: newStatus, isActive: newStatus === "active" });
   } catch (e) {

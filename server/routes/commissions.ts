@@ -22,7 +22,7 @@ function hoursFromTime(start: string, end: string): number {
     return Math.max(0, (eh * 60 + em - (sh * 60 + sm)) / 60);
 }
 
-async function calcCommissionPreview(psychologistId: number, periodStart: string, periodEnd: string) {
+async function calcCommissionPreview(companyId: number, psychologistId: number, periodStart: string, periodEnd: string) {
     const bookings = await db
         .select({
             id: roomBookings.id,
@@ -37,13 +37,14 @@ async function calcCommissionPreview(psychologistId: number, periodStart: string
         .leftJoin(rooms, eq(roomBookings.roomId, rooms.id))
         .where(
             and(
+                eq(roomBookings.companyId, companyId),
                 eq(roomBookings.psychologistId, psychologistId),
                 gte(roomBookings.date, periodStart),
                 lte(roomBookings.date, periodEnd)
             )
         );
 
-    const allConfigs = await storage.listCommissionPayoutConfigs(psychologistId);
+    const allConfigs = await storage.listCommissionPayoutConfigs(companyId, psychologistId);
 
     function configForDate(bookingDate: string) {
         return allConfigs.find((c) => {
@@ -86,7 +87,7 @@ async function calcCommissionPreview(psychologistId: number, periodStart: string
 router.get("/dashboard", async (req, res) => {
     try {
         const month = (req.query.month as string) || new Date().toISOString().slice(0, 7);
-        const data = await storage.getCommissionDashboard(month);
+        const data = await storage.getCommissionDashboard(req.companyId!, month);
         res.json(data);
     } catch (e) {
         res.status(500).json({ message: "Erro ao buscar dashboard" });
@@ -97,7 +98,7 @@ router.get("/dashboard", async (req, res) => {
 router.get("/", async (req, res) => {
     try {
         const { psychologistId, status, periodStart, periodEnd } = req.query;
-        const list = await storage.listCommissions({
+        const list = await storage.listCommissions(req.companyId!, {
             psychologistId: psychologistId ? parseInt(psychologistId as string) : undefined,
             status: status as string | undefined,
             periodStart: periodStart as string | undefined,
@@ -106,7 +107,7 @@ router.get("/", async (req, res) => {
 
         const enriched = await Promise.all(
             list.map(async (c) => {
-                const psych = await storage.getPsychologist(c.psychologistId);
+                const psych = await storage.getPsychologist(req.companyId!, c.psychologistId);
                 const user = psych ? await storage.getUser(psych.userId) : null;
                 return { ...c, psychologistName: user?.fullName ?? null };
             })
@@ -125,6 +126,7 @@ router.get("/preview", async (req, res) => {
             return res.status(400).json({ message: "Parâmetros obrigatórios: psychologistId, periodStart, periodEnd" });
         }
         const preview = await calcCommissionPreview(
+            req.companyId!,
             parseInt(psychologistId as string),
             periodStart as string,
             periodEnd as string
@@ -138,9 +140,9 @@ router.get("/preview", async (req, res) => {
 // GET /api/admin/commissions/:id
 router.get("/:id", async (req, res) => {
     try {
-        const c = await storage.getCommission(parseInt(req.params.id));
+        const c = await storage.getCommission(req.companyId!, parseInt(req.params.id));
         if (!c) return res.status(404).json({ message: "Comissionamento não encontrado" });
-        const psych = await storage.getPsychologist(c.psychologistId);
+        const psych = await storage.getPsychologist(req.companyId!, c.psychologistId);
         const user = psych ? await storage.getUser(psych.userId) : null;
         res.json({ ...c, psychologistName: user?.fullName ?? null });
     } catch (e) {
@@ -151,7 +153,9 @@ router.get("/:id", async (req, res) => {
 // GET /api/admin/commissions/:id/items
 router.get("/:id/items", async (req, res) => {
     try {
-        const items = await storage.listCommissionItems(parseInt(req.params.id));
+        const c = await storage.getCommission(req.companyId!, parseInt(req.params.id));
+        if (!c) return res.status(404).json({ message: "Comissionamento não encontrado" });
+        const items = await storage.listCommissionItems(c.id);
         res.json(items);
     } catch (e) {
         res.status(500).json({ message: "Erro ao buscar itens" });
@@ -167,18 +171,21 @@ router.post("/generate", async (req, res) => {
             periodEnd: z.string(),
         });
         const { psychologistId, periodStart, periodEnd } = schema.parse(req.body);
+        if (!(await storage.getPsychologist(req.companyId!, psychologistId))) {
+            return res.status(400).json({ message: "Psicóloga não encontrada." });
+        }
 
-        const existing = await storage.listCommissions({ psychologistId, exactPeriod: { periodStart, periodEnd } });
+        const existing = await storage.listCommissions(req.companyId!, { psychologistId, exactPeriod: { periodStart, periodEnd } });
         if (existing.length > 0) {
             return res.status(409).json({ message: "Já existe um comissionamento para este período e psicóloga." });
         }
 
         const { items, totalRoomsValue, totalRepasse, totalBookings } = await calcCommissionPreview(
-            psychologistId, periodStart, periodEnd
+            req.companyId!, psychologistId, periodStart, periodEnd
         );
 
         const adminId = (req.user as any).id;
-        const commission = await storage.createCommission({
+        const commission = await storage.createCommission(req.companyId!, {
             psychologistId,
             periodStart,
             periodEnd,
@@ -221,10 +228,10 @@ router.patch("/:id/pay", async (req, res) => {
             paymentNotes: z.string().optional(),
         });
         const data = schema.parse(req.body);
-        const c = await storage.getCommission(parseInt(req.params.id));
+        const c = await storage.getCommission(req.companyId!, parseInt(req.params.id));
         if (!c) return res.status(404).json({ message: "Comissionamento não encontrado" });
         if (c.status === "cancelled") return res.status(400).json({ message: "Não é possível pagar um comissionamento cancelado." });
-        const updated = await storage.updateCommission(c.id, { ...data, status: "paid" });
+        const updated = await storage.updateCommission(req.companyId!, c.id, { ...data, status: "paid" });
         res.json(updated);
     } catch (e: any) {
         if (e instanceof z.ZodError) return res.status(400).json({ message: e.errors[0].message });
@@ -235,10 +242,10 @@ router.patch("/:id/pay", async (req, res) => {
 // PATCH /api/admin/commissions/:id/cancel
 router.patch("/:id/cancel", async (req, res) => {
     try {
-        const c = await storage.getCommission(parseInt(req.params.id));
+        const c = await storage.getCommission(req.companyId!, parseInt(req.params.id));
         if (!c) return res.status(404).json({ message: "Comissionamento não encontrado" });
         if (c.status === "paid") return res.status(400).json({ message: "Não é possível cancelar um comissionamento já pago." });
-        const updated = await storage.updateCommission(c.id, { status: "cancelled" });
+        const updated = await storage.updateCommission(req.companyId!, c.id, { status: "cancelled" });
         res.json(updated);
     } catch (e) {
         res.status(500).json({ message: "Erro ao cancelar comissionamento" });
@@ -257,12 +264,13 @@ commissionConfigsRouter.get("/", async (req, res) => {
     try {
         const { psychologistId } = req.query;
         const configs = await storage.listCommissionPayoutConfigs(
+            req.companyId!,
             psychologistId ? parseInt(psychologistId as string) : undefined
         );
 
         const enriched = await Promise.all(
             configs.map(async (c) => {
-                const psych = await storage.getPsychologist(c.psychologistId);
+                const psych = await storage.getPsychologist(req.companyId!, c.psychologistId);
                 const user = psych ? await storage.getUser(psych.userId) : null;
                 return { ...c, psychologistName: user?.fullName ?? null };
             })
@@ -284,7 +292,10 @@ commissionConfigsRouter.post("/", async (req, res) => {
             validUntil: z.string().nullable().optional(),
         });
         const data = schema.parse(req.body);
-        const config = await storage.createCommissionPayoutConfig({
+        if (!(await storage.getPsychologist(req.companyId!, data.psychologistId))) {
+            return res.status(400).json({ message: "Psicóloga não encontrada." });
+        }
+        const config = await storage.createCommissionPayoutConfig(req.companyId!, {
             ...data,
             validUntil: data.validUntil ?? null,
         });
@@ -305,13 +316,13 @@ commissionConfigsRouter.put("/:id", async (req, res) => {
             validUntil: z.string().nullable().optional(),
         });
         const parsed = schema.parse(req.body);
-        const updateData: Parameters<typeof storage.updateCommissionPayoutConfig>[1] = {
+        const updateData: Parameters<typeof storage.updateCommissionPayoutConfig>[2] = {
             ...(parsed.payoutType !== undefined && { payoutType: parsed.payoutType }),
             ...(parsed.payoutValue !== undefined && { payoutValue: parsed.payoutValue }),
             ...(parsed.validFrom !== undefined && { validFrom: parsed.validFrom }),
             ...(parsed.validUntil !== undefined && { validUntil: parsed.validUntil }),
         };
-        const updated = await storage.updateCommissionPayoutConfig(parseInt(req.params.id), updateData);
+        const updated = await storage.updateCommissionPayoutConfig(req.companyId!, parseInt(req.params.id), updateData);
         if (!updated) return res.status(404).json({ message: "Configuração não encontrada" });
         res.json(updated);
     } catch (e: any) {

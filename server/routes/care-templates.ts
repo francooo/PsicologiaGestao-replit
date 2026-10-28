@@ -18,15 +18,18 @@ const checkAuth = (req: any, res: any, next: any) => {
 };
 router.use(checkAuth);
 
+// The logged-in psychologist's own templates in the active company (system defaults have no owner)
+const ownTemplate = (req: any) =>
+  and(eq(careTemplates.psychologistId, req.user.id), eq(careTemplates.companyId, req.companyId))!;
+
 // ── GET /api/care/templates — list own + system default templates (with full questions) ──
 router.get("/", async (req, res) => {
   try {
-    const userId = (req.user as any).id;
 
     const templates = await db
       .select()
       .from(careTemplates)
-      .where(or(eq(careTemplates.psychologistId, userId), isNull(careTemplates.psychologistId)));
+      .where(or(ownTemplate(req), isNull(careTemplates.psychologistId)));
 
     // Attach full questions (not just count) so frontend can render preview + inline edit
     const result = await Promise.all(
@@ -59,7 +62,7 @@ router.post("/", async (req, res) => {
       isDefault: false,
     });
 
-    const [template] = await db.insert(careTemplates).values(templateData).returning();
+    const [template] = await db.insert(careTemplates).values({ ...templateData, companyId: req.companyId! }).returning();
 
     if (Array.isArray(questions) && questions.length > 0) {
       const qs = questions.map((q: any, i: number) =>
@@ -85,7 +88,6 @@ router.post("/", async (req, res) => {
 // ── GET /api/care/templates/:id — detail with questions ──────────────────
 router.get("/:id", async (req, res) => {
   try {
-    const userId = (req.user as any).id;
     const id = parseInt(req.params.id);
 
     const [template] = await db
@@ -94,7 +96,7 @@ router.get("/:id", async (req, res) => {
       .where(
         and(
           eq(careTemplates.id, id),
-          or(eq(careTemplates.psychologistId, userId), isNull(careTemplates.psychologistId))
+          or(ownTemplate(req), isNull(careTemplates.psychologistId))
         )
       );
 
@@ -116,13 +118,12 @@ router.get("/:id", async (req, res) => {
 // ── PATCH /api/care/templates/:id — update template metadata ─────────────
 router.patch("/:id", async (req, res) => {
   try {
-    const userId = (req.user as any).id;
     const id = parseInt(req.params.id);
 
     const [template] = await db
       .select()
       .from(careTemplates)
-      .where(and(eq(careTemplates.id, id), eq(careTemplates.psychologistId, userId)));
+      .where(and(eq(careTemplates.id, id), ownTemplate(req)));
 
     if (!template) return res.status(404).json({ message: "Template não encontrado" });
 
@@ -150,13 +151,12 @@ router.patch("/:id", async (req, res) => {
 // ── DELETE /api/care/templates/:id — delete if no dispatches ─────────────
 router.delete("/:id", async (req, res) => {
   try {
-    const userId = (req.user as any).id;
     const id = parseInt(req.params.id);
 
     const [template] = await db
       .select()
       .from(careTemplates)
-      .where(and(eq(careTemplates.id, id), eq(careTemplates.psychologistId, userId)));
+      .where(and(eq(careTemplates.id, id), ownTemplate(req)));
 
     if (!template) return res.status(404).json({ message: "Template não encontrado" });
 
@@ -181,14 +181,13 @@ router.delete("/:id", async (req, res) => {
 
 router.put("/:id/questions", async (req, res) => {
   try {
-    const userId = (req.user as any).id;
     const templateId = parseInt(req.params.id);
 
     // Only own templates can be mutated
     const [template] = await db
       .select()
       .from(careTemplates)
-      .where(and(eq(careTemplates.id, templateId), eq(careTemplates.psychologistId, userId)));
+      .where(and(eq(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template não encontrado" });
 
     const questionsSchema = z.array(
@@ -228,14 +227,13 @@ router.put("/:id/questions", async (req, res) => {
 // ── POST /api/care/templates/:id/questions — add question ─────────────────
 router.post("/:id/questions", async (req, res) => {
   try {
-    const userId = (req.user as any).id;
     const templateId = parseInt(req.params.id);
 
     // Only own templates can be mutated (not system defaults with psychologistId IS NULL)
     const [template] = await db
       .select()
       .from(careTemplates)
-      .where(and(eq(careTemplates.id, templateId), eq(careTemplates.psychologistId, userId)));
+      .where(and(eq(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template não encontrado" });
 
     const data = insertCareTemplateQuestionSchema.parse({ ...req.body, templateId });
@@ -251,7 +249,6 @@ router.post("/:id/questions", async (req, res) => {
 // ── PATCH /api/care/templates/:id/questions/:qId — edit question ──────────
 router.patch("/:id/questions/:qId", async (req, res) => {
   try {
-    const userId = (req.user as any).id;
     const templateId = parseInt(req.params.id);
     const qId = parseInt(req.params.qId);
 
@@ -259,7 +256,7 @@ router.patch("/:id/questions/:qId", async (req, res) => {
     const [template] = await db
       .select()
       .from(careTemplates)
-      .where(and(eq(careTemplates.id, templateId), eq(careTemplates.psychologistId, userId)));
+      .where(and(eq(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template não encontrado" });
 
     // Whitelist editable question fields — disallow templateId to prevent
@@ -286,7 +283,6 @@ router.patch("/:id/questions/:qId", async (req, res) => {
 // ── DELETE /api/care/templates/:id/questions/:qId — remove question ───────
 router.delete("/:id/questions/:qId", async (req, res) => {
   try {
-    const userId = (req.user as any).id;
     const templateId = parseInt(req.params.id);
     const qId = parseInt(req.params.qId);
 
@@ -294,7 +290,7 @@ router.delete("/:id/questions/:qId", async (req, res) => {
     const [template] = await db
       .select()
       .from(careTemplates)
-      .where(and(eq(careTemplates.id, templateId), eq(careTemplates.psychologistId, userId)));
+      .where(and(eq(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template não encontrado" });
 
     await db

@@ -1,7 +1,7 @@
 import express, { type Express, type Request } from "express";
 import { createServer, type Server } from "http";
 import { setupAuth, hashPassword } from "./auth";
-import { requireAuth, requireAdmin, requireRole } from "./middleware/auth-guards";
+import { requireAuth, requireAdmin, requireRole, requireCompanyExcept } from "./middleware/auth-guards";
 import { storage } from "./storage";
 import { insertAppointmentSchema, insertRoomSchema, insertPsychologistSchema, insertTransactionSchema, insertRoomBookingSchema, insertPermissionSchema, insertRolePermissionSchema, insertInvoiceSchema } from "@shared/schema";
 import { ZodError } from "zod";
@@ -54,6 +54,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Set up authentication routes
   setupAuth(app);
 
+  // Multi-empresa: every /api route below needs an active company, except these
+  app.use(requireCompanyExcept([
+    { method: "GET", path: /^\/api\/psychologists\/\d+$/ }, // quick-booking page
+    { method: "POST", path: /^\/api\/appointments\/quick-book$/ },
+    { method: "GET", path: /^\/api\/users\/\d+\/photo$/ }, // <img> tags
+    { method: "POST", path: /^\/api\/recover-password$/ },
+    { method: "GET", path: /^\/api\/reset-password\/[^/]+$/ },
+    { method: "POST", path: /^\/api\/reset-password$/ },
+    { path: /^\/api\/companies\// }, // choosing the company itself
+    { path: /^\/api\/care\/respond\// }, // patient form link (scoped by its token)
+    { method: "GET", path: /^\/api\/google-calendar\/auth\/callback$/ }, // OAuth redirect
+  ]));
+
   // Error handler for Zod validation errors
   const handleZodError = (error: unknown) => {
     if (error instanceof ZodError) {
@@ -63,15 +76,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return { message: 'An unexpected error occurred' };
   };
 
+  /**
+   * Room/psychologist ids that come from the request body must be rows of the active
+   * company; returns the error message when one is not.
+   */
+  async function foreignReference(companyId: number, refs: { roomId?: unknown; psychologistId?: unknown }) {
+    if (refs.roomId !== undefined && !(await storage.getRoom(companyId, Number(refs.roomId)))) {
+      return "Sala não encontrada.";
+    }
+    if (refs.psychologistId !== undefined && !(await storage.getPsychologist(companyId, Number(refs.psychologistId)))) {
+      return "Psicóloga não encontrada.";
+    }
+    return null;
+  }
+
   // Psychologists routes
   app.get("/api/psychologists", requireAuth, async (req, res) => {
     try {
-      const psychologists = await storage.getAllPsychologists();
+      const psychologists = await storage.getAllPsychologists(req.companyId!);
+      // Members carry their role in this company
+      const members = new Map((await storage.getAllUsers(req.companyId!)).map((u) => [u.id, u]));
 
       // Get associated user details for each psychologist
       const result = await Promise.all(
         psychologists.map(async (psych) => {
-          const user = await storage.getUser(psych.userId);
+          const user = members.get(psych.userId) ?? (await storage.getUser(psych.userId));
           return {
             ...psych,
             user: user ? {
@@ -93,9 +122,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Also used by the public quick-booking page (no login, so no company to scope by)
   app.get("/api/psychologists/:id", async (req, res) => {
     try {
-      const psychologist = await storage.getPsychologist(parseInt(req.params.id));
+      const id = parseInt(req.params.id);
+      const psychologist = req.companyId
+        ? await storage.getPsychologist(req.companyId, id)
+        : await storage.getPsychologistForPublicPage(id);
       if (!psychologist) {
         return res.status(404).json({ message: "Psychologist not found" });
       }
@@ -122,7 +155,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/psychologists", requireStaff, async (req, res) => {
     try {
       const data = insertPsychologistSchema.parse(req.body);
-      const psychologist = await storage.createPsychologist(data);
+      const psychologist = await storage.createPsychologist(req.companyId!, data);
       res.status(201).json(psychologist);
     } catch (error) {
       if (error instanceof ZodError) {
@@ -163,7 +196,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Verificar se a psicóloga existe
-      const psychologist = await storage.getPsychologist(psychologistId);
+      const psychologist = await storage.getPsychologist(req.companyId!, psychologistId);
       if (!psychologist) {
         console.error('Psychologist not found:', psychologistId);
         return res.status(404).json({ message: "Psicóloga não encontrada" });
@@ -224,10 +257,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/psychologists/:id", requireStaff, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const { profileImage, ...psychologistData } = req.body;
+      const { profileImage, userId: _userId, ...psychologistData } = req.body;
 
       // Atualizar dados da psicóloga
-      const updatedPsychologist = await storage.updatePsychologist(id, psychologistData);
+      const updatedPsychologist = await storage.updatePsychologist(req.companyId!, id, psychologistData);
       if (!updatedPsychologist) {
         return res.status(404).json({ message: "Psychologist not found" });
       }
@@ -246,7 +279,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/psychologists/:id", requireStaff, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const result = await storage.deletePsychologist(id);
+      const result = await storage.deletePsychologist(req.companyId!, id);
       if (!result) {
         return res.status(404).json({ message: "Psychologist not found" });
       }
@@ -259,7 +292,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Rooms routes
   app.get("/api/rooms", requireAuth, async (req, res) => {
     try {
-      const rooms = await storage.getAllRooms();
+      const rooms = await storage.getAllRooms(req.companyId!);
       res.json(rooms);
     } catch (error) {
       res.status(500).json({ message: "Error fetching rooms" });
@@ -268,7 +301,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/rooms/:id", requireAuth, async (req, res) => {
     try {
-      const room = await storage.getRoom(parseInt(req.params.id));
+      const room = await storage.getRoom(req.companyId!, parseInt(req.params.id));
       if (!room) {
         return res.status(404).json({ message: "Room not found" });
       }
@@ -281,7 +314,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/rooms", requireAdmin, async (req, res) => {
     try {
       const data = insertRoomSchema.parse(req.body);
-      const room = await storage.createRoom(data);
+      const room = await storage.createRoom(req.companyId!, data);
       res.status(201).json(room);
     } catch (error) {
       if (error instanceof ZodError) {
@@ -294,7 +327,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/rooms/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const updatedRoom = await storage.updateRoom(id, req.body);
+      const updatedRoom = await storage.updateRoom(req.companyId!, id, req.body);
       if (!updatedRoom) {
         return res.status(404).json({ message: "Room not found" });
       }
@@ -307,7 +340,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/rooms/:id", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const result = await storage.deleteRoom(id);
+      const result = await storage.deleteRoom(req.companyId!, id);
       if (!result) {
         return res.status(404).json({ message: "Room not found" });
       }
@@ -325,7 +358,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const startTime = req.query.startTime as string;
       const endTime = req.query.endTime as string;
 
-      const isAvailable = await storage.checkRoomAvailability(roomId, date, startTime, endTime);
+      const isAvailable = await storage.checkRoomAvailability(req.companyId!, roomId, date, startTime, endTime);
       res.json({ available: isAvailable });
     } catch (error) {
       res.status(500).json({ message: "Error checking room availability" });
@@ -341,7 +374,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let psychologistFilter: number | null = null;
 
       if (user?.role === 'psychologist') {
-        const psychProfile = await storage.getPsychologistByUserId(user.id);
+        const psychProfile = await storage.getPsychologistByUserId(req.companyId!, user.id);
         if (!psychProfile) {
           return res.json([]);
         }
@@ -351,29 +384,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (psychologistFilter && req.query.startDate && req.query.endDate) {
-        appointments = await storage.getAppointmentsByPsychologistIdAndDateRange(
+        appointments = await storage.getAppointmentsByPsychologistIdAndDateRange(req.companyId!,
           psychologistFilter,
           new Date(req.query.startDate as string),
           new Date(req.query.endDate as string)
         );
       } else if (psychologistFilter && req.query.date) {
-        const dateAppts = await storage.getAppointmentsByDate(
+        const dateAppts = await storage.getAppointmentsByDate(req.companyId!,
           new Date(req.query.date as string)
         );
         appointments = dateAppts.filter(a => a.psychologistId === psychologistFilter);
       } else if (psychologistFilter) {
-        appointments = await storage.getAppointmentsByPsychologistId(psychologistFilter);
+        appointments = await storage.getAppointmentsByPsychologistId(req.companyId!, psychologistFilter);
       } else if (req.query.date) {
-        appointments = await storage.getAppointmentsByDate(
+        appointments = await storage.getAppointmentsByDate(req.companyId!,
           new Date(req.query.date as string)
         );
       } else if (req.query.startDate && req.query.endDate) {
-        appointments = await storage.getAppointmentsByDateRange(
+        appointments = await storage.getAppointmentsByDateRange(req.companyId!,
           new Date(req.query.startDate as string),
           new Date(req.query.endDate as string)
         );
       } else {
-        appointments = await storage.getAllAppointments();
+        appointments = await storage.getAllAppointments(req.companyId!);
       }
 
       // Auto-complete confirmed appointments whose endTime has already passed
@@ -390,7 +423,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const [endHour, endMin] = (a.endTime as string).split(':').map(Number);
             const endDatetime = new Date(year, month - 1, day, endHour, endMin, 0);
             if (endDatetime < now) {
-              await storage.updateAppointment(a.id, { status: 'completed' });
+              await storage.updateAppointment(req.companyId!, a.id, { status: 'completed' });
               a.status = 'completed';
             }
           })
@@ -399,12 +432,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Get associated psychologist and room details
       const result = await Promise.all(
         appointments.map(async (appointment) => {
-          const psychologist = await storage.getPsychologist(appointment.psychologistId);
+          const psychologist = await storage.getPsychologist(req.companyId!, appointment.psychologistId);
           const psychologistUser = psychologist
             ? await storage.getUser(psychologist.userId)
             : null;
 
-          const room = await storage.getRoom(appointment.roomId);
+          const room = await storage.getRoom(req.companyId!, appointment.roomId);
 
           return {
             ...appointment,
@@ -429,17 +462,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/appointments/:id", requireAuth, async (req, res) => {
     try {
-      const appointment = await storage.getAppointment(parseInt(req.params.id));
+      const appointment = await storage.getAppointment(req.companyId!, parseInt(req.params.id));
       if (!appointment) {
         return res.status(404).json({ message: "Appointment not found" });
       }
 
-      const psychologist = await storage.getPsychologist(appointment.psychologistId);
+      const psychologist = await storage.getPsychologist(req.companyId!, appointment.psychologistId);
       const psychologistUser = psychologist
         ? await storage.getUser(psychologist.userId)
         : null;
 
-      const room = await storage.getRoom(appointment.roomId);
+      const room = await storage.getRoom(req.companyId!, appointment.roomId);
 
       res.json({
         ...appointment,
@@ -465,7 +498,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // For psychologist role, always enforce their own psychologistId server-side
       let body = { ...req.body };
       if (user?.role === 'psychologist') {
-        const psychProfile = await storage.getPsychologistByUserId(user.id);
+        const psychProfile = await storage.getPsychologistByUserId(req.companyId!, user.id);
         if (!psychProfile) {
           return res.status(400).json({ message: "Perfil de psicóloga não encontrado. Peça ao administrador para criar seu perfil." });
         }
@@ -473,9 +506,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const data = insertAppointmentSchema.parse(body);
+      const foreign = await foreignReference(req.companyId!, data);
+      if (foreign) return res.status(400).json({ message: foreign });
 
       // Check if room is available for the specified time
-      const isRoomAvailable = await storage.checkRoomAvailability(
+      const isRoomAvailable = await storage.checkRoomAvailability(req.companyId!,
         data.roomId,
         new Date(data.date),
         data.startTime,
@@ -486,10 +521,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(409).json({ message: "Room is not available for the specified time" });
       }
 
-      const appointment = await storage.createAppointment(data);
+      const appointment = await storage.createAppointment(req.companyId!, data);
 
       // Also create a room booking
-      await storage.createRoomBooking({
+      await storage.createRoomBooking(req.companyId!, {
         roomId: data.roomId,
         psychologistId: data.psychologistId,
         date: data.date,
@@ -523,15 +558,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Missing required fields" });
       }
 
-      // Check if psychologist exists
-      const psychologist = await storage.getPsychologist(parseInt(psychologistId));
-      if (!psychologist) {
+      // Public link: the psychologist's company scopes everything below
+      const psychologist = await storage.getPsychologistForPublicPage(parseInt(psychologistId));
+      if (!psychologist?.companyId) {
         return res.status(404).json({ message: "Psychologist not found" });
       }
+      const companyId = psychologist.companyId;
 
-      // Check if room exists and is available
-      const isRoomAvailable = await storage.checkRoomAvailability(
-        roomId || 1, // Default to room 1 if not specified
+      // The room must be one of this company's (default: its first room)
+      const room = roomId
+        ? await storage.getRoom(companyId, parseInt(roomId))
+        : (await storage.getAllRooms(companyId)).sort((a, b) => a.id - b.id)[0];
+      if (!room) {
+        return res.status(404).json({ message: "Sala não encontrada." });
+      }
+
+      // Check if room is available
+      const isRoomAvailable = await storage.checkRoomAvailability(companyId,
+        room.id,
         new Date(date),
         startTime,
         endTime
@@ -544,7 +588,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Check for time slot conflicts with the psychologist
-      const existingAppointments = await storage.getAppointmentsByDate(date);
+      const existingAppointments = await storage.getAppointmentsByDate(companyId, new Date(date));
       const isTimeSlotTaken = existingAppointments.some(app => {
         // Check if time slots overlap for the same psychologist
         if (app.psychologistId !== parseInt(psychologistId)) return false;
@@ -571,16 +615,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         startTime,
         endTime,
         patientName,
-        psychologistId: parseInt(psychologistId),
-        roomId: roomId || 1, // Default to room 1 if not specified
+        psychologistId: psychologist.id,
+        roomId: room.id,
         status: "pending-confirmation", // Special status for quick bookings
         notes: notes || ""
       };
 
-      const appointment = await storage.createAppointment(appointmentData);
+      const appointment = await storage.createAppointment(companyId, appointmentData);
 
       // Also create a room booking
-      await storage.createRoomBooking({
+      await storage.createRoomBooking(companyId, {
         roomId: appointmentData.roomId,
         psychologistId: appointmentData.psychologistId,
         date: appointmentData.date,
@@ -603,7 +647,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/appointments/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const updatedAppointment = await storage.updateAppointment(id, req.body);
+      const foreign = await foreignReference(req.companyId!, req.body);
+      if (foreign) return res.status(400).json({ message: foreign });
+      const updatedAppointment = await storage.updateAppointment(req.companyId!, id, req.body);
       if (!updatedAppointment) {
         return res.status(404).json({ message: "Appointment not found" });
       }
@@ -616,7 +662,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/appointments/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const result = await storage.deleteAppointment(id);
+      const result = await storage.deleteAppointment(req.companyId!, id);
       if (!result) {
         return res.status(404).json({ message: "Appointment not found" });
       }
@@ -638,14 +684,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let transactions;
 
       if (req.query.type) {
-        transactions = await storage.getTransactionsByType(req.query.type as string);
+        transactions = await storage.getTransactionsByType(req.companyId!, req.query.type as string);
       } else if (req.query.startDate && req.query.endDate) {
-        transactions = await storage.getTransactionsByDateRange(
+        transactions = await storage.getTransactionsByDateRange(req.companyId!,
           new Date(req.query.startDate as string),
           new Date(req.query.endDate as string)
         );
       } else {
-        transactions = await storage.getAllTransactions();
+        transactions = await storage.getAllTransactions(req.companyId!);
       }
 
       // Filtrar transações do usuário autenticado (a menos que seja admin)
@@ -660,7 +706,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           let relatedAppointment = null;
           if (transaction.relatedAppointmentId) {
-            relatedAppointment = await storage.getAppointment(transaction.relatedAppointmentId);
+            relatedAppointment = await storage.getAppointment(req.companyId!, transaction.relatedAppointmentId);
           }
 
           return {
@@ -690,7 +736,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const user = req.user;
-      const transaction = await storage.getTransaction(parseInt(req.params.id));
+      const transaction = await storage.getTransaction(req.companyId!, parseInt(req.params.id));
 
       if (!transaction) {
         return res.status(404).json({ message: "Transaction not found" });
@@ -705,7 +751,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       let relatedAppointment = null;
       if (transaction.relatedAppointmentId) {
-        relatedAppointment = await storage.getAppointment(transaction.relatedAppointmentId);
+        relatedAppointment = await storage.getAppointment(req.companyId!, transaction.relatedAppointmentId);
       }
 
       res.json({
@@ -738,7 +784,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responsibleId: user.id
       });
 
-      const transaction = await storage.createTransaction(data);
+      const transaction = await storage.createTransaction(req.companyId!, data);
       res.status(201).json(transaction);
     } catch (error) {
       if (error instanceof ZodError) {
@@ -756,7 +802,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const id = parseInt(req.params.id);
-      const existingTransaction = await storage.getTransaction(id);
+      const existingTransaction = await storage.getTransaction(req.companyId!, id);
 
       if (!existingTransaction) {
         return res.status(404).json({ message: "Transaction not found" });
@@ -767,7 +813,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Forbidden: You can only update your own transactions" });
       }
 
-      const updatedTransaction = await storage.updateTransaction(id, req.body);
+      const updatedTransaction = await storage.updateTransaction(req.companyId!, id, req.body);
       res.json(updatedTransaction);
     } catch (error) {
       res.status(500).json({ message: "Error updating transaction" });
@@ -782,7 +828,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const id = parseInt(req.params.id);
-      const existingTransaction = await storage.getTransaction(id);
+      const existingTransaction = await storage.getTransaction(req.companyId!, id);
 
       if (!existingTransaction) {
         return res.status(404).json({ message: "Transaction not found" });
@@ -793,7 +839,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Forbidden: You can only delete your own transactions" });
       }
 
-      const result = await storage.deleteTransaction(id);
+      const result = await storage.deleteTransaction(req.companyId!, id);
       res.sendStatus(204);
     } catch (error) {
       res.status(500).json({ message: "Error deleting transaction" });
@@ -813,7 +859,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       lastMonth.setMonth(today.getMonth() - 1);
 
       // Mês atual - Receitas
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId!, {
         description: "Consulta - Pedro Santos",
         amount: 150,
         date: new Date().toISOString().split('T')[0],
@@ -822,7 +868,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responsibleId: user.id
       });
 
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId!, {
         description: "Consulta - Maria Oliveira",
         amount: 150,
         date: new Date().toISOString().split('T')[0],
@@ -831,7 +877,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responsibleId: user.id
       });
 
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId!, {
         description: "Avaliação - João Pereira",
         amount: 200,
         date: new Date(today.getFullYear(), today.getMonth(), today.getDate() - 5).toISOString().split('T')[0],
@@ -840,7 +886,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responsibleId: user.id
       });
 
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId!, {
         description: "Workshop de Mindfulness",
         amount: 500,
         date: new Date(today.getFullYear(), today.getMonth(), today.getDate() - 10).toISOString().split('T')[0],
@@ -850,7 +896,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Mês atual - Despesas
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId!, {
         description: "Aluguel do Consultório",
         amount: 2500,
         date: new Date(today.getFullYear(), today.getMonth(), 5).toISOString().split('T')[0],
@@ -859,7 +905,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responsibleId: user.id
       });
 
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId!, {
         description: "Conta de Luz",
         amount: 320,
         date: new Date(today.getFullYear(), today.getMonth(), 7).toISOString().split('T')[0],
@@ -868,7 +914,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responsibleId: user.id
       });
 
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId!, {
         description: "Internet",
         amount: 150,
         date: new Date(today.getFullYear(), today.getMonth(), 8).toISOString().split('T')[0],
@@ -877,7 +923,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responsibleId: user.id
       });
 
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId!, {
         description: "Material de Escritório",
         amount: 230,
         date: new Date(today.getFullYear(), today.getMonth(), 12).toISOString().split('T')[0],
@@ -887,7 +933,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Mês passado - Receitas
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId!, {
         description: "Consulta - Carlos Silva",
         amount: 150,
         date: new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 15).toISOString().split('T')[0],
@@ -896,7 +942,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responsibleId: user.id
       });
 
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId!, {
         description: "Consulta - Ana Rodrigues",
         amount: 150,
         date: new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 18).toISOString().split('T')[0],
@@ -905,7 +951,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responsibleId: user.id
       });
 
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId!, {
         description: "Sessão em Grupo - Ansiedade",
         amount: 400,
         date: new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 22).toISOString().split('T')[0],
@@ -915,7 +961,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Mês passado - Despesas
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId!, {
         description: "Aluguel do Consultório",
         amount: 2500,
         date: new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 5).toISOString().split('T')[0],
@@ -924,7 +970,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responsibleId: user.id
       });
 
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId!, {
         description: "Conta de Luz",
         amount: 290,
         date: new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 7).toISOString().split('T')[0],
@@ -933,7 +979,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         responsibleId: user.id
       });
 
-      await storage.createTransaction({
+      await storage.createTransaction(req.companyId!, {
         description: "Internet",
         amount: 150,
         date: new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 9).toISOString().split('T')[0],
@@ -954,23 +1000,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let bookings;
 
       if (req.query.roomId) {
-        bookings = await storage.getRoomBookingsByRoomId(parseInt(req.query.roomId as string));
+        bookings = await storage.getRoomBookingsByRoomId(req.companyId!, parseInt(req.query.roomId as string));
       } else if (req.query.date) {
-        bookings = await storage.getRoomBookingsByDate(new Date(req.query.date as string));
+        bookings = await storage.getRoomBookingsByDate(req.companyId!, new Date(req.query.date as string));
       } else if (req.query.startDate && req.query.endDate) {
-        bookings = await storage.getRoomBookingsByDateRange(
+        bookings = await storage.getRoomBookingsByDateRange(req.companyId!,
           new Date(req.query.startDate as string),
           new Date(req.query.endDate as string)
         );
       } else {
-        bookings = await storage.getAllRoomBookings();
+        bookings = await storage.getAllRoomBookings(req.companyId!);
       }
 
       // Enrich with room and psychologist data
       const result = await Promise.all(
         bookings.map(async (booking) => {
-          const room = await storage.getRoom(booking.roomId);
-          const psychologist = await storage.getPsychologist(booking.psychologistId);
+          const room = await storage.getRoom(req.companyId!, booking.roomId);
+          const psychologist = await storage.getPsychologist(req.companyId!, booking.psychologistId);
           const psychologistUser = psychologist
             ? await storage.getUser(psychologist.userId)
             : null;
@@ -998,13 +1044,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/room-bookings/:id", requireAuth, async (req, res) => {
     try {
-      const booking = await storage.getRoomBooking(parseInt(req.params.id));
+      const booking = await storage.getRoomBooking(req.companyId!, parseInt(req.params.id));
       if (!booking) {
         return res.status(404).json({ message: "Room booking not found" });
       }
 
-      const room = await storage.getRoom(booking.roomId);
-      const psychologist = await storage.getPsychologist(booking.psychologistId);
+      const room = await storage.getRoom(req.companyId!, booking.roomId);
+      const psychologist = await storage.getPsychologist(req.companyId!, booking.psychologistId);
       const psychologistUser = psychologist
         ? await storage.getUser(psychologist.userId)
         : null;
@@ -1029,9 +1075,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/room-bookings", requireAuth, async (req, res) => {
     try {
       const data = insertRoomBookingSchema.parse(req.body);
+      const foreign = await foreignReference(req.companyId!, data);
+      if (foreign) return res.status(400).json({ message: foreign });
 
       // Check if room is available
-      const isRoomAvailable = await storage.checkRoomAvailability(
+      const isRoomAvailable = await storage.checkRoomAvailability(req.companyId!,
         data.roomId,
         new Date(data.date),
         data.startTime,
@@ -1042,7 +1090,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(409).json({ message: "Room is not available for the specified time" });
       }
 
-      const booking = await storage.createRoomBooking(data);
+      const booking = await storage.createRoomBooking(req.companyId!, data);
       res.status(201).json(booking);
     } catch (error) {
       if (error instanceof ZodError) {
@@ -1055,7 +1103,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/room-bookings/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const updatedBooking = await storage.updateRoomBooking(id, req.body);
+      const foreign = await foreignReference(req.companyId!, req.body);
+      if (foreign) return res.status(400).json({ message: foreign });
+      const updatedBooking = await storage.updateRoomBooking(req.companyId!, id, req.body);
       if (!updatedBooking) {
         return res.status(404).json({ message: "Room booking not found" });
       }
@@ -1068,7 +1118,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/room-bookings/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const result = await storage.deleteRoomBooking(id);
+      const result = await storage.deleteRoomBooking(req.companyId!, id);
       if (!result) {
         return res.status(404).json({ message: "Room booking not found" });
       }
@@ -1165,7 +1215,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Get psychologist info
-      const psychologist = await storage.getPsychologist(parseInt(psychologistId));
+      const psychologist = await storage.getPsychologist(req.companyId!, parseInt(psychologistId));
       if (!psychologist) {
         return res.status(404).json({ message: "Psychologist not found" });
       }
@@ -1176,7 +1226,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Get all appointments in date range
-      const appointments = await storage.getAppointmentsByDateRange(
+      const appointments = await storage.getAppointmentsByDateRange(req.companyId!,
         new Date(startDate),
         new Date(endDate)
       );
@@ -1256,7 +1306,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (req.body.psychologistId) {
         console.log('Updating psychologist photo, ID:', req.body.psychologistId);
         const psychologistId = parseInt(req.body.psychologistId);
-        const psychologist = await storage.getPsychologist(psychologistId);
+        const psychologist = await storage.getPsychologist(req.companyId!, psychologistId);
         if (!psychologist) {
           console.error('Psychologist not found:', psychologistId);
           return res.status(404).json({ message: "Psicóloga não encontrada" });
@@ -1496,30 +1546,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Endpoint para agendamento rápido via WhatsApp
-  app.post("/api/appointments/quick-book", async (req, res) => {
-    try {
-      const appointmentData = req.body;
-
-      // Validar dados básicos
-      if (!appointmentData.date || !appointmentData.startTime || !appointmentData.endTime ||
-        !appointmentData.patientName || !appointmentData.psychologistId) {
-        return res.status(400).json({ message: "Dados incompletos para agendamento" });
-      }
-
-      // Adicionar status especial para agendamentos via WhatsApp
-      const newAppointment = await storage.createAppointment({
-        ...appointmentData,
-        status: "pending-confirmation", // Status especial para agendamentos via WhatsApp
-      });
-
-      res.status(201).json(newAppointment);
-    } catch (error) {
-      console.error("Erro no agendamento rápido:", error);
-      res.status(500).json({ message: "Erro ao processar agendamento" });
-    }
-  });
-
   // WhatsApp Integration
   app.post("/api/whatsapp/share-availability", async (req, res) => {
     try {
@@ -1540,7 +1566,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Verificar se o psicólogo existe
-      const psychologist = await storage.getPsychologist(parseInt(psychologistId));
+      const psychologist = await storage.getPsychologist(req.companyId!, parseInt(psychologistId));
       if (!psychologist) {
         return res.status(404).json({ message: "Psychologist not found" });
       }
@@ -1556,7 +1582,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const end = new Date(endDate);
 
       // Obter compromissos no período para verificar disponibilidade
-      const appointments = await storage.getAppointmentsByDateRange(start, end);
+      const appointments = await storage.getAppointmentsByDateRange(req.companyId!, start, end);
       const psychologistAppointments = appointments.filter(app => app.psychologistId === parseInt(psychologistId));
 
       // Calcular slots disponíveis
@@ -1709,7 +1735,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Duplicidade de chave NF-e é garantida por constraint UNIQUE no banco
       const valorLiquido = body.valor_liquido != null ? Number(body.valor_liquido) : null;
       const valorServicos = body.valor_servicos != null ? Number(body.valor_servicos) : null;
-      const invoice = await storage.createInvoice({
+      const invoice = await storage.createInvoice(req.companyId!, {
         psychologistId,
         clinicId: (body.clinic_id as number) ?? null,
         chaveNfe: (body.chave_nfe as string) ?? null,
@@ -1784,7 +1810,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const dataEmissaoTo = req.query.data_emissao_to as string | undefined;
       const status = req.query.status as string | undefined;
       const search = req.query.search as string | undefined;
-      const result = await storage.getInvoicesByUserId(user.id, { limit, offset, dataEmissaoFrom, dataEmissaoTo, status, search });
+      const result = await storage.getInvoicesByUserId(req.companyId!, user.id, { limit, offset, dataEmissaoFrom, dataEmissaoTo, status, search });
       res.set("Cache-Control", "private, no-store, no-cache, max-age=0, must-revalidate");
       res.json(result);
     } catch (error) {
@@ -1803,7 +1829,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const dataEmissaoFrom = req.query.data_emissao_from as string | undefined;
       const dataEmissaoTo = req.query.data_emissao_to as string | undefined;
       const status = req.query.status as string | undefined;
-      const summary = await storage.getInvoicesSummary(user.id, { dataEmissaoFrom, dataEmissaoTo, status });
+      const summary = await storage.getInvoicesSummary(req.companyId!, user.id, { dataEmissaoFrom, dataEmissaoTo, status });
       res.json(summary);
     } catch (error) {
       console.error("Error fetching invoice summary:", error);
@@ -1820,7 +1846,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = req.user as { id: number; role: string };
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) return res.status(400).json({ message: "ID inválido" });
-      const invoice = await storage.getInvoice(id);
+      const invoice = await storage.getInvoice(req.companyId!, id);
       if (!invoice) return res.status(404).json({ message: "Nota fiscal não encontrada" });
       if (invoice.psychologistId !== user.id && user.role !== "admin") {
         return res.status(403).json({ message: "Acesso negado" });
@@ -1842,13 +1868,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = req.user as { id: number };
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) return res.status(400).json({ message: "ID inválido" });
-      const invoice = await storage.getInvoice(id);
+      const invoice = await storage.getInvoice(req.companyId!, id);
       if (!invoice) return res.status(404).json({ message: "Nota fiscal não encontrada" });
       if (invoice.psychologistId !== user.id) {
         return res.status(403).json({ message: "Apenas a psicóloga que registrou pode editar." });
       }
       const body = req.body as Record<string, unknown>;
-      const updated = await storage.updateInvoice(id, {
+      const updated = await storage.updateInvoice(req.companyId!, id, {
         numeroNota: body.numero_nota as string | undefined,
         serie: body.serie as string | undefined,
         dataEmissao: body.data_emissao as string | undefined,
@@ -1883,7 +1909,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = req.user as { id: number; role: string };
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) return res.status(400).json({ message: "ID inválido" });
-      const invoice = await storage.getInvoice(id);
+      const invoice = await storage.getInvoice(req.companyId!, id);
       if (!invoice) return res.status(404).json({ message: "Nota fiscal não encontrada" });
       if (invoice.psychologistId !== user.id && user.role !== "admin") {
         return res.status(403).json({ message: "Acesso negado" });
@@ -1892,7 +1918,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!status || !["ativa", "cancelada", "pendente"].includes(status)) {
         return res.status(400).json({ message: "Status inválido. Use: ativa, cancelada ou pendente." });
       }
-      const updated = await storage.updateInvoice(id, { status });
+      const updated = await storage.updateInvoice(req.companyId!, id, { status });
       const { imageData: _invoiceImageData, ...updatedResponse } = updated ?? {};
       res.json(updatedResponse);
     } catch (error) {
@@ -1918,7 +1944,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const dataEmissaoTo = req.query.data_emissao_to as string | undefined;
       const status = req.query.status as string | undefined;
       const search = req.query.search as string | undefined;
-      const result = await storage.getInvoicesAdmin({ limit, offset, psychologistId, dataEmissaoFrom, dataEmissaoTo, status, search });
+      const result = await storage.getInvoicesAdmin(req.companyId!, { limit, offset, psychologistId, dataEmissaoFrom, dataEmissaoTo, status, search });
       res.json(result);
     } catch (error) {
       console.error("Error fetching admin invoices:", error);
@@ -1940,7 +1966,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const dataEmissaoFrom = req.query.data_emissao_from as string | undefined;
       const dataEmissaoTo = req.query.data_emissao_to as string | undefined;
       const status = req.query.status as string | undefined;
-      const summary = await storage.getInvoicesSummaryAdmin({ psychologistId, dataEmissaoFrom, dataEmissaoTo, status });
+      const summary = await storage.getInvoicesSummaryAdmin(req.companyId!, { psychologistId, dataEmissaoFrom, dataEmissaoTo, status });
       res.json(summary);
     } catch (error) {
       console.error("Error fetching admin invoice summary:", error);
@@ -1962,7 +1988,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const dataEmissaoFrom = req.query.data_emissao_from as string | undefined;
       const dataEmissaoTo = req.query.data_emissao_to as string | undefined;
       const status = req.query.status as string | undefined;
-      const { invoices } = await storage.getInvoicesAdmin({ limit: 10000, offset: 0, psychologistId, dataEmissaoFrom, dataEmissaoTo, status });
+      const { invoices } = await storage.getInvoicesAdmin(req.companyId!, { limit: 10000, offset: 0, psychologistId, dataEmissaoFrom, dataEmissaoTo, status });
       const headers = ["Chave NF-e", "Número", "Série", "Data Emissão", "Psicóloga", "Tomador", "Valor Líquido", "Status", "Registrada em"];
       const rows = invoices.map((inv) => [
         inv.chaveNfe ?? "",
@@ -2003,9 +2029,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const dataEmissaoFrom = `${year}-${String(month).padStart(2, "0")}-01`;
       const lastDay = new Date(year, month, 0).getDate();
       const dataEmissaoTo = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-      const { invoices } = await storage.getInvoicesAdmin({ limit: 10000, offset: 0, dataEmissaoFrom, dataEmissaoTo });
+      const { invoices } = await storage.getInvoicesAdmin(req.companyId!, { limit: 10000, offset: 0, dataEmissaoFrom, dataEmissaoTo });
       const psychologistIdsWithInvoice = new Set(invoices.map((inv) => inv.psychologistId));
-      const allUsers = await storage.getAllUsers();
+      const allUsers = await storage.getAllUsers(req.companyId!);
       const nonAdminUsers = allUsers.filter((u) => u.role !== "admin");
       const sent = nonAdminUsers.filter((u) => psychologistIdsWithInvoice.has(u.id)).map((u) => ({ id: u.id, fullName: u.fullName, email: u.email, role: u.role }));
       const pending = nonAdminUsers.filter((u) => !psychologistIdsWithInvoice.has(u.id)).map((u) => ({ id: u.id, fullName: u.fullName, email: u.email, role: u.role }));
@@ -2025,7 +2051,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = req.user as { id: number; role: string };
       const invoiceId = parseInt(req.params.id, 10);
       if (isNaN(invoiceId)) return res.status(400).json({ message: "ID inválido" });
-      const invoice = await storage.getInvoice(invoiceId);
+      const invoice = await storage.getInvoice(req.companyId!, invoiceId);
       if (!invoice) return res.status(404).json({ message: "Nota fiscal não encontrada" });
       if (invoice.psychologistId !== user.id && user.role !== "admin") {
         return res.status(403).json({ message: "Acesso negado" });
@@ -2051,7 +2077,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = req.user as { id: number; role: string };
       const invoiceId = parseInt(req.params.id, 10);
       if (isNaN(invoiceId)) return res.status(400).json({ message: "ID inválido" });
-      const invoice = await storage.getInvoice(invoiceId);
+      const invoice = await storage.getInvoice(req.companyId!, invoiceId);
       if (!invoice) return res.status(404).json({ message: "Nota fiscal não encontrada" });
       if (invoice.psychologistId !== user.id && user.role !== "admin") {
         return res.status(403).json({ message: "Acesso negado" });
@@ -2080,12 +2106,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = req.user as { id: number };
       const invoiceId = parseInt(req.params.id, 10);
       if (isNaN(invoiceId)) return res.status(400).json({ message: "ID inválido" });
-      const invoice = await storage.getInvoice(invoiceId);
+      const invoice = await storage.getInvoice(req.companyId!, invoiceId);
       if (!invoice) return res.status(404).json({ message: "Nota fiscal não encontrada" });
       if (invoice.psychologistId !== user.id) {
         return res.status(403).json({ message: "Acesso negado. Você só pode excluir suas próprias notas." });
       }
-      await storage.deleteInvoice(invoiceId);
+      await storage.deleteInvoice(req.companyId!, invoiceId);
       res.json({ message: "Nota fiscal excluída com sucesso" });
     } catch (error) {
       console.error("Error deleting invoice:", error);

@@ -14,6 +14,7 @@ import { isValidEmail } from "../lib/validate-email";
 import { generateResponseToken } from "../lib/care-token";
 import { sendCareFormEmail } from "../lib/send-care-email";
 import { z } from "zod";
+import { clinicDisplayName } from "../lib/companies";
 
 const router = Router();
 
@@ -32,19 +33,20 @@ function substituteVariables(text: string, patientName: string, psychologistName
 }
 
 /**
- * Checks if the logged-in user can access the given patient.
- * Mirrors the checkPatientAccess logic from patient-records.ts:
+ * Checks if the logged-in user can access the given patient (already loaded from the
+ * active company, see findPatient). Mirrors checkPatientAccess from patient-records.ts:
  *   - admin: always allowed
  *   - psychologist: patient.psychologistId === psychologist.id OR patient.createdBy === user.id
  */
-async function canAccessPatient(user: any, patientRow: typeof patients.$inferSelect): Promise<boolean> {
+async function canAccessPatient(req: any, patientRow: typeof patients.$inferSelect): Promise<boolean> {
+  const user = req.user;
   if (user.role === "admin") return true;
 
   if (user.role === "psychologist") {
     const [psychRow] = await db
       .select()
       .from(psychologists)
-      .where(eq(psychologists.userId, user.id));
+      .where(and(eq(psychologists.userId, user.id), eq(psychologists.companyId, req.companyId)));
     const psychId = psychRow?.id ?? -1;
     return patientRow.psychologistId === psychId || patientRow.createdBy === user.id;
   }
@@ -52,14 +54,23 @@ async function canAccessPatient(user: any, patientRow: typeof patients.$inferSel
   return false;
 }
 
+async function findPatient(companyId: number, patientId: number) {
+  const [patient] = await db
+    .select()
+    .from(patients)
+    .where(and(eq(patients.id, patientId), eq(patients.companyId, companyId)));
+  return patient;
+}
+
 /**
- * Checks if the logged-in user can access a given dispatch.
+ * Checks if the logged-in user can access a given dispatch (always of the active company).
  * - admin: always
  * - psychologist: dispatch.psychologistId === user.id
  */
-function canAccessDispatch(user: any, dispatch: typeof careDispatches.$inferSelect): boolean {
-  if (user.role === "admin") return true;
-  return dispatch.psychologistId === user.id;
+function canAccessDispatch(req: any, dispatch: typeof careDispatches.$inferSelect): boolean {
+  if (dispatch.companyId !== req.companyId) return false;
+  if (req.user.role === "admin") return true;
+  return dispatch.psychologistId === req.user.id;
 }
 
 // ── POST /api/care/patients/:patientId/dispatch ───────────────────────────
@@ -72,11 +83,11 @@ router.post("/patients/:patientId/dispatch", async (req, res) => {
     if (!template_id) return res.status(400).json({ message: "template_id é obrigatório" });
 
     // 1. Fetch patient
-    const [patient] = await db.select().from(patients).where(eq(patients.id, patientId));
+    const patient = await findPatient(req.companyId!, patientId);
     if (!patient) return res.status(404).json({ message: "Paciente não encontrado" });
 
     // 2. Authorize access to patient
-    const authorized = await canAccessPatient(user, patient);
+    const authorized = await canAccessPatient(req, patient);
     if (!authorized) {
       return res.status(403).json({
         message: "Acesso negado. Você não possui permissão para acessar este paciente.",
@@ -96,14 +107,17 @@ router.post("/patients/:patientId/dispatch", async (req, res) => {
     const [psychUser] = await db.select().from(users).where(eq(users.id, user.id));
     if (!psychUser) return res.status(400).json({ message: "Usuário não encontrado" });
 
-    // 5. Fetch template with questions (own or system default)
+    // 5. Fetch template with questions (own in this company, or system default)
     const [template] = await db
       .select()
       .from(careTemplates)
       .where(
         and(
           eq(careTemplates.id, parseInt(template_id)),
-          or(eq(careTemplates.psychologistId, user.id), isNull(careTemplates.psychologistId))
+          or(
+            and(eq(careTemplates.psychologistId, user.id), eq(careTemplates.companyId, req.companyId!)),
+            isNull(careTemplates.psychologistId)
+          )
         )
       );
     if (!template) return res.status(404).json({ message: "Template não encontrado" });
@@ -164,6 +178,7 @@ router.post("/patients/:patientId/dispatch", async (req, res) => {
     const [dispatch] = await db
       .insert(careDispatches)
       .values({
+        companyId: req.companyId!,
         psychologistId: user.id,
         patientId,
         templateId: template.id,
@@ -200,6 +215,7 @@ router.post("/patients/:patientId/dispatch", async (req, res) => {
       patientEmail: patient.email!,
       psychologistName: psychName,
       psychologistEmail: psychUser.email,
+      clinicName: await clinicDisplayName(req.companyId),
       subject: finalSubject,
       customMessage: custom_message ?? null,
       questions: renderedQuestions,
@@ -229,14 +245,13 @@ router.post("/patients/:patientId/dispatch", async (req, res) => {
 // ── GET /api/care/patients/:patientId/dispatches — history ───────────────
 router.get("/patients/:patientId/dispatches", async (req, res) => {
   try {
-    const user = req.user as any;
     const patientId = parseInt(req.params.patientId);
 
     // Authorize access to patient
-    const [patient] = await db.select().from(patients).where(eq(patients.id, patientId));
+    const patient = await findPatient(req.companyId!, patientId);
     if (!patient) return res.status(404).json({ message: "Paciente não encontrado" });
 
-    const authorized = await canAccessPatient(user, patient);
+    const authorized = await canAccessPatient(req, patient);
     if (!authorized) {
       return res.status(403).json({
         message: "Acesso negado.",
@@ -247,7 +262,7 @@ router.get("/patients/:patientId/dispatches", async (req, res) => {
     const dispatches = await db
       .select()
       .from(careDispatches)
-      .where(eq(careDispatches.patientId, patientId))
+      .where(and(eq(careDispatches.patientId, patientId), eq(careDispatches.companyId, req.companyId!)))
       .orderBy(desc(careDispatches.sentAt));
 
     const now = new Date();
@@ -282,7 +297,6 @@ router.get("/patients/:patientId/dispatches", async (req, res) => {
 // ── GET /api/care/dispatches/:dispatchId/responses — questions + answers ──
 router.get("/dispatches/:dispatchId/responses", async (req, res) => {
   try {
-    const user = req.user as any;
     const dispatchId = parseInt(req.params.dispatchId);
 
     const [dispatch] = await db
@@ -292,7 +306,7 @@ router.get("/dispatches/:dispatchId/responses", async (req, res) => {
     if (!dispatch) return res.status(404).json({ message: "Envio não encontrado" });
 
     // Authorization: admin or the psychologist who sent this dispatch
-    if (!canAccessDispatch(user, dispatch)) {
+    if (!canAccessDispatch(req, dispatch)) {
       return res.status(403).json({
         message: "Acesso negado.",
         code: "FORBIDDEN",

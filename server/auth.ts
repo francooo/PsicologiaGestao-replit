@@ -7,7 +7,7 @@ import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 import { storage } from "./storage";
 import { User as SelectUser } from "@shared/schema";
-import { bearerSessionBridge, companyContext } from "./middleware/auth-guards";
+import { bearerSessionBridge, companyContext, requireCompany } from "./middleware/auth-guards";
 import { applyPendingInvites } from "./lib/access-invites";
 import { resolveCompanyContext, upsertMembership, userPayload } from "./lib/companies";
 
@@ -55,10 +55,11 @@ declare module "express-session" {
  * create it on first access.
  */
 async function ensurePsychologistProfile(req: Request) {
-  if (!req.user || req.user.role !== "psychologist") return;
-  const existingProfile = await storage.getPsychologistByUserId(req.user.id);
+  if (!req.user || req.user.role !== "psychologist" || !req.companyId) return;
+  const companyId = req.companyId;
+  const existingProfile = await storage.getPsychologistByUserId(companyId, req.user.id);
   if (existingProfile) return;
-  const newProfile = await storage.createPsychologist({
+  const newProfile = await storage.createPsychologist(companyId, {
     userId: req.user.id,
     specialization: null,
     bio: null,
@@ -66,10 +67,10 @@ async function ensurePsychologistProfile(req: Request) {
   });
   // Fix any existing appointments/bookings that were saved with psychologistId=0
   // (caused by missing profile at creation time)
-  const allAppointments = await storage.getAllAppointments();
+  const allAppointments = await storage.getAllAppointments(companyId);
   const orphaned = allAppointments.filter(a => a.psychologistId === 0);
   for (const appt of orphaned) {
-    await storage.updateAppointment(appt.id, { psychologistId: newProfile.id });
+    await storage.updateAppointment(companyId, appt.id, { psychologistId: newProfile.id });
   }
 }
 
@@ -299,7 +300,7 @@ export function setupAuth(app: Express) {
 
       // If user is a psychologist, create a psychologist record too
       if (isAdminCaller && role === "psychologist" && req.body.hourlyRate) {
-        await storage.createPsychologist({
+        await storage.createPsychologist(req.companyId!, {
           userId: user.id,
           specialization: req.body.specialization || "",
           bio: req.body.bio || "",
@@ -382,17 +383,16 @@ export function setupAuth(app: Express) {
     }
   });
 
-  // Rota para listar todos os usuários
-  app.get("/api/users", async (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
-
+  // Members of the active company (role = their role there)
+  app.get("/api/users", requireCompany, async (req, res) => {
     try {
       // Apenas usuários admin podem listar todos os usuários
-      if (req.user.role !== 'admin' && req.user.role !== 'psychologist' && req.user.role !== 'manager') {
+      const role = req.user!.role;
+      if (role !== 'admin' && role !== 'psychologist' && role !== 'manager') {
         return res.status(403).json({ message: "Acesso não autorizado" });
       }
 
-      const users = await storage.getAllUsers();
+      const users = await storage.getAllUsers(req.companyId!);
 
       // Remover senha de todos os usuários
       const safeUsers = users.map(user => {

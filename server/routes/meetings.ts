@@ -23,13 +23,13 @@ function requireAuth(req: any, res: any, next: any) {
 
 /**
  * Returns true if the authenticated user may access this meeting.
- * All roles: only own meetings are accessible (psychologistId === user.id).
+ * All roles: only own meetings of the active company are accessible.
  */
 function canAccessMeeting(
-  user: { id: number; role: string },
-  meeting: { psychologistId: number }
+  req: { user?: { id: number }; companyId?: number },
+  meeting: { psychologistId: number; companyId: number | null }
 ): boolean {
-  return meeting.psychologistId === user.id;
+  return meeting.psychologistId === req.user?.id && meeting.companyId === req.companyId;
 }
 
 /**
@@ -54,8 +54,9 @@ router.get('/', requireAuth, async (req, res) => {
 
     const conditions: ReturnType<typeof eq>[] = [];
 
-    // Strict ownership: all users see only their own meetings
+    // Strict ownership: all users see only their own meetings, in the active company
     conditions.push(eq(meetings.psychologistId, user.id));
+    conditions.push(eq(meetings.companyId, req.companyId!));
 
     if (status && status !== 'all') {
       conditions.push(eq(meetings.status, status as string));
@@ -123,13 +124,13 @@ router.get('/', requireAuth, async (req, res) => {
 // ─── Get single meeting ────────────────────────────────────────────────────────
 router.get('/:id', requireAuth, async (req, res) => {
   try {
-    const user = req.user as { id: number; role: string };
     const id = parseInt(req.params.id);
 
     const rows = await db
       .select({
         id: meetings.id,
         psychologistId: meetings.psychologistId,
+        companyId: meetings.companyId,
         patientId: meetings.patientId,
         title: meetings.title,
         description: meetings.description,
@@ -157,7 +158,7 @@ router.get('/:id', requireAuth, async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: 'Reunião não encontrada' });
 
     const meeting = rows[0];
-    if (!canAccessMeeting(user, meeting)) {
+    if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: 'Acesso negado' });
     }
 
@@ -190,7 +191,7 @@ router.post('/', requireAuth, async (req, res) => {
     const patientRows = await db
       .select()
       .from(patients)
-      .where(eq(patients.id, body.patientId));
+      .where(and(eq(patients.id, body.patientId), eq(patients.companyId, req.companyId!)));
     if (!patientRows.length) return res.status(404).json({ error: 'Paciente não encontrado' });
     const patient = patientRows[0];
 
@@ -234,6 +235,7 @@ router.post('/', requireAuth, async (req, res) => {
     const [meeting] = await db
       .insert(meetings)
       .values({
+        companyId: req.companyId!,
         psychologistId,
         patientId: body.patientId,
         appointmentId: body.appointmentId ?? null,
@@ -304,13 +306,12 @@ router.post('/', requireAuth, async (req, res) => {
 // ─── Update meeting ────────────────────────────────────────────────────────────
 router.patch('/:id', requireAuth, async (req, res) => {
   try {
-    const user = req.user as { id: number; role: string };
     const id = parseInt(req.params.id);
 
     const rows = await db.select().from(meetings).where(eq(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: 'Reunião não encontrada' });
     const meeting = rows[0];
-    if (!canAccessMeeting(user, meeting)) {
+    if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: 'Acesso negado' });
     }
 
@@ -351,13 +352,12 @@ router.patch('/:id', requireAuth, async (req, res) => {
 // ─── Start meeting ────────────────────────────────────────────────────────────
 router.post('/:id/start', requireAuth, async (req, res) => {
   try {
-    const user = req.user as { id: number; role: string };
     const id = parseInt(req.params.id);
 
     const rows = await db.select().from(meetings).where(eq(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: 'Reunião não encontrada' });
     const meeting = rows[0];
-    if (!canAccessMeeting(user, meeting)) {
+    if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: 'Acesso negado' });
     }
 
@@ -376,13 +376,12 @@ router.post('/:id/start', requireAuth, async (req, res) => {
 // ─── End meeting ───────────────────────────────────────────────────────────────
 router.post('/:id/end', requireAuth, async (req, res) => {
   try {
-    const user = req.user as { id: number; role: string };
     const id = parseInt(req.params.id);
 
     const rows = await db.select().from(meetings).where(eq(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: 'Reunião não encontrada' });
     const meeting = rows[0];
-    if (!canAccessMeeting(user, meeting)) {
+    if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: 'Acesso negado' });
     }
 
@@ -412,13 +411,12 @@ router.post('/:id/end', requireAuth, async (req, res) => {
 // ─── Update notes ─────────────────────────────────────────────────────────────
 router.patch('/:id/notes', requireAuth, async (req, res) => {
   try {
-    const user = req.user as { id: number; role: string };
     const id = parseInt(req.params.id);
 
     const rows = await db.select().from(meetings).where(eq(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: 'Reunião não encontrada' });
     const meeting = rows[0];
-    if (!canAccessMeeting(user, meeting)) {
+    if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: 'Acesso negado' });
     }
 
@@ -443,7 +441,7 @@ router.post('/:id/send-link', requireAuth, async (req, res) => {
     const rows = await db.select().from(meetings).where(eq(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: 'Reunião não encontrada' });
     const meeting = rows[0];
-    if (!canAccessMeeting(user, meeting)) {
+    if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: 'Acesso negado' });
     }
 
@@ -491,13 +489,12 @@ router.post('/:id/send-link', requireAuth, async (req, res) => {
 // ─── Cancel / delete meeting ──────────────────────────────────────────────────
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
-    const user = req.user as { id: number; role: string };
     const id = parseInt(req.params.id);
 
     const rows = await db.select().from(meetings).where(eq(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: 'Reunião não encontrada' });
     const meeting = rows[0];
-    if (!canAccessMeeting(user, meeting)) {
+    if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: 'Acesso negado' });
     }
 

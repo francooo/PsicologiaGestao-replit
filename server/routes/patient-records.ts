@@ -7,7 +7,7 @@ import path from 'path';
 import { summarizeDocument, UnsupportedFormatError, AIServiceError, AIQuotaError } from '../services/ai';
 import { db } from '../db';
 import { psychologists, users } from '@shared/schema';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 const router = Router();
 
@@ -82,7 +82,7 @@ async function checkPatientAccess(req: any, res: any, next: any) {
             return res.status(400).json({ message: "ID de paciente inválido" });
         }
 
-        const patient = await storage.getPatient(patientId);
+        const patient = await storage.getPatient(req.companyId!, patientId);
         if (!patient) {
             return res.status(404).json({ message: "Paciente não encontrado" });
         }
@@ -95,7 +95,7 @@ async function checkPatientAccess(req: any, res: any, next: any) {
 
         // Psicólogo: só pode acessar pacientes da sua carteira
         if (user.role === 'psychologist') {
-            const psychologist = await storage.getPsychologistByUserId(user.id);
+            const psychologist = await storage.getPsychologistByUserId(req.companyId!, user.id);
             const psychologistId = psychologist?.id ?? -1;
             if (isPatientOwned(patient, psychologistId, user.id)) {
                 req.patient = patient;
@@ -104,7 +104,7 @@ async function checkPatientAccess(req: any, res: any, next: any) {
         }
 
         // Acesso negado — registrar no audit log
-        await storage.createAuditLog({
+        await storage.createAuditLog(req.companyId!, {
             userId: user.id,
             action: "access_denied",
             resourceType: "patient_record",
@@ -168,11 +168,11 @@ router.get('/', async (req, res) => {
     try {
         const user = req.user as any;
         const activeOnly = req.query.active !== 'false';
-        let patientsList = await storage.listPatients(activeOnly);
+        let patientsList = await storage.listPatients(req.companyId!, activeOnly);
 
         // Filtrar carteira para psicólogos
         if (user.role === 'psychologist') {
-            const psychologist = await storage.getPsychologistByUserId(user.id);
+            const psychologist = await storage.getPsychologistByUserId(req.companyId!, user.id);
             const psychologistId = psychologist?.id ?? -1;
             patientsList = patientsList.filter(p => isPatientOwned(p, psychologistId, user.id));
         }
@@ -182,7 +182,8 @@ router.get('/', async (req, res) => {
             const allPsychologists = await db
                 .select({ id: psychologists.id, fullName: users.fullName })
                 .from(psychologists)
-                .innerJoin(users, eq(psychologists.userId, users.id));
+                .innerJoin(users, eq(psychologists.userId, users.id))
+                .where(eq(psychologists.companyId, req.companyId!));
             const psychologistNames: Record<number, string> = {};
             for (const row of allPsychologists) {
                 psychologistNames[row.id] = row.fullName;
@@ -219,16 +220,19 @@ router.post('/', async (req, res) => {
         const userRole = (req.user as any).role;
 
         let psychologistId = data.psychologistId ?? null;
+        if (psychologistId && !(await storage.getPsychologist(req.companyId!, psychologistId))) {
+            return res.status(400).json({ message: "Psicólogo não encontrado." });
+        }
         if (!psychologistId && userRole === 'psychologist') {
-            const psychRecord = await storage.getPsychologistByUserId(userId);
+            const psychRecord = await storage.getPsychologistByUserId(req.companyId!, userId);
             if (psychRecord) psychologistId = psychRecord.id;
         }
 
         const patientData = { ...data, createdBy: userId, psychologistId };
-        const patient = await storage.createPatient(patientData);
+        const patient = await storage.createPatient(req.companyId!, patientData);
 
         // Audit log
-        await storage.createAuditLog({
+        await storage.createAuditLog(req.companyId!, {
             userId: userId,
             action: "create",
             resourceType: "patient",
@@ -254,14 +258,14 @@ router.put('/:id', checkPatientAccess, async (req, res) => {
         const id = parseInt(req.params.id);
         const userId = (req.user as any).id;
         const data = insertPatientSchema.partial().parse(req.body);
-        const patient = await storage.updatePatient(id, data);
+        const patient = await storage.updatePatient(req.companyId!, id, data);
 
         if (!patient) {
             return res.status(404).json({ message: "Paciente não encontrado" });
         }
 
         // Audit log
-        await storage.createAuditLog({
+        await storage.createAuditLog(req.companyId!, {
             userId: userId,
             action: "update",
             resourceType: "patient",
@@ -290,7 +294,7 @@ router.get('/:id/medical-record', checkPatientAccess, async (req, res) => {
         const record = await storage.getMedicalRecordByPatientId(patientId);
 
         // Audit log (view)
-        await storage.createAuditLog({
+        await storage.createAuditLog(req.companyId!, {
             userId: userId,
             action: "view",
             resourceType: "medical_record",
@@ -325,7 +329,7 @@ router.post('/:id/medical-record', checkPatientAccess, async (req, res) => {
         }
 
         // Audit log
-        await storage.createAuditLog({
+        await storage.createAuditLog(req.companyId!, {
             userId: userId,
             action: existing ? "update" : "create",
             resourceType: "medical_record",
@@ -384,7 +388,7 @@ router.post('/:id/sessions', checkPatientAccess, async (req, res) => {
         const session = await storage.createSession(data);
 
         // Audit log
-        await storage.createAuditLog({
+        await storage.createAuditLog(req.companyId!, {
             userId: userId,
             action: "create",
             resourceType: "clinical_session",
@@ -409,7 +413,8 @@ router.put('/sessions/:sessionId', checkSessionAccess, async (req, res) => {
     try {
         const sessionId = parseInt(req.params.sessionId);
         const userId = (req.user as any).id;
-        const data = insertClinicalSessionSchema.partial().parse(req.body);
+        // A session never moves to another patient (that one may not even be of this company)
+        const { patientId: _patientId, ...data } = insertClinicalSessionSchema.partial().parse(req.body);
 
         const oldSession = await storage.getSession(sessionId);
         if (!oldSession) return res.status(404).json({ message: "Sessão não encontrada" });
@@ -423,7 +428,7 @@ router.put('/sessions/:sessionId', checkSessionAccess, async (req, res) => {
         const session = await storage.updateSession(sessionId, updateData);
 
         // Audit log
-        await storage.createAuditLog({
+        await storage.createAuditLog(req.companyId!, {
             userId: userId,
             action: "update",
             resourceType: "clinical_session",
@@ -450,7 +455,7 @@ router.patch('/sessions/:sessionId/archive', checkSessionAccess, async (req, res
 
         const updated = await storage.updateSession(sessionId, { isActive: false, editedBy: userId });
 
-        await storage.createAuditLog({
+        await storage.createAuditLog(req.companyId!, {
             userId,
             action: "archive",
             resourceType: "clinical_session",
@@ -502,7 +507,7 @@ router.post('/:id/documents', checkPatientAccess, uploadSingle('file'), async (r
         const doc = await storage.createDocument(docData);
 
         // Audit log
-        await storage.createAuditLog({
+        await storage.createAuditLog(req.companyId!, {
             userId: userId,
             action: "upload",
             resourceType: "document",
@@ -536,7 +541,7 @@ router.get('/documents/:docId/download', checkDocumentAccess, async (req, res) =
         }
 
         // Audit log
-        await storage.createAuditLog({
+        await storage.createAuditLog(req.companyId!, {
             userId: userId,
             action: "download",
             resourceType: "document",
@@ -587,7 +592,7 @@ router.post('/documents/:docId/summarize', checkDocumentAccess, async (req, res)
         const { summary, model } = await summarizeDocument(doc.fileData, doc.mimeType, doc.documentName);
         const saved = await storage.saveDocumentSummary(docId, summary, model);
 
-        await storage.createAuditLog({
+        await storage.createAuditLog(req.companyId!, {
             userId: user.id,
             action: wantsRefresh ? "ai_summary_refresh" : "ai_summary",
             resourceType: "document",
@@ -626,7 +631,7 @@ router.delete('/documents/:docId', checkDocumentAccess, async (req, res) => {
         await storage.deleteDocument(docId);
 
         // Audit log
-        await storage.createAuditLog({
+        await storage.createAuditLog(req.companyId!, {
             userId: userId,
             action: "delete",
             resourceType: "document",
@@ -662,7 +667,7 @@ router.post('/:id/assessments', checkPatientAccess, async (req, res) => {
         const data = insertPsychologicalAssessmentSchema.parse({ ...req.body, patientId });
         const assessment = await storage.createAssessment(data);
 
-        await storage.createAuditLog({
+        await storage.createAuditLog(req.companyId!, {
             userId,
             action: "create",
             resourceType: "assessment",
@@ -703,7 +708,7 @@ router.patch('/:id/transfer', async (req, res) => {
 
         // Somente admin pode transferir
         if (user.role !== 'admin') {
-            await storage.createAuditLog({
+            await storage.createAuditLog(req.companyId!, {
                 userId: user.id,
                 action: "transfer_denied",
                 resourceType: "patient_record",
@@ -724,11 +729,11 @@ router.patch('/:id/transfer', async (req, res) => {
         }
 
         // Buscar paciente atual
-        const patient = await storage.getPatient(patientId);
+        const patient = await storage.getPatient(req.companyId!, patientId);
         if (!patient) return res.status(404).json({ message: "Paciente não encontrado." });
 
         // Validar novo psicólogo
-        const targetPsychologist = await storage.getPsychologist(toPsychologistId);
+        const targetPsychologist = await storage.getPsychologist(req.companyId!, toPsychologistId);
         if (!targetPsychologist) {
             return res.status(400).json({ message: "Psicólogo de destino não encontrado." });
         }
@@ -739,7 +744,7 @@ router.patch('/:id/transfer', async (req, res) => {
         }
 
         // Executar transferência atômica (UPDATE patients + INSERT patient_transfers)
-        const result = await storage.transferPatient({
+        const result = await storage.transferPatient(req.companyId!, {
             patientId,
             fromPsychologistId: patient.psychologistId ?? null,
             toPsychologistId,
@@ -748,7 +753,7 @@ router.patch('/:id/transfer', async (req, res) => {
         });
 
         // Audit log
-        await storage.createAuditLog({
+        await storage.createAuditLog(req.companyId!, {
             userId: user.id,
             action: "patient_transfer",
             resourceType: "patient",
@@ -779,6 +784,9 @@ router.get('/:id/transfers', async (req, res) => {
             return res.status(403).json({ message: "Acesso negado.", code: "FORBIDDEN" });
         }
         const patientId = parseInt(req.params.id);
+        if (!(await storage.getPatient(req.companyId!, patientId))) {
+            return res.status(404).json({ message: "Paciente não encontrado." });
+        }
         const transfers = await storage.listTransfersByPatientId(patientId);
         res.json(transfers);
     } catch (error) {

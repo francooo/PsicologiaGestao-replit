@@ -11,6 +11,8 @@ interface SendCareEmailParams {
   patientEmail: string;
   psychologistName: string;
   psychologistEmail: string;
+  /** Name of the dispatch's company, see clinicDisplayName */
+  clinicName: string;
   subject: string;
   customMessage?: string | null;
   questions: CareDispatchQuestion[];
@@ -26,7 +28,7 @@ export async function sendCareFormEmail(params: SendCareEmailParams): Promise<bo
       return false;
     }
 
-    const clinicName = process.env.CLINIC_NAME || "ConsultaPsi";
+    const clinicName = params.clinicName;
     const firstName = params.patientName.split(" ")[0];
 
     const expiryStr = params.tokenExpiresAt.toLocaleDateString("pt-BR", {

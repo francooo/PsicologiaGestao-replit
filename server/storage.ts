@@ -21,6 +21,7 @@ import {
   commissionPayoutConfigs, type CommissionPayoutConfig, type InsertCommissionPayoutConfig,
   commissions, type Commission,
   commissionItems, type CommissionItem,
+  companyMemberships,
 } from "@shared/schema";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
@@ -29,9 +30,18 @@ import { eq, and, gte, lte, sql, desc, ilike, or, getTableColumns } from "drizzl
 
 const PostgresSessionStore = connectPg(session);
 
-// company_id is optional on insert while the column still defaults to Empresa 1 (multi-empresa, fase 0).
-type NewAuditLog = Omit<AuditLog, "id" | "createdAt" | "companyId"> & { companyId?: number | null };
-type NewCommission = Omit<Commission, "id" | "createdAt" | "updatedAt" | "companyId"> & { companyId?: number | null };
+// Multi-empresa: every method on clinic data takes the active companyId first; reads,
+// updates and deletes are filtered by it and inserts store it. Child rows (sessions,
+// documents, assessments, commission items...) are reached through a parent that
+// was already checked (e.g. checkPatientAccess), so they take no companyId.
+type NewAuditLog = Omit<AuditLog, "id" | "createdAt" | "companyId">;
+type NewCommission = Omit<Commission, "id" | "createdAt" | "updatedAt" | "companyId">;
+
+/** Updates come from request bodies: a companyId there must never move a row to another company. */
+function withoutCompany<T extends object>(data: T): Omit<T, "companyId"> {
+  const { companyId: _ignored, ...rest } = data as T & { companyId?: unknown };
+  return rest;
+}
 
 // Listagens de notas fiscais não devem trazer o bytea da imagem (pode ter
 // alguns MB por nota) — só as buscas de uma única nota (para servir a
@@ -50,54 +60,55 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: number, user: Partial<User>): Promise<User | undefined>;
   deleteUser(id: number): Promise<boolean>;
-  getAllUsers(): Promise<User[]>;
+  getAllUsers(companyId: number): Promise<User[]>;
   getUserProfilePhoto(id: number): Promise<{ data: Buffer; mimeType: string } | undefined>;
 
   // Psychologist related methods
-  getPsychologist(id: number): Promise<Psychologist | undefined>;
-  getPsychologistByUserId(userId: number): Promise<Psychologist | undefined>;
-  createPsychologist(psychologist: InsertPsychologist): Promise<Psychologist>;
-  updatePsychologist(id: number, psychologist: Partial<Psychologist>): Promise<Psychologist | undefined>;
-  deletePsychologist(id: number): Promise<boolean>;
-  getAllPsychologists(): Promise<Psychologist[]>;
+  getPsychologist(companyId: number, id: number): Promise<Psychologist | undefined>;
+  getPsychologistForPublicPage(id: number): Promise<Psychologist | undefined>;
+  getPsychologistByUserId(companyId: number, userId: number): Promise<Psychologist | undefined>;
+  createPsychologist(companyId: number, psychologist: InsertPsychologist): Promise<Psychologist>;
+  updatePsychologist(companyId: number, id: number, psychologist: Partial<Psychologist>): Promise<Psychologist | undefined>;
+  deletePsychologist(companyId: number, id: number): Promise<boolean>;
+  getAllPsychologists(companyId: number): Promise<Psychologist[]>;
 
   // Room related methods
-  getRoom(id: number): Promise<Room | undefined>;
-  createRoom(room: InsertRoom): Promise<Room>;
-  updateRoom(id: number, room: Partial<Room>): Promise<Room | undefined>;
-  deleteRoom(id: number): Promise<boolean>;
-  getAllRooms(): Promise<Room[]>;
+  getRoom(companyId: number, id: number): Promise<Room | undefined>;
+  createRoom(companyId: number, room: InsertRoom): Promise<Room>;
+  updateRoom(companyId: number, id: number, room: Partial<Room>): Promise<Room | undefined>;
+  deleteRoom(companyId: number, id: number): Promise<boolean>;
+  getAllRooms(companyId: number): Promise<Room[]>;
 
   // Appointment related methods
-  getAppointment(id: number): Promise<Appointment | undefined>;
-  createAppointment(appointment: InsertAppointment): Promise<Appointment>;
-  updateAppointment(id: number, appointment: Partial<Appointment>): Promise<Appointment | undefined>;
-  deleteAppointment(id: number): Promise<boolean>;
-  getAllAppointments(): Promise<Appointment[]>;
-  getAppointmentsByPsychologistId(psychologistId: number): Promise<Appointment[]>;
-  getAppointmentsByDate(date: Date): Promise<Appointment[]>;
-  getAppointmentsByDateRange(startDate: Date, endDate: Date): Promise<Appointment[]>;
-  getAppointmentsByPsychologistIdAndDateRange(psychologistId: number, startDate: Date, endDate: Date): Promise<Appointment[]>;
+  getAppointment(companyId: number, id: number): Promise<Appointment | undefined>;
+  createAppointment(companyId: number, appointment: InsertAppointment): Promise<Appointment>;
+  updateAppointment(companyId: number, id: number, appointment: Partial<Appointment>): Promise<Appointment | undefined>;
+  deleteAppointment(companyId: number, id: number): Promise<boolean>;
+  getAllAppointments(companyId: number): Promise<Appointment[]>;
+  getAppointmentsByPsychologistId(companyId: number, psychologistId: number): Promise<Appointment[]>;
+  getAppointmentsByDate(companyId: number, date: Date): Promise<Appointment[]>;
+  getAppointmentsByDateRange(companyId: number, startDate: Date, endDate: Date): Promise<Appointment[]>;
+  getAppointmentsByPsychologistIdAndDateRange(companyId: number, psychologistId: number, startDate: Date, endDate: Date): Promise<Appointment[]>;
 
   // Transaction related methods
-  getTransaction(id: number): Promise<Transaction | undefined>;
-  createTransaction(transaction: InsertTransaction): Promise<Transaction>;
-  updateTransaction(id: number, transaction: Partial<Transaction>): Promise<Transaction | undefined>;
-  deleteTransaction(id: number): Promise<boolean>;
-  getAllTransactions(): Promise<Transaction[]>;
-  getTransactionsByType(type: string): Promise<Transaction[]>;
-  getTransactionsByDateRange(startDate: Date, endDate: Date): Promise<Transaction[]>;
+  getTransaction(companyId: number, id: number): Promise<Transaction | undefined>;
+  createTransaction(companyId: number, transaction: InsertTransaction): Promise<Transaction>;
+  updateTransaction(companyId: number, id: number, transaction: Partial<Transaction>): Promise<Transaction | undefined>;
+  deleteTransaction(companyId: number, id: number): Promise<boolean>;
+  getAllTransactions(companyId: number): Promise<Transaction[]>;
+  getTransactionsByType(companyId: number, type: string): Promise<Transaction[]>;
+  getTransactionsByDateRange(companyId: number, startDate: Date, endDate: Date): Promise<Transaction[]>;
 
   // Room booking related methods
-  getRoomBooking(id: number): Promise<RoomBooking | undefined>;
-  createRoomBooking(roomBooking: InsertRoomBooking): Promise<RoomBooking>;
-  updateRoomBooking(id: number, roomBooking: Partial<RoomBooking>): Promise<RoomBooking | undefined>;
-  deleteRoomBooking(id: number): Promise<boolean>;
-  getAllRoomBookings(): Promise<RoomBooking[]>;
-  getRoomBookingsByRoomId(roomId: number): Promise<RoomBooking[]>;
-  getRoomBookingsByDate(date: Date): Promise<RoomBooking[]>;
-  getRoomBookingsByDateRange(startDate: Date, endDate: Date): Promise<RoomBooking[]>;
-  checkRoomAvailability(roomId: number, date: Date, startTime: string, endTime: string): Promise<boolean>;
+  getRoomBooking(companyId: number, id: number): Promise<RoomBooking | undefined>;
+  createRoomBooking(companyId: number, roomBooking: InsertRoomBooking): Promise<RoomBooking>;
+  updateRoomBooking(companyId: number, id: number, roomBooking: Partial<RoomBooking>): Promise<RoomBooking | undefined>;
+  deleteRoomBooking(companyId: number, id: number): Promise<boolean>;
+  getAllRoomBookings(companyId: number): Promise<RoomBooking[]>;
+  getRoomBookingsByRoomId(companyId: number, roomId: number): Promise<RoomBooking[]>;
+  getRoomBookingsByDate(companyId: number, date: Date): Promise<RoomBooking[]>;
+  getRoomBookingsByDateRange(companyId: number, startDate: Date, endDate: Date): Promise<RoomBooking[]>;
+  checkRoomAvailability(companyId: number, roomId: number, date: Date, startTime: string, endTime: string): Promise<boolean>;
 
   // Permission related methods
   getPermission(id: number): Promise<Permission | undefined>;
@@ -115,25 +126,25 @@ export interface IStorage {
   getRolePermissionsByRole(role: string): Promise<RolePermission[]>;
 
   // Invoice related methods (NFS-e)
-  getInvoice(id: number): Promise<Invoice | undefined>;
-  createInvoice(invoice: InsertInvoice): Promise<Invoice>;
-  updateInvoice(id: number, data: Partial<Invoice>): Promise<Invoice | undefined>;
-  deleteInvoice(id: number): Promise<boolean>;
-  getInvoicesByUserId(userId: number, opts?: { limit?: number; offset?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: Omit<Invoice, "imageData">[]; total: number }>;
-  getInvoicesSummary(psychologistId: number, opts?: { dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }>;
-  getAllInvoices(): Promise<Invoice[]>;
-  getInvoicesByReferenceMonth(referenceMonth: string): Promise<Invoice[]>;
-  getInvoiceByUserAndMonth(userId: number, referenceMonth: string): Promise<Invoice | undefined>;
-  getInvoicesAdmin(opts?: { limit?: number; offset?: number; psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: (Omit<Invoice, "imageData"> & { user: User })[]; total: number }>;
-  getInvoicesSummaryAdmin(opts?: { psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }>;
+  getInvoice(companyId: number, id: number): Promise<Invoice | undefined>;
+  createInvoice(companyId: number, invoice: Omit<InsertInvoice, "companyId">): Promise<Invoice>;
+  updateInvoice(companyId: number, id: number, data: Partial<Invoice>): Promise<Invoice | undefined>;
+  deleteInvoice(companyId: number, id: number): Promise<boolean>;
+  getInvoicesByUserId(companyId: number, userId: number, opts?: { limit?: number; offset?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: Omit<Invoice, "imageData">[]; total: number }>;
+  getInvoicesSummary(companyId: number, psychologistId: number, opts?: { dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }>;
+  getAllInvoices(companyId: number): Promise<Invoice[]>;
+  getInvoicesByReferenceMonth(companyId: number, referenceMonth: string): Promise<Invoice[]>;
+  getInvoiceByUserAndMonth(companyId: number, userId: number, referenceMonth: string): Promise<Invoice | undefined>;
+  getInvoicesAdmin(companyId: number, opts?: { limit?: number; offset?: number; psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: (Omit<Invoice, "imageData"> & { user: User })[]; total: number }>;
+  getInvoicesSummaryAdmin(companyId: number, opts?: { psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }>;
 
   // Patient Record System Methods
   // Patients
-  getPatient(id: number): Promise<Patient | undefined>;
-  getPatientByCpf(cpf: string): Promise<Patient | undefined>;
-  createPatient(patient: InsertPatient): Promise<Patient>;
-  updatePatient(id: number, patient: Partial<Patient>): Promise<Patient | undefined>;
-  listPatients(activeOnly?: boolean): Promise<Patient[]>;
+  getPatient(companyId: number, id: number): Promise<Patient | undefined>;
+  getPatientByCpf(companyId: number, cpf: string): Promise<Patient | undefined>;
+  createPatient(companyId: number, patient: InsertPatient): Promise<Patient>;
+  updatePatient(companyId: number, id: number, patient: Partial<Patient>): Promise<Patient | undefined>;
+  listPatients(companyId: number, activeOnly?: boolean): Promise<Patient[]>;
 
   // Medical Records
   getMedicalRecordByPatientId(patientId: number): Promise<MedicalRecord | undefined>;
@@ -159,14 +170,14 @@ export interface IStorage {
   listAssessmentsByPatientId(patientId: number): Promise<PsychologicalAssessment[]>;
 
   // Audit & History
-  createAuditLog(log: NewAuditLog): Promise<AuditLog>;
+  createAuditLog(companyId: number, log: NewAuditLog): Promise<AuditLog>;
   listAuditLogsByPatientId(patientId: number): Promise<AuditLog[]>;
   getSessionHistory(sessionId: number): Promise<SessionHistory[]>;
-  getInvoiceWithUser(id: number): Promise<(Invoice & { user: User }) | undefined>;
-  getAllInvoicesWithUsers(): Promise<(Invoice & { user: User })[]>;
+  getInvoiceWithUser(companyId: number, id: number): Promise<(Invoice & { user: User }) | undefined>;
+  getAllInvoicesWithUsers(companyId: number): Promise<(Invoice & { user: User })[]>;
 
   // Patient Transfers
-  transferPatient(data: {
+  transferPatient(companyId: number, data: {
     patientId: number;
     fromPsychologistId: number | null;
     toPsychologistId: number;
@@ -176,17 +187,17 @@ export interface IStorage {
   listTransfersByPatientId(patientId: number): Promise<PatientTransfer[]>;
 
   // Commission methods
-  listCommissionPayoutConfigs(psychologistId?: number): Promise<CommissionPayoutConfig[]>;
-  getActiveCommissionPayoutConfig(psychologistId: number, forDate: string): Promise<CommissionPayoutConfig | undefined>;
-  createCommissionPayoutConfig(data: InsertCommissionPayoutConfig): Promise<CommissionPayoutConfig>;
-  updateCommissionPayoutConfig(id: number, data: Partial<InsertCommissionPayoutConfig>): Promise<CommissionPayoutConfig | undefined>;
-  listCommissions(filters?: { psychologistId?: number; status?: string; periodStart?: string; periodEnd?: string; exactPeriod?: { periodStart: string; periodEnd: string } }): Promise<Commission[]>;
-  getCommission(id: number): Promise<Commission | undefined>;
-  createCommission(data: NewCommission): Promise<Commission>;
-  updateCommission(id: number, data: Partial<Commission>): Promise<Commission | undefined>;
+  listCommissionPayoutConfigs(companyId: number, psychologistId?: number): Promise<CommissionPayoutConfig[]>;
+  getActiveCommissionPayoutConfig(companyId: number, psychologistId: number, forDate: string): Promise<CommissionPayoutConfig | undefined>;
+  createCommissionPayoutConfig(companyId: number, data: InsertCommissionPayoutConfig): Promise<CommissionPayoutConfig>;
+  updateCommissionPayoutConfig(companyId: number, id: number, data: Partial<InsertCommissionPayoutConfig>): Promise<CommissionPayoutConfig | undefined>;
+  listCommissions(companyId: number, filters?: { psychologistId?: number; status?: string; periodStart?: string; periodEnd?: string; exactPeriod?: { periodStart: string; periodEnd: string } }): Promise<Commission[]>;
+  getCommission(companyId: number, id: number): Promise<Commission | undefined>;
+  createCommission(companyId: number, data: NewCommission): Promise<Commission>;
+  updateCommission(companyId: number, id: number, data: Partial<Commission>): Promise<Commission | undefined>;
   listCommissionItems(commissionId: number): Promise<CommissionItem[]>;
   createCommissionItems(items: Omit<CommissionItem, "id">[]): Promise<CommissionItem[]>;
-  getCommissionDashboard(month: string): Promise<{ totalPendente: string; totalPago: string; numPsicologas: number; numLocacoes: number }>;
+  getCommissionDashboard(companyId: number, month: string): Promise<{ totalPendente: string; totalPago: string; numPsicologas: number; numLocacoes: number }>;
 
   // Session store
   sessionStore: session.Store;
@@ -241,8 +252,14 @@ export class DatabaseStorage implements IStorage {
     return !!deletedUser;
   }
 
-  async getAllUsers(): Promise<User[]> {
-    return await db.select(userColumns).from(users) as User[];
+  /** Members of the company, with `role` = their role there. */
+  async getAllUsers(companyId: number): Promise<User[]> {
+    const rows = await db
+      .select({ user: userColumns, role: companyMemberships.role })
+      .from(companyMemberships)
+      .innerJoin(users, eq(companyMemberships.userId, users.id))
+      .where(and(eq(companyMemberships.companyId, companyId), eq(companyMemberships.status, "active")));
+    return rows.map((r) => ({ ...r.user, role: r.role }) as User);
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
@@ -316,109 +333,121 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Psychologist methods
-  async getPsychologist(id: number): Promise<Psychologist | undefined> {
+  async getPsychologist(companyId: number, id: number): Promise<Psychologist | undefined> {
+    const [psych] = await db.select().from(psychologists).where(and(eq(psychologists.id, id), eq(psychologists.companyId, companyId)));
+    return psych;
+  }
+
+  /**
+   * Unscoped lookup for public pages (quick booking link), which have no logged-in
+   * company: the psychologist's companyId is what scopes everything after it.
+   */
+  async getPsychologistForPublicPage(id: number): Promise<Psychologist | undefined> {
     const [psych] = await db.select().from(psychologists).where(eq(psychologists.id, id));
     return psych;
   }
 
-  async getPsychologistByUserId(userId: number): Promise<Psychologist | undefined> {
-    const [psych] = await db.select().from(psychologists).where(eq(psychologists.userId, userId));
+  async getPsychologistByUserId(companyId: number, userId: number): Promise<Psychologist | undefined> {
+    const [psych] = await db.select().from(psychologists).where(and(eq(psychologists.userId, userId), eq(psychologists.companyId, companyId)));
     return psych;
   }
 
-  async createPsychologist(psychologist: InsertPsychologist): Promise<Psychologist> {
+  async createPsychologist(companyId: number, psychologist: InsertPsychologist): Promise<Psychologist> {
     const [newPsych] = await db.insert(psychologists).values({
       ...psychologist,
+      companyId,
       hourlyRate: psychologist.hourlyRate.toString()
     }).returning();
     return newPsych;
   }
 
-  async updatePsychologist(id: number, data: Partial<Psychologist>): Promise<Psychologist | undefined> {
-    const [updated] = await db.update(psychologists).set(data).where(eq(psychologists.id, id)).returning();
+  async updatePsychologist(companyId: number, id: number, data: Partial<Psychologist>): Promise<Psychologist | undefined> {
+    const [updated] = await db.update(psychologists).set(withoutCompany(data)).where(and(eq(psychologists.id, id), eq(psychologists.companyId, companyId))).returning();
     return updated;
   }
 
-  async deletePsychologist(id: number): Promise<boolean> {
-    const [deleted] = await db.delete(psychologists).where(eq(psychologists.id, id)).returning();
+  async deletePsychologist(companyId: number, id: number): Promise<boolean> {
+    const [deleted] = await db.delete(psychologists).where(and(eq(psychologists.id, id), eq(psychologists.companyId, companyId))).returning();
     return !!deleted;
   }
 
-  async getAllPsychologists(): Promise<Psychologist[]> {
-    return await db.select().from(psychologists);
+  async getAllPsychologists(companyId: number): Promise<Psychologist[]> {
+    return await db.select().from(psychologists).where(eq(psychologists.companyId, companyId));
   }
 
   // Room methods
-  async getRoom(id: number): Promise<Room | undefined> {
-    const [room] = await db.select().from(rooms).where(eq(rooms.id, id));
+  async getRoom(companyId: number, id: number): Promise<Room | undefined> {
+    const [room] = await db.select().from(rooms).where(and(eq(rooms.id, id), eq(rooms.companyId, companyId)));
     return room;
   }
 
-  async createRoom(room: InsertRoom): Promise<Room> {
-    const [newRoom] = await db.insert(rooms).values(room).returning();
+  async createRoom(companyId: number, room: InsertRoom): Promise<Room> {
+    const [newRoom] = await db.insert(rooms).values({ ...room, companyId }).returning();
     return newRoom;
   }
 
-  async updateRoom(id: number, data: Partial<Room>): Promise<Room | undefined> {
-    const [updated] = await db.update(rooms).set(data).where(eq(rooms.id, id)).returning();
+  async updateRoom(companyId: number, id: number, data: Partial<Room>): Promise<Room | undefined> {
+    const [updated] = await db.update(rooms).set(withoutCompany(data)).where(and(eq(rooms.id, id), eq(rooms.companyId, companyId))).returning();
     return updated;
   }
 
-  async deleteRoom(id: number): Promise<boolean> {
-    const [deleted] = await db.delete(rooms).where(eq(rooms.id, id)).returning();
+  async deleteRoom(companyId: number, id: number): Promise<boolean> {
+    const [deleted] = await db.delete(rooms).where(and(eq(rooms.id, id), eq(rooms.companyId, companyId))).returning();
     return !!deleted;
   }
 
-  async getAllRooms(): Promise<Room[]> {
-    return await db.select().from(rooms);
+  async getAllRooms(companyId: number): Promise<Room[]> {
+    return await db.select().from(rooms).where(eq(rooms.companyId, companyId));
   }
 
   // Appointment methods
-  async getAppointment(id: number): Promise<Appointment | undefined> {
-    const [appt] = await db.select().from(appointments).where(eq(appointments.id, id));
+  async getAppointment(companyId: number, id: number): Promise<Appointment | undefined> {
+    const [appt] = await db.select().from(appointments).where(and(eq(appointments.id, id), eq(appointments.companyId, companyId)));
     return appt;
   }
 
-  async createAppointment(appointment: InsertAppointment): Promise<Appointment> {
-    const [newAppt] = await db.insert(appointments).values(appointment).returning();
+  async createAppointment(companyId: number, appointment: InsertAppointment): Promise<Appointment> {
+    const [newAppt] = await db.insert(appointments).values({ ...appointment, companyId }).returning();
     return newAppt;
   }
 
-  async updateAppointment(id: number, data: Partial<Appointment>): Promise<Appointment | undefined> {
-    const [updated] = await db.update(appointments).set(data).where(eq(appointments.id, id)).returning();
+  async updateAppointment(companyId: number, id: number, data: Partial<Appointment>): Promise<Appointment | undefined> {
+    const [updated] = await db.update(appointments).set(withoutCompany(data)).where(and(eq(appointments.id, id), eq(appointments.companyId, companyId))).returning();
     return updated;
   }
 
-  async deleteAppointment(id: number): Promise<boolean> {
-    const [deleted] = await db.delete(appointments).where(eq(appointments.id, id)).returning();
+  async deleteAppointment(companyId: number, id: number): Promise<boolean> {
+    const [deleted] = await db.delete(appointments).where(and(eq(appointments.id, id), eq(appointments.companyId, companyId))).returning();
     return !!deleted;
   }
 
-  async getAllAppointments(): Promise<Appointment[]> {
-    return await db.select().from(appointments);
+  async getAllAppointments(companyId: number): Promise<Appointment[]> {
+    return await db.select().from(appointments).where(eq(appointments.companyId, companyId));
   }
 
-  async getAppointmentsByPsychologistId(psychologistId: number): Promise<Appointment[]> {
-    return await db.select().from(appointments).where(eq(appointments.psychologistId, psychologistId));
+  async getAppointmentsByPsychologistId(companyId: number, psychologistId: number): Promise<Appointment[]> {
+    return await db.select().from(appointments).where(and(eq(appointments.psychologistId, psychologistId), eq(appointments.companyId, companyId)));
   }
 
-  async getAppointmentsByDate(date: Date): Promise<Appointment[]> {
-    const all = await this.getAllAppointments();
+  async getAppointmentsByDate(companyId: number, date: Date): Promise<Appointment[]> {
+    const all = await this.getAllAppointments(companyId);
     const dateString = date.toISOString().split('T')[0];
     return all.filter(a => new Date(a.date).toISOString().split('T')[0] === dateString);
   }
 
-  async getAppointmentsByDateRange(startDate: Date, endDate: Date): Promise<Appointment[]> {
+  async getAppointmentsByDateRange(companyId: number, startDate: Date, endDate: Date): Promise<Appointment[]> {
     return await db.select().from(appointments)
       .where(and(
+        eq(appointments.companyId, companyId),
         gte(appointments.date, startDate.toISOString()),
         lte(appointments.date, endDate.toISOString())
       ));
   }
 
-  async getAppointmentsByPsychologistIdAndDateRange(psychologistId: number, startDate: Date, endDate: Date): Promise<Appointment[]> {
+  async getAppointmentsByPsychologistIdAndDateRange(companyId: number, psychologistId: number, startDate: Date, endDate: Date): Promise<Appointment[]> {
     return await db.select().from(appointments)
       .where(and(
+        eq(appointments.companyId, companyId),
         eq(appointments.psychologistId, psychologistId),
         gte(appointments.date, startDate.toISOString()),
         lte(appointments.date, endDate.toISOString())
@@ -426,90 +455,93 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Transaction methods
-  async getTransaction(id: number): Promise<Transaction | undefined> {
-    const [tx] = await db.select().from(transactions).where(eq(transactions.id, id));
+  async getTransaction(companyId: number, id: number): Promise<Transaction | undefined> {
+    const [tx] = await db.select().from(transactions).where(and(eq(transactions.id, id), eq(transactions.companyId, companyId)));
     return tx;
   }
 
-  async createTransaction(transaction: InsertTransaction): Promise<Transaction> {
+  async createTransaction(companyId: number, transaction: InsertTransaction): Promise<Transaction> {
     const [newTx] = await db.insert(transactions).values({
       ...transaction,
+      companyId,
       amount: transaction.amount.toString()
     }).returning();
     return newTx;
   }
 
-  async updateTransaction(id: number, data: Partial<Transaction>): Promise<Transaction | undefined> {
-    const [updated] = await db.update(transactions).set(data).where(eq(transactions.id, id)).returning();
+  async updateTransaction(companyId: number, id: number, data: Partial<Transaction>): Promise<Transaction | undefined> {
+    const [updated] = await db.update(transactions).set(withoutCompany(data)).where(and(eq(transactions.id, id), eq(transactions.companyId, companyId))).returning();
     return updated;
   }
 
-  async deleteTransaction(id: number): Promise<boolean> {
-    const [deleted] = await db.delete(transactions).where(eq(transactions.id, id)).returning();
+  async deleteTransaction(companyId: number, id: number): Promise<boolean> {
+    const [deleted] = await db.delete(transactions).where(and(eq(transactions.id, id), eq(transactions.companyId, companyId))).returning();
     return !!deleted;
   }
 
-  async getAllTransactions(): Promise<Transaction[]> {
-    return await db.select().from(transactions);
+  async getAllTransactions(companyId: number): Promise<Transaction[]> {
+    return await db.select().from(transactions).where(eq(transactions.companyId, companyId));
   }
 
-  async getTransactionsByType(type: string): Promise<Transaction[]> {
-    return await db.select().from(transactions).where(eq(transactions.type, type));
+  async getTransactionsByType(companyId: number, type: string): Promise<Transaction[]> {
+    return await db.select().from(transactions).where(and(eq(transactions.type, type), eq(transactions.companyId, companyId)));
   }
 
-  async getTransactionsByDateRange(startDate: Date, endDate: Date): Promise<Transaction[]> {
+  async getTransactionsByDateRange(companyId: number, startDate: Date, endDate: Date): Promise<Transaction[]> {
     return await db.select().from(transactions)
       .where(and(
+        eq(transactions.companyId, companyId),
         gte(transactions.date, startDate.toISOString()),
         lte(transactions.date, endDate.toISOString())
       ));
   }
 
   // RoomBooking methods
-  async getRoomBooking(id: number): Promise<RoomBooking | undefined> {
-    const [booking] = await db.select().from(roomBookings).where(eq(roomBookings.id, id));
+  async getRoomBooking(companyId: number, id: number): Promise<RoomBooking | undefined> {
+    const [booking] = await db.select().from(roomBookings).where(and(eq(roomBookings.id, id), eq(roomBookings.companyId, companyId)));
     return booking;
   }
 
-  async createRoomBooking(booking: InsertRoomBooking): Promise<RoomBooking> {
-    const [newBooking] = await db.insert(roomBookings).values(booking).returning();
+  async createRoomBooking(companyId: number, booking: InsertRoomBooking): Promise<RoomBooking> {
+    const [newBooking] = await db.insert(roomBookings).values({ ...booking, companyId }).returning();
     return newBooking;
   }
 
-  async updateRoomBooking(id: number, data: Partial<RoomBooking>): Promise<RoomBooking | undefined> {
-    const [updated] = await db.update(roomBookings).set(data).where(eq(roomBookings.id, id)).returning();
+  async updateRoomBooking(companyId: number, id: number, data: Partial<RoomBooking>): Promise<RoomBooking | undefined> {
+    const [updated] = await db.update(roomBookings).set(withoutCompany(data)).where(and(eq(roomBookings.id, id), eq(roomBookings.companyId, companyId))).returning();
     return updated;
   }
 
-  async deleteRoomBooking(id: number): Promise<boolean> {
-    const [deleted] = await db.delete(roomBookings).where(eq(roomBookings.id, id)).returning();
+  async deleteRoomBooking(companyId: number, id: number): Promise<boolean> {
+    const [deleted] = await db.delete(roomBookings).where(and(eq(roomBookings.id, id), eq(roomBookings.companyId, companyId))).returning();
     return !!deleted;
   }
 
-  async getAllRoomBookings(): Promise<RoomBooking[]> {
-    return await db.select().from(roomBookings);
+  async getAllRoomBookings(companyId: number): Promise<RoomBooking[]> {
+    return await db.select().from(roomBookings).where(eq(roomBookings.companyId, companyId));
   }
 
-  async getRoomBookingsByRoomId(roomId: number): Promise<RoomBooking[]> {
-    return await db.select().from(roomBookings).where(eq(roomBookings.roomId, roomId));
+  async getRoomBookingsByRoomId(companyId: number, roomId: number): Promise<RoomBooking[]> {
+    return await db.select().from(roomBookings).where(and(eq(roomBookings.roomId, roomId), eq(roomBookings.companyId, companyId)));
   }
 
-  async getRoomBookingsByDate(date: Date): Promise<RoomBooking[]> {
-    const all = await this.getAllRoomBookings();
+  async getRoomBookingsByDate(companyId: number, date: Date): Promise<RoomBooking[]> {
+    const all = await this.getAllRoomBookings(companyId);
     const dateString = date.toISOString().split('T')[0];
     return all.filter(b => new Date(b.date).toISOString().split('T')[0] === dateString);
   }
 
-  async getRoomBookingsByDateRange(startDate: Date, endDate: Date): Promise<RoomBooking[]> {
+  async getRoomBookingsByDateRange(companyId: number, startDate: Date, endDate: Date): Promise<RoomBooking[]> {
     return await db.select().from(roomBookings)
       .where(and(
+        eq(roomBookings.companyId, companyId),
         gte(roomBookings.date, startDate.toISOString()),
         lte(roomBookings.date, endDate.toISOString())
       ));
   }
 
-  async checkRoomAvailability(roomId: number, date: Date, startTime: string, endTime: string): Promise<boolean> {
-    const bookings = await this.getRoomBookingsByDate(date);
+  async checkRoomAvailability(companyId: number, roomId: number, date: Date, startTime: string, endTime: string): Promise<boolean> {
+    const bookings = await this.getRoomBookingsByDate(companyId, date);
     const hasOverlap = bookings.some(booking => {
       if (booking.roomId !== roomId) return false;
       return (startTime < booking.endTime && endTime > booking.startTime);
@@ -572,28 +604,28 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Invoice methods (NFS-e)
-  async getInvoice(id: number): Promise<Invoice | undefined> {
-    const [invoice] = await db.select().from(invoices).where(eq(invoices.id, id));
+  async getInvoice(companyId: number, id: number): Promise<Invoice | undefined> {
+    const [invoice] = await db.select().from(invoices).where(and(eq(invoices.id, id), eq(invoices.companyId, companyId)));
     return invoice;
   }
 
-  async createInvoice(invoice: InsertInvoice): Promise<Invoice> {
-    const [newInvoice] = await db.insert(invoices).values(invoice).returning();
+  async createInvoice(companyId: number, invoice: Omit<InsertInvoice, "companyId">): Promise<Invoice> {
+    const [newInvoice] = await db.insert(invoices).values({ ...invoice, companyId }).returning();
     return newInvoice!;
   }
 
-  async updateInvoice(id: number, data: Partial<Invoice>): Promise<Invoice | undefined> {
-    const [updated] = await db.update(invoices).set({ ...data, updatedAt: new Date() }).where(eq(invoices.id, id)).returning();
+  async updateInvoice(companyId: number, id: number, data: Partial<Invoice>): Promise<Invoice | undefined> {
+    const [updated] = await db.update(invoices).set({ ...withoutCompany(data), updatedAt: new Date() }).where(and(eq(invoices.id, id), eq(invoices.companyId, companyId))).returning();
     return updated;
   }
 
-  async deleteInvoice(id: number): Promise<boolean> {
-    const [deleted] = await db.delete(invoices).where(eq(invoices.id, id)).returning();
+  async deleteInvoice(companyId: number, id: number): Promise<boolean> {
+    const [deleted] = await db.delete(invoices).where(and(eq(invoices.id, id), eq(invoices.companyId, companyId))).returning();
     return !!deleted;
   }
 
-  async getInvoicesByUserId(psychologistId: number, opts?: { limit?: number; offset?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: Omit<Invoice, "imageData">[]; total: number }> {
-    const conditions = [eq(invoices.psychologistId, psychologistId)];
+  async getInvoicesByUserId(companyId: number, psychologistId: number, opts?: { limit?: number; offset?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: Omit<Invoice, "imageData">[]; total: number }> {
+    const conditions = [eq(invoices.companyId, companyId), eq(invoices.psychologistId, psychologistId)];
     if (opts?.dataEmissaoFrom) conditions.push(gte(invoices.dataEmissao, opts.dataEmissaoFrom));
     if (opts?.dataEmissaoTo) conditions.push(lte(invoices.dataEmissao, opts.dataEmissaoTo));
     if (opts?.status) conditions.push(eq(invoices.status, opts.status));
@@ -611,8 +643,8 @@ export class DatabaseStorage implements IStorage {
     return { invoices: rows, total };
   }
 
-  async getInvoicesSummary(psychologistId: number, opts?: { dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }> {
-    const conditions = [eq(invoices.psychologistId, psychologistId)];
+  async getInvoicesSummary(companyId: number, psychologistId: number, opts?: { dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }> {
+    const conditions = [eq(invoices.companyId, companyId), eq(invoices.psychologistId, psychologistId)];
     if (opts?.dataEmissaoFrom) conditions.push(gte(invoices.dataEmissao, opts.dataEmissaoFrom));
     if (opts?.dataEmissaoTo) conditions.push(lte(invoices.dataEmissao, opts.dataEmissaoTo));
     if (opts?.status) conditions.push(eq(invoices.status, opts.status));
@@ -625,20 +657,20 @@ export class DatabaseStorage implements IStorage {
     return { totalCount: row?.totalCount ?? 0, sumValorServicos: row?.sumValorServicos ?? "0", sumValorLiquido: row?.sumValorLiquido ?? "0" };
   }
 
-  async getAllInvoices(): Promise<Invoice[]> {
-    return await db.select().from(invoices);
+  async getAllInvoices(companyId: number): Promise<Invoice[]> {
+    return await db.select().from(invoices).where(eq(invoices.companyId, companyId));
   }
 
-  async getInvoicesByReferenceMonth(_referenceMonth: string): Promise<Invoice[]> {
-    return await db.select().from(invoices);
+  async getInvoicesByReferenceMonth(companyId: number, _referenceMonth: string): Promise<Invoice[]> {
+    return await db.select().from(invoices).where(eq(invoices.companyId, companyId));
   }
 
-  async getInvoiceByUserAndMonth(_userId: number, _referenceMonth: string): Promise<Invoice | undefined> {
+  async getInvoiceByUserAndMonth(_companyId: number, _userId: number, _referenceMonth: string): Promise<Invoice | undefined> {
     return undefined;
   }
 
-  async getInvoicesAdmin(opts?: { limit?: number; offset?: number; psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: (Omit<Invoice, "imageData"> & { user: User })[]; total: number }> {
-    const conditions: ReturnType<typeof eq>[] = [];
+  async getInvoicesAdmin(companyId: number, opts?: { limit?: number; offset?: number; psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string; search?: string }): Promise<{ invoices: (Omit<Invoice, "imageData"> & { user: User })[]; total: number }> {
+    const conditions: ReturnType<typeof eq>[] = [eq(invoices.companyId, companyId)];
     if (opts?.psychologistId != null) conditions.push(eq(invoices.psychologistId, opts.psychologistId));
     if (opts?.dataEmissaoFrom) conditions.push(gte(invoices.dataEmissao, opts.dataEmissaoFrom));
     if (opts?.dataEmissaoTo) conditions.push(lte(invoices.dataEmissao, opts.dataEmissaoTo));
@@ -657,8 +689,8 @@ export class DatabaseStorage implements IStorage {
     return { invoices: invoicesWithUsers, total: totalCount };
   }
 
-  async getInvoicesSummaryAdmin(opts?: { psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }> {
-    const conditions: ReturnType<typeof eq>[] = [];
+  async getInvoicesSummaryAdmin(companyId: number, opts?: { psychologistId?: number; dataEmissaoFrom?: string; dataEmissaoTo?: string; status?: string }): Promise<{ totalCount: number; sumValorServicos: string; sumValorLiquido: string }> {
+    const conditions: ReturnType<typeof eq>[] = [eq(invoices.companyId, companyId)];
     if (opts?.psychologistId != null) conditions.push(eq(invoices.psychologistId, opts.psychologistId));
     if (opts?.dataEmissaoFrom) conditions.push(gte(invoices.dataEmissao, opts.dataEmissaoFrom));
     if (opts?.dataEmissaoTo) conditions.push(lte(invoices.dataEmissao, opts.dataEmissaoTo));
@@ -668,47 +700,43 @@ export class DatabaseStorage implements IStorage {
     return { totalCount: row?.totalCount ?? 0, sumValorServicos: row?.sumValorServicos ?? "0", sumValorLiquido: row?.sumValorLiquido ?? "0" };
   }
 
-  async getInvoiceWithUser(id: number): Promise<(Invoice & { user: User }) | undefined> {
-    const result = await db.select().from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).where(eq(invoices.id, id));
+  async getInvoiceWithUser(companyId: number, id: number): Promise<(Invoice & { user: User }) | undefined> {
+    const result = await db.select().from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).where(and(eq(invoices.id, id), eq(invoices.companyId, companyId)));
     if (result.length === 0) return undefined;
     return { ...result[0].invoices, user: result[0].users };
   }
 
-  async getAllInvoicesWithUsers(): Promise<(Invoice & { user: User })[]> {
-    const result = await db.select().from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).orderBy(desc(invoices.dataUpload));
+  async getAllInvoicesWithUsers(companyId: number): Promise<(Invoice & { user: User })[]> {
+    const result = await db.select().from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).where(eq(invoices.companyId, companyId)).orderBy(desc(invoices.dataUpload));
     return result.map((r) => ({ ...r.invoices, user: r.users }));
   }
 
   // Patient Record System Implementation
 
   // Patients
-  async getPatient(id: number): Promise<Patient | undefined> {
-    const [patient] = await db.select().from(patients).where(eq(patients.id, id));
+  async getPatient(companyId: number, id: number): Promise<Patient | undefined> {
+    const [patient] = await db.select().from(patients).where(and(eq(patients.id, id), eq(patients.companyId, companyId)));
     return patient;
   }
 
-  async getPatientByCpf(cpf: string): Promise<Patient | undefined> {
-    const [patient] = await db.select().from(patients).where(eq(patients.cpf, cpf));
+  async getPatientByCpf(companyId: number, cpf: string): Promise<Patient | undefined> {
+    const [patient] = await db.select().from(patients).where(and(eq(patients.cpf, cpf), eq(patients.companyId, companyId)));
     return patient;
   }
 
-  async createPatient(patient: InsertPatient): Promise<Patient> {
-    const [newPatient] = await db.insert(patients).values(patient).returning();
+  async createPatient(companyId: number, patient: InsertPatient): Promise<Patient> {
+    const [newPatient] = await db.insert(patients).values({ ...patient, companyId }).returning();
     return newPatient;
   }
 
-  async updatePatient(id: number, data: Partial<Patient>): Promise<Patient | undefined> {
-    const [updated] = await db.update(patients).set(data).where(eq(patients.id, id)).returning();
+  async updatePatient(companyId: number, id: number, data: Partial<Patient>): Promise<Patient | undefined> {
+    const [updated] = await db.update(patients).set(withoutCompany(data)).where(and(eq(patients.id, id), eq(patients.companyId, companyId))).returning();
     return updated;
   }
 
-  async listPatients(activeOnly: boolean = true): Promise<Patient[]> {
-    let query = db.select().from(patients);
-    if (activeOnly) {
-      // @ts-ignore - Status field exists but might be inferred incorrectly sometimes
-      return await db.select().from(patients).where(eq(patients.status, 'active'));
-    }
-    return await query;
+  async listPatients(companyId: number, activeOnly: boolean = true): Promise<Patient[]> {
+    const ofCompany = eq(patients.companyId, companyId);
+    return await db.select().from(patients).where(activeOnly ? and(ofCompany, eq(patients.status, 'active')) : ofCompany);
   }
 
   // Medical Records
@@ -806,8 +834,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Audit & History
-  async createAuditLog(log: NewAuditLog): Promise<AuditLog> {
-    const [newLog] = await db.insert(auditLogs).values(log).returning();
+  async createAuditLog(companyId: number, log: NewAuditLog): Promise<AuditLog> {
+    const [newLog] = await db.insert(auditLogs).values({ ...log, companyId }).returning();
     return newLog;
   }
 
@@ -824,7 +852,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Patient Transfers
-  async transferPatient(data: {
+  async transferPatient(companyId: number, data: {
     patientId: number;
     fromPsychologistId: number | null;
     toPsychologistId: number;
@@ -837,7 +865,7 @@ export class DatabaseStorage implements IStorage {
       // 1. Atualiza vínculo do paciente
       await tx.update(patients)
         .set({ psychologistId: data.toPsychologistId })
-        .where(eq(patients.id, data.patientId));
+        .where(and(eq(patients.id, data.patientId), eq(patients.companyId, companyId)));
       // 2. Registra histórico imutável
       const [newTransfer] = await tx.insert(patientTransfers).values({
         patientId: data.patientId,
@@ -857,20 +885,18 @@ export class DatabaseStorage implements IStorage {
       .orderBy(sql`${patientTransfers.createdAt} DESC`);
   }
 
-  async listCommissionPayoutConfigs(psychologistId?: number): Promise<CommissionPayoutConfig[]> {
-    if (psychologistId !== undefined) {
-      return await db.select().from(commissionPayoutConfigs)
-        .where(eq(commissionPayoutConfigs.psychologistId, psychologistId))
-        .orderBy(sql`${commissionPayoutConfigs.validFrom} DESC`);
-    }
+  async listCommissionPayoutConfigs(companyId: number, psychologistId?: number): Promise<CommissionPayoutConfig[]> {
+    const ofCompany = eq(commissionPayoutConfigs.companyId, companyId);
     return await db.select().from(commissionPayoutConfigs)
+      .where(psychologistId !== undefined ? and(ofCompany, eq(commissionPayoutConfigs.psychologistId, psychologistId)) : ofCompany)
       .orderBy(sql`${commissionPayoutConfigs.validFrom} DESC`);
   }
 
-  async getActiveCommissionPayoutConfig(psychologistId: number, forDate: string): Promise<CommissionPayoutConfig | undefined> {
+  async getActiveCommissionPayoutConfig(companyId: number, psychologistId: number, forDate: string): Promise<CommissionPayoutConfig | undefined> {
     const results = await db.select().from(commissionPayoutConfigs)
       .where(
         and(
+          eq(commissionPayoutConfigs.companyId, companyId),
           eq(commissionPayoutConfigs.psychologistId, psychologistId),
           lte(commissionPayoutConfigs.validFrom, forDate),
           or(
@@ -884,18 +910,18 @@ export class DatabaseStorage implements IStorage {
     return results[0];
   }
 
-  async createCommissionPayoutConfig(data: InsertCommissionPayoutConfig): Promise<CommissionPayoutConfig> {
-    const [config] = await db.insert(commissionPayoutConfigs).values(data).returning();
+  async createCommissionPayoutConfig(companyId: number, data: InsertCommissionPayoutConfig): Promise<CommissionPayoutConfig> {
+    const [config] = await db.insert(commissionPayoutConfigs).values({ ...data, companyId }).returning();
     return config;
   }
 
-  async updateCommissionPayoutConfig(id: number, data: Partial<InsertCommissionPayoutConfig>): Promise<CommissionPayoutConfig | undefined> {
-    const [updated] = await db.update(commissionPayoutConfigs).set(data).where(eq(commissionPayoutConfigs.id, id)).returning();
+  async updateCommissionPayoutConfig(companyId: number, id: number, data: Partial<InsertCommissionPayoutConfig>): Promise<CommissionPayoutConfig | undefined> {
+    const [updated] = await db.update(commissionPayoutConfigs).set(withoutCompany(data)).where(and(eq(commissionPayoutConfigs.id, id), eq(commissionPayoutConfigs.companyId, companyId))).returning();
     return updated;
   }
 
-  async listCommissions(filters?: { psychologistId?: number; status?: string; periodStart?: string; periodEnd?: string; exactPeriod?: { periodStart: string; periodEnd: string } }): Promise<Commission[]> {
-    const conditions = [];
+  async listCommissions(companyId: number, filters?: { psychologistId?: number; status?: string; periodStart?: string; periodEnd?: string; exactPeriod?: { periodStart: string; periodEnd: string } }): Promise<Commission[]> {
+    const conditions = [eq(commissions.companyId, companyId)];
     if (filters?.psychologistId) conditions.push(eq(commissions.psychologistId, filters.psychologistId));
     if (filters?.status) conditions.push(eq(commissions.status, filters.status));
     if (filters?.exactPeriod) {
@@ -906,30 +932,28 @@ export class DatabaseStorage implements IStorage {
       if (filters?.periodEnd) conditions.push(lte(commissions.periodEnd, filters.periodEnd));
     }
 
-    if (conditions.length > 0) {
-      return await db.select().from(commissions).where(and(...conditions)).orderBy(sql`${commissions.createdAt} DESC`);
-    }
-    return await db.select().from(commissions).orderBy(sql`${commissions.createdAt} DESC`);
+    return await db.select().from(commissions).where(and(...conditions)).orderBy(sql`${commissions.createdAt} DESC`);
   }
 
-  async getCommission(id: number): Promise<Commission | undefined> {
-    const [c] = await db.select().from(commissions).where(eq(commissions.id, id));
+  async getCommission(companyId: number, id: number): Promise<Commission | undefined> {
+    const [c] = await db.select().from(commissions).where(and(eq(commissions.id, id), eq(commissions.companyId, companyId)));
     return c;
   }
 
-  async createCommission(data: NewCommission): Promise<Commission> {
+  async createCommission(companyId: number, data: NewCommission): Promise<Commission> {
     const [c] = await db.insert(commissions).values({
       ...data,
+      companyId,
       createdAt: new Date(),
       updatedAt: new Date(),
     }).returning();
     return c;
   }
 
-  async updateCommission(id: number, data: Partial<Commission>): Promise<Commission | undefined> {
+  async updateCommission(companyId: number, id: number, data: Partial<Commission>): Promise<Commission | undefined> {
     const [updated] = await db.update(commissions)
-      .set({ ...data, updatedAt: new Date() })
-      .where(eq(commissions.id, id))
+      .set({ ...withoutCompany(data), updatedAt: new Date() })
+      .where(and(eq(commissions.id, id), eq(commissions.companyId, companyId)))
       .returning();
     return updated;
   }
@@ -945,7 +969,7 @@ export class DatabaseStorage implements IStorage {
     return await db.insert(commissionItems).values(items).returning();
   }
 
-  async getCommissionDashboard(month: string): Promise<{ totalPendente: string; totalPago: string; numPsicologas: number; numLocacoes: number }> {
+  async getCommissionDashboard(companyId: number, month: string): Promise<{ totalPendente: string; totalPago: string; numPsicologas: number; numLocacoes: number }> {
     const [year, mon] = month.split("-");
     const periodStart = `${year}-${mon}-01`;
     const lastDay = new Date(parseInt(year), parseInt(mon), 0).getDate();
@@ -954,6 +978,7 @@ export class DatabaseStorage implements IStorage {
     const rows = await db.select().from(commissions)
       .where(
         and(
+          eq(commissions.companyId, companyId),
           gte(commissions.periodStart, periodStart),
           lte(commissions.periodEnd, periodEnd)
         )

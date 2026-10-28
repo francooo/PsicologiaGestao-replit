@@ -141,6 +141,46 @@ async function migrateCompanies() {
       [DEFAULT_COMPANY_SLUG]
     );
   });
+
+  // Fase 2: every insert now stores company_id, so the Empresa 1 default goes away and the
+  // column becomes required — a missed insert path fails instead of landing in Empresa 1.
+  await runOnce("company_id_required", async (client) => {
+    const { rows } = await client.query(`SELECT id FROM companies WHERE slug = $1`, [DEFAULT_COMPANY_SLUG]);
+    const companyId = Number(rows[0].id);
+    // Templates a psychologist created while there was no default for this table
+    if (tables.includes("care_templates")) {
+      await client.query(
+        `UPDATE care_templates SET company_id = $1 WHERE company_id IS NULL AND psychologist_id IS NOT NULL`,
+        [companyId]
+      );
+    }
+    for (const table of tables.filter((t) => t !== "care_templates")) {
+      await client.query(`UPDATE ${table} SET company_id = $1 WHERE company_id IS NULL`, [companyId]);
+      await client.query(`ALTER TABLE ${table} ALTER COLUMN company_id DROP DEFAULT`);
+      await client.query(`ALTER TABLE ${table} ALTER COLUMN company_id SET NOT NULL`);
+    }
+  });
+
+  // A patient's CPF is unique within a company, no longer across the whole system.
+  if (tables.includes("patients")) {
+    await runOnce("patients_cpf_per_company", async (client) => {
+      const { rows } = await client.query(
+        `SELECT c.conname FROM pg_constraint c
+           JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+         WHERE c.conrelid = 'patients'::regclass AND c.contype = 'u'
+           AND array_length(c.conkey, 1) = 1 AND a.attname = 'cpf'`
+      );
+      for (const { conname } of rows) {
+        await client.query(`ALTER TABLE patients DROP CONSTRAINT "${conname}"`);
+      }
+      const { rows: existing } = await client.query(
+        `SELECT 1 FROM pg_constraint WHERE conrelid = 'patients'::regclass AND conname = 'patients_company_cpf'`
+      );
+      if (existing.length === 0) {
+        await client.query(`ALTER TABLE patients ADD CONSTRAINT patients_company_cpf UNIQUE (company_id, cpf)`);
+      }
+    });
+  }
 }
 
 type Client = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };

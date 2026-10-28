@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, date, time, decimal, timestamp, primaryKey, jsonb, varchar } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, date, time, decimal, timestamp, primaryKey, jsonb, varchar, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -11,9 +11,9 @@ import { bytea } from "./pg-types";
 // Patients (Pacientes)
 export const patients = pgTable("patients", {
     id: serial("id").primaryKey(),
-    companyId: integer("company_id").references(() => companies.id),
+    companyId: integer("company_id").notNull().references(() => companies.id),
     fullName: text("full_name").notNull(),
-    cpf: text("cpf").unique(),
+    cpf: text("cpf"), // unique per company (patients_company_cpf)
     birthDate: date("birth_date"),
     gender: text("gender"), // masculino, feminino, outro, prefiro não informar
     maritalStatus: text("marital_status"), // solteiro, casado, divorciado, viúvo, união estável
@@ -33,7 +33,7 @@ export const patients = pgTable("patients", {
     createdBy: integer("created_by").references(() => users.id),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => [unique("patients_company_cpf").on(t.companyId, t.cpf)]);
 
 export const insertPatientSchema = createInsertSchema(patients).pick({
     fullName: true,
@@ -186,7 +186,7 @@ export const insertPsychologicalAssessmentSchema = createInsertSchema(psychologi
 // Audit Logs (Logs de Auditoria - LGPD)
 export const auditLogs = pgTable("audit_logs", {
     id: serial("id").primaryKey(),
-    companyId: integer("company_id").references(() => companies.id),
+    companyId: integer("company_id").notNull().references(() => companies.id),
     userId: integer("user_id").notNull().references(() => users.id),
     action: text("action").notNull(), // view, create, update, delete, export, print
     resourceType: text("resource_type").notNull(), // patient, medical_record, clinical_session, document
@@ -361,7 +361,7 @@ export type InsertCareTemplateQuestion = z.infer<typeof insertCareTemplateQuesti
 // Care Dispatches (Envios de Formulário)
 export const careDispatches = pgTable("care_dispatches", {
     id: serial("id").primaryKey(),
-    companyId: integer("company_id").references(() => companies.id),
+    companyId: integer("company_id").notNull().references(() => companies.id),
     psychologistId: integer("psychologist_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     patientId: integer("patient_id").notNull().references(() => patients.id, { onDelete: "cascade" }),
     templateId: integer("template_id").references(() => careTemplates.id, { onDelete: "set null" }),
