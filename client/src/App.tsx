@@ -24,10 +24,11 @@ import AdminPsicologas from "@/pages/admin/psicologas";
 import AdminComissoes from "@/pages/admin/comissoes";
 import ResponderPage from "@/pages/responder";
 import { ProtectedRoute } from "./lib/protected-route";
-import { AuthProvider, useAuth } from "./hooks/use-auth";
+import { AuthProvider } from "./hooks/use-auth";
+
+const ADMIN = ["admin"];
 
 function Router() {
-  const { user } = useAuth();
   return (
     <Switch>
       <ProtectedRoute path="/" component={Dashboard} />
@@ -35,20 +36,20 @@ function Router() {
       <ProtectedRoute path="/appointments" component={Appointments} />
       {/* Old psychologists page was retired; its create/delete now live in /admin/psicologas */}
       <Route path="/psychologists"><Redirect to="/admin/psicologas" /></Route>
-      {user?.role === "admin" && <ProtectedRoute path="/rooms" component={Rooms} />}
+      <ProtectedRoute path="/rooms" component={Rooms} roles={ADMIN} />
       <ProtectedRoute path="/financial" component={Financial} />
       <ProtectedRoute path="/cash-flow" component={CashFlow} />
       <ProtectedRoute path="/invoices" component={Invoices} />
-      {user?.role === "admin" && <ProtectedRoute path="/admin/invoices" component={AdminInvoices} />}
-      {user?.role === "admin" && <ProtectedRoute path="/permissions" component={Permissions} />}
+      <ProtectedRoute path="/admin/invoices" component={AdminInvoices} roles={ADMIN} />
+      <ProtectedRoute path="/permissions" component={Permissions} roles={ADMIN} />
 
       <ProtectedRoute path="/profile" component={Profile} />
       <ProtectedRoute path="/patients" component={PatientsList} />
       <ProtectedRoute path="/patients/:id/record" component={PatientRecord} />
       <ProtectedRoute path="/reunioes" component={Meetings} />
       <ProtectedRoute path="/perfil" component={Perfil} />
-      {user?.role === "admin" && <ProtectedRoute path="/admin/psicologas" component={AdminPsicologas} />}
-      {user?.role === "admin" && <ProtectedRoute path="/admin/comissoes" component={AdminComissoes} />}
+      <ProtectedRoute path="/admin/psicologas" component={AdminPsicologas} roles={ADMIN} />
+      <ProtectedRoute path="/admin/comissoes" component={AdminComissoes} roles={ADMIN} />
       <Route path="/auth" component={AuthPage} />
       <Route path="/auth-page" component={AuthPage} />
       <Route path="/password-recovery" component={PasswordRecovery} />
