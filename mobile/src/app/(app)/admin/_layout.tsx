@@ -6,7 +6,9 @@ import { colors, fonts } from '@/theme/tokens';
 /** Admin-only area (the API enforces it too; this keeps deep links out). */
 export default function AdminLayout() {
   const { user } = useAuth();
-  if (user?.role !== 'admin') return <Redirect href="/" />;
+  // Signed out (logout or expired session): the root Stack.Protected sends to login — don't race it
+  if (!user) return null;
+  if (user.role !== 'admin') return <Redirect href="/" />;
   return (
     <Stack
       screenOptions={{
