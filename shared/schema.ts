@@ -34,9 +34,52 @@ export const insertUserSchema = createInsertSchema(users).pick({
   avatarUrl: true,
 });
 
+// Companies (clínicas) — each one is an isolated tenant. Created by the platform admin.
+export const companies = pgTable("companies", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  cnpj: text("cnpj"),
+  logoUrl: text("logo_url"),
+  status: text("status").notNull().default("active"), // active, suspended
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type Company = typeof companies.$inferSelect;
+
+/** Slug of the company that received all data from before multi-company. */
+export const DEFAULT_COMPANY_SLUG = "empresa-1";
+
+/** A company as the logged-in user sees it, with their role there. */
+export type CompanySummary = Pick<Company, "id" | "name" | "slug" | "logoUrl"> & { role: string };
+
+/** What /api/user, login and /api/companies/switch return; `role` is the role in the active company. */
+export type AuthUser = Omit<User, "password"> & {
+  isPlatformAdmin: boolean;
+  activeCompany: CompanySummary | null;
+  companies: CompanySummary[];
+};
+
+// A user belongs to one or more companies, with a role per company.
+export const companyMemberships = pgTable(
+  "company_memberships",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    companyId: integer("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("psychologist"), // admin, psychologist, receptionist
+    status: text("status").notNull().default("active"), // active, inactive
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [unique("company_memberships_user_company").on(t.userId, t.companyId)]
+);
+
+export type CompanyMembership = typeof companyMemberships.$inferSelect;
+
 // Psychologist specific info
 export const psychologists = pgTable("psychologists", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id),
   userId: integer("user_id").notNull(),
   specialization: text("specialization"),
   bio: text("bio"),
@@ -105,6 +148,7 @@ export const psychologistSpecializationsRelations = relations(psychologistSpecia
 // Rooms
 export const rooms = pgTable("rooms", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id),
   name: text("name").notNull(),
   capacity: integer("capacity").notNull(),
   hasWifi: boolean("has_wifi").notNull().default(true),
@@ -127,6 +171,7 @@ export const insertRoomSchema = createInsertSchema(rooms).pick({
 // Appointments
 export const appointments = pgTable("appointments", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id),
   patientName: text("patient_name").notNull(),
   psychologistId: integer("psychologist_id").notNull(),
   roomId: integer("room_id").notNull(),
@@ -154,6 +199,7 @@ export const insertAppointmentSchema = createInsertSchema(appointments).pick({
 // Finances
 export const transactions = pgTable("transactions", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id),
   description: text("description").notNull(),
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
   type: text("type").notNull(), // income, expense
@@ -181,6 +227,7 @@ export const insertTransactionSchema = createInsertSchema(transactions).pick({
 // Room bookings
 export const roomBookings = pgTable("room_bookings", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id),
   roomId: integer("room_id").notNull(),
   psychologistId: integer("psychologist_id").notNull(),
   date: date("date").notNull(),
@@ -423,7 +470,7 @@ export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type InsertPasswordResetToken = z.infer<typeof insertPasswordResetTokenSchema>;
 
 // Access invites: e-mails pre-authorized by an admin to get a role on their first access.
-// company_id stays null until companies (multi-tenant) exist. Uniqueness of
+// company_id is still null for every invite until invites become company-scoped. Uniqueness of
 // (company, email) is a functional index created in server/migrations.ts.
 export const accessInvites = pgTable("access_invites", {
   id: serial("id").primaryKey(),
@@ -443,6 +490,7 @@ export const invoices = pgTable(
   "invoices",
   {
     id: serial("id").primaryKey(),
+    companyId: integer("company_id").references(() => companies.id),
     psychologistId: integer("psychologist_id").notNull().references(() => users.id),
     clinicId: integer("clinic_id"),
     // Identificação da nota
@@ -538,6 +586,7 @@ export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
 // ─── Meetings (Reuniões via Google Meet) ─────────────────────────────────────
 export const meetings = pgTable("meetings", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id),
   psychologistId: integer("psychologist_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   patientId: integer("patient_id").notNull(), // references patients.id (defined in patient-schema.ts)
   appointmentId: integer("appointment_id"), // optional link to appointments
@@ -586,6 +635,7 @@ export type InsertMeeting = z.infer<typeof insertMeetingSchema>;
 // ─── Commission Payout Configs ───────────────────────────────────────────────
 export const commissionPayoutConfigs = pgTable("commission_payout_configs", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id),
   psychologistId: integer("psychologist_id").notNull().references(() => psychologists.id, { onDelete: "cascade" }),
   payoutType: text("payout_type").notNull().default("percentual"), // "percentual" | "fixed"
   payoutValue: decimal("payout_value", { precision: 10, scale: 2 }).notNull(),
@@ -610,6 +660,7 @@ export type InsertCommissionPayoutConfig = z.infer<typeof insertCommissionPayout
 // ─── Commissions ─────────────────────────────────────────────────────────────
 export const commissions = pgTable("commissions", {
   id: serial("id").primaryKey(),
+  companyId: integer("company_id").references(() => companies.id),
   psychologistId: integer("psychologist_id").notNull().references(() => psychologists.id, { onDelete: "cascade" }),
   periodStart: date("period_start").notNull(),
   periodEnd: date("period_end").notNull(),

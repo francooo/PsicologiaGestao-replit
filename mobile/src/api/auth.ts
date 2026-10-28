@@ -14,6 +14,9 @@ export const authApi = {
 
   logout: () => api('/api/logout', { method: 'POST' }),
 
+  switchCompany: (companyId: number) =>
+    api<User>('/api/companies/switch', { method: 'POST', body: { companyId } }),
+
   recoverPassword: (email: string) =>
     api<{ message: string }>('/api/recover-password', { method: 'POST', body: { email } }),
 };

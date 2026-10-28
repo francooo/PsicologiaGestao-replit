@@ -34,7 +34,11 @@ function RootNavigator() {
       <Stack.Protected guard={!user}>
         <Stack.Screen name="(auth)" />
       </Stack.Protected>
-      <Stack.Protected guard={!!user}>
+      {/* Logged in but no active company yet: choose one (or learn there is none) */}
+      <Stack.Protected guard={!!user && !user.activeCompany}>
+        <Stack.Screen name="selecionar-empresa" />
+      </Stack.Protected>
+      <Stack.Protected guard={!!user?.activeCompany}>
         <Stack.Screen name="(app)" />
       </Stack.Protected>
     </Stack>

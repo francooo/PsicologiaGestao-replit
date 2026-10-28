@@ -3,7 +3,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
 import { sql } from "drizzle-orm";
-import { users, psychologists } from "./schema";
+import { users, psychologists, companies } from "./schema";
 import { bytea } from "./pg-types";
 
 // ========== PATIENT RECORD SYSTEM ==========
@@ -11,6 +11,7 @@ import { bytea } from "./pg-types";
 // Patients (Pacientes)
 export const patients = pgTable("patients", {
     id: serial("id").primaryKey(),
+    companyId: integer("company_id").references(() => companies.id),
     fullName: text("full_name").notNull(),
     cpf: text("cpf").unique(),
     birthDate: date("birth_date"),
@@ -185,6 +186,7 @@ export const insertPsychologicalAssessmentSchema = createInsertSchema(psychologi
 // Audit Logs (Logs de Auditoria - LGPD)
 export const auditLogs = pgTable("audit_logs", {
     id: serial("id").primaryKey(),
+    companyId: integer("company_id").references(() => companies.id),
     userId: integer("user_id").notNull().references(() => users.id),
     action: text("action").notNull(), // view, create, update, delete, export, print
     resourceType: text("resource_type").notNull(), // patient, medical_record, clinical_session, document
@@ -315,6 +317,7 @@ export type SessionHistory = typeof sessionHistory.$inferSelect;
 // Care Templates (Formulários de Cuidado)
 export const careTemplates = pgTable("care_templates", {
     id: serial("id").primaryKey(),
+    companyId: integer("company_id").references(() => companies.id), // null = template global do sistema
     psychologistId: integer("psychologist_id").references(() => users.id, { onDelete: "cascade" }),
     title: varchar("title", { length: 255 }).notNull(),
     description: text("description"),
@@ -358,6 +361,7 @@ export type InsertCareTemplateQuestion = z.infer<typeof insertCareTemplateQuesti
 // Care Dispatches (Envios de Formulário)
 export const careDispatches = pgTable("care_dispatches", {
     id: serial("id").primaryKey(),
+    companyId: integer("company_id").references(() => companies.id),
     psychologistId: integer("psychologist_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     patientId: integer("patient_id").notNull().references(() => patients.id, { onDelete: "cascade" }),
     templateId: integer("template_id").references(() => careTemplates.id, { onDelete: "set null" }),

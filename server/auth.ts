@@ -1,14 +1,15 @@
 import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
-import { Express } from "express";
+import { Express, type Request } from "express";
 import session from "express-session";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 import { storage } from "./storage";
 import { User as SelectUser } from "@shared/schema";
-import { bearerSessionBridge } from "./middleware/auth-guards";
+import { bearerSessionBridge, companyContext } from "./middleware/auth-guards";
 import { applyPendingInvites } from "./lib/access-invites";
+import { resolveCompanyContext, upsertMembership, userPayload } from "./lib/companies";
 
 declare global {
   namespace Express {
@@ -49,6 +50,29 @@ declare module "express-session" {
   }
 }
 
+/**
+ * A psychologist in the active company needs a psychologists row to use the system;
+ * create it on first access.
+ */
+async function ensurePsychologistProfile(req: Request) {
+  if (!req.user || req.user.role !== "psychologist") return;
+  const existingProfile = await storage.getPsychologistByUserId(req.user.id);
+  if (existingProfile) return;
+  const newProfile = await storage.createPsychologist({
+    userId: req.user.id,
+    specialization: null,
+    bio: null,
+    hourlyRate: 0,
+  });
+  // Fix any existing appointments/bookings that were saved with psychologistId=0
+  // (caused by missing profile at creation time)
+  const allAppointments = await storage.getAllAppointments();
+  const orphaned = allAppointments.filter(a => a.psychologistId === 0);
+  for (const appt of orphaned) {
+    await storage.updateAppointment(appt.id, { psychologistId: newProfile.id });
+  }
+}
+
 export function setupAuth(app: Express) {
   const sessionSecret = process.env.SESSION_SECRET || "r8q/+&1LM3)cd*zAGpx1xm{NeQHc;#";
   const sessionSettings = {
@@ -70,6 +94,7 @@ export function setupAuth(app: Express) {
   app.use(session(sessionSettings));
   app.use(passport.initialize());
   app.use(passport.session());
+  app.use(companyContext);
 
   // Local Strategy
   passport.use(
@@ -145,14 +170,7 @@ export function setupAuth(app: Express) {
               googleId: profile.id,
               avatarUrl: profile.photos?.[0]?.value,
             });
-
-            // Create psychologist record for new google users so they can access the system
-            await storage.createPsychologist({
-              userId: user.id,
-              specialization: "Psicólogo (Google Auth)",
-              bio: "Bio pendente...",
-              hourlyRate: 0
-            });
+            // No company yet: the psychologist profile is created once they join one (ensurePsychologistProfile)
           }
 
           // E-mails pre-authorized by an admin get their role on first access
@@ -201,7 +219,13 @@ export function setupAuth(app: Express) {
           : '/auth';
         passport.authenticate('google', { failureRedirect, callbackURL } as any)(req, res, next);
       },
-      (req, res) => {
+      async (req, res, next) => {
+        try {
+          await resolveCompanyContext(req);
+          await ensurePsychologistProfile(req);
+        } catch (error) {
+          return next(error);
+        }
         const mobileRedirect = res.locals.mobileRedirect;
         if (!isAllowedMobileRedirect(mobileRedirect)) return res.redirect('/');
 
@@ -258,7 +282,8 @@ export function setupAuth(app: Express) {
       const hashedPassword = await hashPassword(req.body.password);
 
       // Only an authenticated admin may pick role/status; public sign-up is always a psychologist
-      const isAdminCaller = req.isAuthenticated() && req.user.role === "admin";
+      // and joins no company until invited
+      const isAdminCaller = req.isAuthenticated() && req.user.role === "admin" && !!req.companyId;
       const role = isAdminCaller && req.body.role ? req.body.role : "psychologist";
       const status = isAdminCaller && req.body.status ? req.body.status : "active";
 
@@ -270,8 +295,10 @@ export function setupAuth(app: Express) {
         password: hashedPassword,
       });
 
+      if (isAdminCaller) await upsertMembership(user.id, req.companyId!, role);
+
       // If user is a psychologist, create a psychologist record too
-      if (role === "psychologist" && req.body.hourlyRate) {
+      if (isAdminCaller && role === "psychologist" && req.body.hourlyRate) {
         await storage.createPsychologist({
           userId: user.id,
           specialization: req.body.specialization || "",
@@ -283,17 +310,21 @@ export function setupAuth(app: Express) {
       // E-mails pre-authorized by an admin get their role on first access
       user = await applyPendingInvites(user);
 
-      // Clean up sensitive info before returning
-      const { password, ...userResponse } = user;
-
       // Staff creating someone else's account must keep their own session
       if (req.isAuthenticated()) {
+        const { password, ...userResponse } = user;
         return res.status(201).json(userResponse);
       }
 
-      req.login(user, (err) => {
+      req.login(user, async (err) => {
         if (err) return next(err);
-        res.status(201).json(userResponse);
+        try {
+          await resolveCompanyContext(req);
+          await ensurePsychologistProfile(req);
+          res.status(201).json(await userPayload(req));
+        } catch (error) {
+          next(error);
+        }
       });
     } catch (error) {
       next(error);
@@ -310,28 +341,14 @@ export function setupAuth(app: Express) {
       req.login(user, async (loginErr: any) => {
         if (loginErr) return next(loginErr);
 
-        // Auto-create psychologist profile if user has psychologist role but no profile yet
-        if (user.role === 'psychologist') {
-          const existingProfile = await storage.getPsychologistByUserId(user.id);
-          if (!existingProfile) {
-            const newProfile = await storage.createPsychologist({
-              userId: user.id,
-              specialization: null,
-              bio: null,
-              hourlyRate: 0,
-            });
-            // Fix any existing appointments/bookings that were saved with psychologistId=0
-            // (caused by missing profile at creation time)
-            const allAppointments = await storage.getAllAppointments();
-            const orphaned = allAppointments.filter(a => a.psychologistId === 0);
-            for (const appt of orphaned) {
-              await storage.updateAppointment(appt.id, { psychologistId: newProfile.id });
-            }
-          }
+        let userResponse;
+        try {
+          await resolveCompanyContext(req);
+          await ensurePsychologistProfile(req);
+          userResponse = await userPayload(req);
+        } catch (error) {
+          return next(error);
         }
-
-        // Clean up sensitive info before returning
-        const { password, ...userResponse } = user;
 
         if (!mobile) return res.status(200).json(userResponse);
 
@@ -356,13 +373,13 @@ export function setupAuth(app: Express) {
     });
   });
 
-  app.get("/api/user", (req, res) => {
+  app.get("/api/user", async (req, res, next) => {
     if (!req.isAuthenticated()) return res.sendStatus(401);
-
-    // Clean up sensitive info before returning
-    const { password, ...userResponse } = req.user as any;
-
-    res.json(userResponse);
+    try {
+      res.json(await userPayload(req));
+    } catch (error) {
+      next(error);
+    }
   });
 
   // Rota para listar todos os usuários

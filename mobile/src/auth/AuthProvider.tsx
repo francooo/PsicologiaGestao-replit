@@ -16,6 +16,8 @@ type AuthContextValue = {
   signOut: () => Promise<void>;
   /** Re-reads /api/user (after profile/photo changes). */
   refreshUser: () => Promise<void>;
+  /** Makes another company active; cached data belongs to the old one, so it is dropped. */
+  switchCompany: (companyId: number) => Promise<void>;
   hasRole: (...roles: Role[]) => boolean;
 };
 
@@ -86,6 +88,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(await authApi.me());
   }, []);
 
+  const switchCompany = useCallback(
+    async (companyId: number) => {
+      const me = await authApi.switchCompany(companyId);
+      queryClient.clear();
+      setUser(me);
+    },
+    [queryClient],
+  );
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
@@ -94,9 +105,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithToken,
       signOut,
       refreshUser,
+      switchCompany,
       hasRole: (...roles) => !!user && roles.includes(user.role),
     }),
-    [user, isLoading, signIn, signInWithToken, signOut, refreshUser],
+    [user, isLoading, signIn, signInWithToken, signOut, refreshUser, switchCompany],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

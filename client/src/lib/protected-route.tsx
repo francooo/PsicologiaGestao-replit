@@ -32,6 +32,15 @@ export function ProtectedRoute({
     );
   }
 
+  // Every page works inside a company; pick one first (or learn there is none yet)
+  if (!user.activeCompany) {
+    return (
+      <Route path={path}>
+        <Redirect to="/selecionar-empresa" />
+      </Route>
+    );
+  }
+
   if (roles && !roles.includes(user.role)) {
     return (
       <Route path={path}>

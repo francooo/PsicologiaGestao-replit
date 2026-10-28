@@ -4,7 +4,7 @@ import {
   useMutation,
   UseMutationResult,
 } from "@tanstack/react-query";
-import { insertUserSchema, User as SelectUser, InsertUser } from "@shared/schema";
+import { AuthUser as SelectUser, InsertUser } from "@shared/schema";
 import { getQueryFn, apiRequest, queryClient } from "../lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -15,6 +15,8 @@ type AuthContextType = {
   loginMutation: UseMutationResult<SelectUser, Error, LoginData>;
   logoutMutation: UseMutationResult<void, Error, void>;
   registerMutation: UseMutationResult<SelectUser, Error, InsertUser>;
+  /** Makes another company active; every cached query belongs to the old one, so the cache is cleared. */
+  switchCompanyMutation: UseMutationResult<SelectUser, Error, number>;
 };
 
 type LoginData = Pick<InsertUser, "username" | "password">;
@@ -76,6 +78,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
   });
 
+  const switchCompanyMutation = useMutation({
+    mutationFn: async (companyId: number) => {
+      const res = await apiRequest("POST", "/api/companies/switch", { companyId });
+      return await res.json();
+    },
+    onSuccess: (user: SelectUser) => {
+      queryClient.clear();
+      queryClient.setQueryData(["/api/user"], user);
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Não foi possível trocar de empresa",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const logoutMutation = useMutation({
     mutationFn: async () => {
       await apiRequest("POST", "/api/logout");
@@ -108,6 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loginMutation,
         logoutMutation,
         registerMutation,
+        switchCompanyMutation,
       }}
     >
       {children}

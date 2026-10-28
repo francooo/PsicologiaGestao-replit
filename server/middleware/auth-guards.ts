@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { createHmac } from "crypto";
+import { isPlatformAdmin, resolveCompanyContext } from "../lib/companies";
 
 export const SESSION_COOKIE_NAME = "connect.sid";
 
@@ -48,3 +49,26 @@ export function requireRole(...roles: string[]) {
 }
 
 export const requireAdmin = requireRole("admin");
+
+/**
+ * Sets req.companyId and the per-company req.user.role on every authenticated request.
+ * Must be registered right after `passport.session()`.
+ */
+export function companyContext(req: Request, _res: Response, next: NextFunction) {
+  if (!req.isAuthenticated()) return next();
+  resolveCompanyContext(req).then(() => next(), next);
+}
+
+export function requireCompany(req: Request, res: Response, next: NextFunction) {
+  if (!req.isAuthenticated()) return res.status(401).json({ message: "Não autenticado" });
+  if (!req.companyId) {
+    return res.status(409).json({ message: "Selecione uma empresa para continuar.", code: "NO_COMPANY" });
+  }
+  next();
+}
+
+export function requirePlatformAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!req.isAuthenticated()) return res.status(401).json({ message: "Não autenticado" });
+  if (!isPlatformAdmin(req.user.email)) return res.status(403).json({ message: "Acesso não autorizado" });
+  next();
+}

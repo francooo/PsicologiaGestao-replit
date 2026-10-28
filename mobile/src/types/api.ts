@@ -1,7 +1,17 @@
 // Shapes returned by the ConsultaPsi API (JSON — dates arrive as strings).
 // Mirrors shared/schema.ts and shared/patient-schema.ts on the server.
 
-export type Role = 'admin' | 'psychologist' | 'receptionist' | 'manager';
+// 'none': logged in but with no active company (no screen is available)
+export type Role = 'admin' | 'psychologist' | 'receptionist' | 'manager' | 'none';
+
+/** A company (clínica) the user belongs to, with their role there. */
+export interface CompanySummary {
+  id: number;
+  name: string;
+  slug: string;
+  logoUrl: string | null;
+  role: Role;
+}
 
 export interface User {
   id: number;
@@ -14,6 +24,10 @@ export interface User {
   avatarUrl: string | null;
   googleId: string | null;
   birthDate: string | null;
+  /** Role above is the one in activeCompany. */
+  isPlatformAdmin: boolean;
+  activeCompany: CompanySummary | null;
+  companies: CompanySummary[];
 }
 
 export interface PsychologistUser {
