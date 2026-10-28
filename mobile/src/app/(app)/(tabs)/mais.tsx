@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { router, type Href } from 'expo-router';
 import {
   BarChart3,
+  Building2,
   ChevronRight,
   DoorOpen,
   FileCheck2,
@@ -26,7 +27,14 @@ import { roleLabels } from '@/utils/status';
 import { colors, radius } from '@/theme/tokens';
 import type { Role } from '@/types/api';
 
-type Item = { label: string; href: Href; icon: ComponentType<{ size?: number; color?: string }>; roles?: Role[] };
+type Item = {
+  label: string;
+  href: Href;
+  icon: ComponentType<{ size?: number; color?: string }>;
+  roles?: Role[];
+  /** Only for the platform (super) admin */
+  platformOnly?: boolean;
+};
 
 // Same role matrix as client/src/components/sidebar.tsx
 const sections: { title: string; items: Item[] }[] = [
@@ -49,6 +57,7 @@ const sections: { title: string; items: Item[] }[] = [
       { label: 'Psicólogas', href: '/admin/psicologas', icon: UsersRound, roles: ['admin'] },
       { label: 'Salas', href: '/admin/salas', icon: DoorOpen, roles: ['admin'] },
       { label: 'Permissões', href: '/admin/permissoes', icon: ShieldCheck, roles: ['admin'] },
+      { label: 'Empresas', href: '/empresas', icon: Building2, platformOnly: true },
     ],
   },
   {
@@ -65,7 +74,10 @@ export default function MoreScreen() {
   if (!user) return null;
 
   const visible = sections
-    .map((s) => ({ ...s, items: s.items.filter((i) => !i.roles || i.roles.includes(user.role)) }))
+    .map((s) => ({
+      ...s,
+      items: s.items.filter((i) => (i.platformOnly ? user.isPlatformAdmin : !i.roles || i.roles.includes(user.role))),
+    }))
     .filter((s) => s.items.length);
 
   const onSignOut = async () => {

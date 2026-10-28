@@ -41,6 +41,10 @@ function RootNavigator() {
       <Stack.Protected guard={!!user?.activeCompany}>
         <Stack.Screen name="(app)" />
       </Stack.Protected>
+      {/* Platform (super) admin: the companies themselves, with or without an active one */}
+      <Stack.Protected guard={!!user?.isPlatformAdmin}>
+        <Stack.Screen name="empresas" />
+      </Stack.Protected>
     </Stack>
   );
 }

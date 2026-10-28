@@ -1,5 +1,5 @@
-import { Redirect, useLocation } from "wouter";
-import { Building2, Check, Loader2, LogOut } from "lucide-react";
+import { Link, Redirect, useLocation } from "wouter";
+import { Building2, Check, Loader2, LogOut, Settings2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { BrandLogo } from "@/components/brand/brand-logo";
 import { PublicState } from "@/components/cp/PublicShell";
@@ -85,7 +85,13 @@ export default function SelectCompanyPage() {
             </>
           )}
 
-          <div className="mt-8 flex justify-center">
+          <div className="mt-8 flex flex-wrap justify-center gap-3">
+            {user.isPlatformAdmin && (
+              <Link href="/admin/empresas" className={cpButton.primary}>
+                <Settings2 className="h-4 w-4" aria-hidden="true" />
+                Gerenciar empresas
+              </Link>
+            )}
             <button
               type="button"
               className={cpButton.secondary}

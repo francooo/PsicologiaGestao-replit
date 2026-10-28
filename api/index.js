@@ -1765,7 +1765,7 @@ var storage = new DatabaseStorage();
 import { createHmac } from "crypto";
 
 // server/lib/companies.ts
-import { and as and3, eq as eq3 } from "drizzle-orm";
+import { and as and3, eq as eq3, isNull as isNull2, sql as sql3 } from "drizzle-orm";
 
 // server/lib/access-invites.ts
 import { and as and2, eq as eq2, isNull, sql as sql2 } from "drizzle-orm";
@@ -1805,6 +1805,38 @@ async function upsertMembership(userId, companyId, role) {
     target: [companyMemberships.userId, companyMemberships.companyId],
     set: { role, status: "active" }
   });
+}
+var adminColumns = {
+  id: users.id,
+  fullName: users.fullName,
+  email: users.email,
+  username: users.username,
+  status: users.status,
+  avatarUrl: users.avatarUrl
+};
+async function addCompanyAdmin(companyId, rawEmail, invitedByUserId) {
+  const email = normalizeEmail(rawEmail);
+  const [existing] = await db2.select(adminColumns).from(users).where(sql3`lower(${users.email}) = ${email}`).limit(1);
+  if (existing) {
+    const [current] = await db2.select({ id: companyMemberships.id }).from(companyMemberships).where(
+      and3(
+        eq3(companyMemberships.companyId, companyId),
+        eq3(companyMemberships.userId, existing.id),
+        eq3(companyMemberships.role, "admin"),
+        eq3(companyMemberships.status, "active")
+      )
+    );
+    if (current) return { type: "conflict", message: "Este e-mail j\xE1 \xE9 administrador." };
+    await upsertMembership(existing.id, companyId, "admin");
+    await db2.update(users).set({ status: "active" }).where(eq3(users.id, existing.id));
+    return { type: "promoted", admin: { ...existing, status: "active" } };
+  }
+  const sameInvite = and3(sql3`lower(${accessInvites.email}) = ${email}`, eq3(accessInvites.companyId, companyId));
+  const [pending] = await db2.select({ id: accessInvites.id }).from(accessInvites).where(and3(sameInvite, isNull2(accessInvites.acceptedAt))).limit(1);
+  if (pending) return { type: "conflict", message: "Este e-mail j\xE1 est\xE1 pr\xE9-autorizado." };
+  await db2.delete(accessInvites).where(sameInvite);
+  const [invite] = await db2.insert(accessInvites).values({ email, role: "admin", companyId, invitedByUserId }).returning({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt });
+  return { type: "invited", invite };
 }
 async function getDefaultCompanyId() {
   const [row] = await db2.select({ id: companies.id }).from(companies).where(eq3(companies.slug, DEFAULT_COMPANY_SLUG));
@@ -1894,6 +1926,11 @@ function requireCompanyExcept(publicRoutes) {
     if (isPublic) return next();
     requireCompany(req, res, next);
   };
+}
+function requirePlatformAdmin(req, res, next) {
+  if (!req.isAuthenticated()) return res.status(401).json({ message: "N\xE3o autenticado" });
+  if (!isPlatformAdmin(req.user.email)) return res.status(403).json({ message: "Acesso n\xE3o autorizado" });
+  next();
 }
 
 // server/auth.ts
@@ -4463,7 +4500,7 @@ var specialization_areas_default = router5;
 
 // server/routes/admin-psychologists.ts
 import { Router as Router6 } from "express";
-import { eq as eq10, and as and9, ne, sql as sql3 } from "drizzle-orm";
+import { eq as eq10, and as and9, ne, sql as sql4 } from "drizzle-orm";
 var router6 = Router6();
 function requireAdmin2(req, res, next) {
   if (!req.isAuthenticated()) return res.status(401).json({ error: "N\xE3o autenticado." });
@@ -4540,8 +4577,8 @@ router6.get("/", async (req, res) => {
         if (specializationId && !specs.some((s) => s.id === parseInt(specializationId))) {
           return null;
         }
-        const activePatientsCount = await db2.select({ count: sql3`count(*)` }).from(patients).where(and9(eq10(patients.psychologistId, psych.id), eq10(patients.status, "active")));
-        const sessionsCount = await db2.select({ count: sql3`count(*)` }).from(clinicalSessions).where(eq10(clinicalSessions.psychologistId, psych.id));
+        const activePatientsCount = await db2.select({ count: sql4`count(*)` }).from(patients).where(and9(eq10(patients.psychologistId, psych.id), eq10(patients.status, "active")));
+        const sessionsCount = await db2.select({ count: sql4`count(*)` }).from(clinicalSessions).where(eq10(clinicalSessions.psychologistId, psych.id));
         const { password, ...safeUser } = user;
         return {
           ...psych,
@@ -4568,8 +4605,8 @@ router6.get("/:id", async (req, res) => {
     const user = await findUserInCompany(req.companyId, psych.userId);
     if (!user) return res.status(404).json({ error: "Usu\xE1rio n\xE3o encontrado." });
     const specs = await getSpecializationsForPsych(psych.id);
-    const activePatientsCount = await db2.select({ count: sql3`count(*)` }).from(patients).where(and9(eq10(patients.psychologistId, psych.id), eq10(patients.status, "active")));
-    const sessionsCount = await db2.select({ count: sql3`count(*)` }).from(clinicalSessions).where(eq10(clinicalSessions.psychologistId, psych.id));
+    const activePatientsCount = await db2.select({ count: sql4`count(*)` }).from(patients).where(and9(eq10(patients.psychologistId, psych.id), eq10(patients.status, "active")));
+    const sessionsCount = await db2.select({ count: sql4`count(*)` }).from(clinicalSessions).where(eq10(clinicalSessions.psychologistId, psych.id));
     return res.json({
       ...psych,
       user,
@@ -4670,9 +4707,9 @@ var admin_psychologists_default = router6;
 // server/routes/admin-access.ts
 import { Router as Router7 } from "express";
 import { z as z4 } from "zod";
-import { and as and10, desc as desc3, eq as eq11, isNull as isNull2, ne as ne2, sql as sql4 } from "drizzle-orm";
+import { and as and10, desc as desc3, eq as eq11, isNull as isNull3, ne as ne2, sql as sql5 } from "drizzle-orm";
 var router7 = Router7();
-var adminColumns = {
+var adminColumns2 = {
   id: users.id,
   fullName: users.fullName,
   email: users.email,
@@ -4685,8 +4722,8 @@ var isCompanyAdmin = (companyId) => and10(eq11(companyMemberships.companyId, com
 router7.get("/admins", requireCompany, requireAdmin, async (req, res) => {
   const companyId = req.companyId;
   try {
-    const admins = await db2.select(adminColumns).from(companyMemberships).innerJoin(users, eq11(companyMemberships.userId, users.id)).where(isCompanyAdmin(companyId)).orderBy(users.fullName);
-    const invites = await db2.select({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt }).from(accessInvites).where(and10(isNull2(accessInvites.acceptedAt), eq11(accessInvites.role, "admin"), eq11(accessInvites.companyId, companyId))).orderBy(desc3(accessInvites.createdAt));
+    const admins = await db2.select(adminColumns2).from(companyMemberships).innerJoin(users, eq11(companyMemberships.userId, users.id)).where(isCompanyAdmin(companyId)).orderBy(users.fullName);
+    const invites = await db2.select({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt }).from(accessInvites).where(and10(isNull3(accessInvites.acceptedAt), eq11(accessInvites.role, "admin"), eq11(accessInvites.companyId, companyId))).orderBy(desc3(accessInvites.createdAt));
     res.json({ admins, invites });
   } catch (error) {
     console.error("GET /api/admin/admins:", error);
@@ -4696,23 +4733,10 @@ router7.get("/admins", requireCompany, requireAdmin, async (req, res) => {
 router7.post("/admins", requireCompany, requireAdmin, async (req, res) => {
   const parsed = emailSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0].message });
-  const email = normalizeEmail(parsed.data.email);
-  const companyId = req.companyId;
   try {
-    const [existing] = await db2.select(adminColumns).from(users).where(sql4`lower(${users.email}) = ${email}`).limit(1);
-    if (existing) {
-      const [current] = await db2.select({ id: companyMemberships.id }).from(companyMemberships).where(and10(isCompanyAdmin(companyId), eq11(companyMemberships.userId, existing.id)));
-      if (current) return res.status(409).json({ message: "Este e-mail j\xE1 \xE9 administrador." });
-      await upsertMembership(existing.id, companyId, "admin");
-      await db2.update(users).set({ status: "active" }).where(eq11(users.id, existing.id));
-      return res.status(200).json({ type: "promoted", admin: { ...existing, status: "active" } });
-    }
-    const sameInvite = and10(sql4`lower(${accessInvites.email}) = ${email}`, eq11(accessInvites.companyId, companyId));
-    const [pending] = await db2.select({ id: accessInvites.id }).from(accessInvites).where(and10(sameInvite, isNull2(accessInvites.acceptedAt))).limit(1);
-    if (pending) return res.status(409).json({ message: "Este e-mail j\xE1 est\xE1 pr\xE9-autorizado." });
-    await db2.delete(accessInvites).where(sameInvite);
-    const [invite] = await db2.insert(accessInvites).values({ email, role: "admin", companyId, invitedByUserId: req.user.id }).returning({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt });
-    res.status(201).json({ type: "invited", invite });
+    const result = await addCompanyAdmin(req.companyId, parsed.data.email, req.user.id);
+    if (result.type === "conflict") return res.status(409).json({ message: result.message });
+    res.status(result.type === "promoted" ? 200 : 201).json(result);
   } catch (error) {
     console.error("POST /api/admin/admins:", error);
     res.status(500).json({ message: "Erro ao adicionar administrador." });
@@ -4726,8 +4750,8 @@ router7.delete("/admins/:userId", requireCompany, requireAdmin, async (req, res)
   try {
     const [target] = await db2.select({ id: companyMemberships.id }).from(companyMemberships).where(and10(isCompanyAdmin(companyId), eq11(companyMemberships.userId, userId)));
     if (!target) return res.status(404).json({ message: "Administrador n\xE3o encontrado." });
-    const [{ count: count3 }] = await db2.select({ count: sql4`count(*)::int` }).from(companyMemberships).innerJoin(users, eq11(companyMemberships.userId, users.id)).where(and10(isCompanyAdmin(companyId), eq11(users.status, "active"), ne2(users.id, userId)));
-    if (count3 === 0) return res.status(400).json({ message: "A empresa precisa de pelo menos um administrador." });
+    const [{ count: count4 }] = await db2.select({ count: sql5`count(*)::int` }).from(companyMemberships).innerJoin(users, eq11(companyMemberships.userId, users.id)).where(and10(isCompanyAdmin(companyId), eq11(users.status, "active"), ne2(users.id, userId)));
+    if (count4 === 0) return res.status(400).json({ message: "A empresa precisa de pelo menos um administrador." });
     await db2.update(companyMemberships).set({ role: "psychologist" }).where(eq11(companyMemberships.id, target.id));
     res.status(204).end();
   } catch (error) {
@@ -4739,7 +4763,7 @@ router7.delete("/invites/:id", requireCompany, requireAdmin, async (req, res) =>
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ message: "Convite inv\xE1lido." });
   try {
-    const deleted = await db2.delete(accessInvites).where(and10(eq11(accessInvites.id, id), eq11(accessInvites.companyId, req.companyId), isNull2(accessInvites.acceptedAt))).returning({ id: accessInvites.id });
+    const deleted = await db2.delete(accessInvites).where(and10(eq11(accessInvites.id, id), eq11(accessInvites.companyId, req.companyId), isNull3(accessInvites.acceptedAt))).returning({ id: accessInvites.id });
     if (deleted.length === 0) return res.status(404).json({ message: "Convite n\xE3o encontrado." });
     res.status(204).end();
   } catch (error) {
@@ -4768,6 +4792,19 @@ router8.post("/switch", requireAuth, async (req, res) => {
   try {
     const company = await findCompanyAccess(req.user, parsed.data.companyId);
     if (!company) return res.status(403).json({ message: "Voc\xEA n\xE3o tem acesso a esta empresa." });
+    const isMember = (await listUserCompanies(req.user.id)).some((c) => c.id === company.id);
+    if (!isMember) {
+      await storage.createAuditLog(company.id, {
+        userId: req.user.id,
+        action: "platform_support_access",
+        resourceType: "company",
+        resourceId: company.id,
+        patientId: null,
+        ipAddress: req.ip || null,
+        userAgent: req.get("user-agent") || null,
+        details: { email: req.user.email }
+      });
+    }
     req.session.companyId = company.id;
     await resolveCompanyContext(req);
     const payload = await userPayload(req);
@@ -4785,23 +4822,166 @@ router8.post("/switch", requireAuth, async (req, res) => {
 });
 var companies_default = router8;
 
-// server/routes/care-templates.ts
+// server/routes/platform.ts
 import { Router as Router9 } from "express";
-import { eq as eq12, or as or2, isNull as isNull3, and as and11, count } from "drizzle-orm";
 import { z as z6 } from "zod";
+import { and as and11, asc, count, eq as eq12, isNull as isNull4 } from "drizzle-orm";
 var router9 = Router9();
+router9.use(requirePlatformAdmin);
+var companyColumns = {
+  id: companies.id,
+  name: companies.name,
+  slug: companies.slug,
+  cnpj: companies.cnpj,
+  logoUrl: companies.logoUrl,
+  status: companies.status,
+  createdAt: companies.createdAt
+};
+var nameSchema = z6.string().trim().min(2, "Informe o nome da empresa.").max(120);
+var cnpjSchema = z6.string().trim().transform((v) => v.replace(/\D/g, "")).refine((v) => v === "" || v.length === 14, "CNPJ deve ter 14 d\xEDgitos.").transform((v) => v || null);
+function slugify(name) {
+  return name.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "empresa";
+}
+async function uniqueSlug(name) {
+  const base = slugify(name);
+  for (let i = 1; ; i++) {
+    const slug = i === 1 ? base : `${base}-${i}`;
+    const [taken] = await db2.select({ id: companies.id }).from(companies).where(eq12(companies.slug, slug));
+    if (!taken) return slug;
+  }
+}
+var parseId = (raw) => {
+  const id = Number(raw);
+  return Number.isInteger(id) && id > 0 ? id : null;
+};
+router9.get("/companies", async (_req, res) => {
+  try {
+    const list = await db2.select(companyColumns).from(companies).orderBy(asc(companies.name));
+    const members = await db2.select({ companyId: companyMemberships.companyId, role: companyMemberships.role, total: count() }).from(companyMemberships).where(eq12(companyMemberships.status, "active")).groupBy(companyMemberships.companyId, companyMemberships.role);
+    const pending = await db2.select({ companyId: accessInvites.companyId, total: count() }).from(accessInvites).where(isNull4(accessInvites.acceptedAt)).groupBy(accessInvites.companyId);
+    res.json(
+      list.map((c) => {
+        const rows = members.filter((m) => m.companyId === c.id);
+        return {
+          ...c,
+          membersCount: rows.reduce((acc, m) => acc + Number(m.total), 0),
+          adminsCount: Number(rows.find((m) => m.role === "admin")?.total ?? 0),
+          pendingInvitesCount: Number(pending.find((p) => p.companyId === c.id)?.total ?? 0)
+        };
+      })
+    );
+  } catch (error) {
+    console.error("GET /api/platform/companies:", error);
+    res.status(500).json({ message: "Erro ao carregar empresas." });
+  }
+});
+var createSchema2 = z6.object({
+  name: nameSchema,
+  cnpj: cnpjSchema.optional(),
+  adminEmail: z6.string().trim().email("Informe um e-mail v\xE1lido.").optional().or(z6.literal(""))
+});
+router9.post("/companies", async (req, res) => {
+  const parsed = createSchema2.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0].message });
+  const { name, cnpj, adminEmail } = parsed.data;
+  try {
+    const [company] = await db2.insert(companies).values({ name, cnpj: cnpj ?? null, slug: await uniqueSlug(name) }).returning(companyColumns);
+    const admin = adminEmail ? await addCompanyAdmin(company.id, adminEmail, req.user.id) : null;
+    res.status(201).json({ company, admin });
+  } catch (error) {
+    console.error("POST /api/platform/companies:", error);
+    res.status(500).json({ message: "Erro ao criar empresa." });
+  }
+});
+var updateSchema = z6.object({
+  name: nameSchema.optional(),
+  cnpj: cnpjSchema.optional(),
+  status: z6.enum(["active", "suspended"]).optional()
+}).refine((v) => Object.keys(v).length > 0, "Nada para alterar.");
+router9.patch("/companies/:id", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ message: "Empresa inv\xE1lida." });
+  const parsed = updateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0].message });
+  try {
+    const [updated] = await db2.update(companies).set(parsed.data).where(eq12(companies.id, id)).returning(companyColumns);
+    if (!updated) return res.status(404).json({ message: "Empresa n\xE3o encontrada." });
+    res.json(updated);
+  } catch (error) {
+    console.error("PATCH /api/platform/companies/:id:", error);
+    res.status(500).json({ message: "Erro ao atualizar empresa." });
+  }
+});
+router9.get("/companies/:id", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ message: "Empresa inv\xE1lida." });
+  try {
+    const [company] = await db2.select(companyColumns).from(companies).where(eq12(companies.id, id));
+    if (!company) return res.status(404).json({ message: "Empresa n\xE3o encontrada." });
+    const members = await db2.select({
+      id: users.id,
+      fullName: users.fullName,
+      email: users.email,
+      avatarUrl: users.avatarUrl,
+      role: companyMemberships.role,
+      status: companyMemberships.status
+    }).from(companyMemberships).innerJoin(users, eq12(companyMemberships.userId, users.id)).where(eq12(companyMemberships.companyId, id)).orderBy(asc(users.fullName));
+    const invites = await db2.select({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt }).from(accessInvites).where(and11(eq12(accessInvites.companyId, id), isNull4(accessInvites.acceptedAt))).orderBy(asc(accessInvites.createdAt));
+    res.json({ company, members, invites });
+  } catch (error) {
+    console.error("GET /api/platform/companies/:id:", error);
+    res.status(500).json({ message: "Erro ao carregar empresa." });
+  }
+});
+var emailSchema2 = z6.object({ email: z6.string().trim().email("Informe um e-mail v\xE1lido.") });
+router9.post("/companies/:id/admins", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ message: "Empresa inv\xE1lida." });
+  const parsed = emailSchema2.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0].message });
+  try {
+    const [company] = await db2.select({ id: companies.id }).from(companies).where(eq12(companies.id, id));
+    if (!company) return res.status(404).json({ message: "Empresa n\xE3o encontrada." });
+    const result = await addCompanyAdmin(id, parsed.data.email, req.user.id);
+    if (result.type === "conflict") return res.status(409).json({ message: result.message });
+    res.status(result.type === "promoted" ? 200 : 201).json(result);
+  } catch (error) {
+    console.error("POST /api/platform/companies/:id/admins:", error);
+    res.status(500).json({ message: "Erro ao adicionar administrador." });
+  }
+});
+router9.delete("/companies/:id/invites/:inviteId", async (req, res) => {
+  const id = parseId(req.params.id);
+  const inviteId = parseId(req.params.inviteId);
+  if (!id || !inviteId) return res.status(400).json({ message: "Convite inv\xE1lido." });
+  try {
+    const deleted = await db2.delete(accessInvites).where(and11(eq12(accessInvites.id, inviteId), eq12(accessInvites.companyId, id), isNull4(accessInvites.acceptedAt))).returning({ id: accessInvites.id });
+    if (deleted.length === 0) return res.status(404).json({ message: "Convite n\xE3o encontrado." });
+    res.status(204).end();
+  } catch (error) {
+    console.error("DELETE /api/platform/companies/:id/invites/:inviteId:", error);
+    res.status(500).json({ message: "Erro ao cancelar convite." });
+  }
+});
+var platform_default = router9;
+
+// server/routes/care-templates.ts
+import { Router as Router10 } from "express";
+import { eq as eq13, or as or2, isNull as isNull5, and as and12, count as count2 } from "drizzle-orm";
+import { z as z7 } from "zod";
+var router10 = Router10();
 var checkAuth2 = (req, res, next) => {
   if (!req.isAuthenticated()) return res.status(401).json({ message: "N\xE3o autenticado" });
   next();
 };
-router9.use(checkAuth2);
-var ownTemplate = (req) => and11(eq12(careTemplates.psychologistId, req.user.id), eq12(careTemplates.companyId, req.companyId));
-router9.get("/", async (req, res) => {
+router10.use(checkAuth2);
+var ownTemplate = (req) => and12(eq13(careTemplates.psychologistId, req.user.id), eq13(careTemplates.companyId, req.companyId));
+router10.get("/", async (req, res) => {
   try {
-    const templates = await db2.select().from(careTemplates).where(or2(ownTemplate(req), isNull3(careTemplates.psychologistId)));
+    const templates = await db2.select().from(careTemplates).where(or2(ownTemplate(req), isNull5(careTemplates.psychologistId)));
     const result = await Promise.all(
       templates.map(async (t) => {
-        const questions = await db2.select().from(careTemplateQuestions).where(eq12(careTemplateQuestions.templateId, t.id)).orderBy(careTemplateQuestions.orderIndex);
+        const questions = await db2.select().from(careTemplateQuestions).where(eq13(careTemplateQuestions.templateId, t.id)).orderBy(careTemplateQuestions.orderIndex);
         return { ...t, questions, questionCount: questions.length };
       })
     );
@@ -4811,7 +4991,7 @@ router9.get("/", async (req, res) => {
     res.status(500).json({ message: "Erro ao listar templates" });
   }
 });
-router9.post("/", async (req, res) => {
+router10.post("/", async (req, res) => {
   try {
     const userId = req.user.id;
     const { questions = [], ...body } = req.body;
@@ -4827,77 +5007,77 @@ router9.post("/", async (req, res) => {
       );
       await db2.insert(careTemplateQuestions).values(qs);
     }
-    const allQuestions = await db2.select().from(careTemplateQuestions).where(eq12(careTemplateQuestions.templateId, template.id)).orderBy(careTemplateQuestions.orderIndex);
+    const allQuestions = await db2.select().from(careTemplateQuestions).where(eq13(careTemplateQuestions.templateId, template.id)).orderBy(careTemplateQuestions.orderIndex);
     res.status(201).json({ ...template, questions: allQuestions });
   } catch (e) {
-    if (e instanceof z6.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z7.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao criar template" });
   }
 });
-router9.get("/:id", async (req, res) => {
+router10.get("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const [template] = await db2.select().from(careTemplates).where(
-      and11(
-        eq12(careTemplates.id, id),
-        or2(ownTemplate(req), isNull3(careTemplates.psychologistId))
+      and12(
+        eq13(careTemplates.id, id),
+        or2(ownTemplate(req), isNull5(careTemplates.psychologistId))
       )
     );
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const questions = await db2.select().from(careTemplateQuestions).where(eq12(careTemplateQuestions.templateId, id)).orderBy(careTemplateQuestions.orderIndex);
+    const questions = await db2.select().from(careTemplateQuestions).where(eq13(careTemplateQuestions.templateId, id)).orderBy(careTemplateQuestions.orderIndex);
     res.json({ ...template, questions });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: "Erro ao buscar template" });
   }
 });
-router9.patch("/:id", async (req, res) => {
+router10.patch("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(and11(eq12(careTemplates.id, id), ownTemplate(req)));
+    const [template] = await db2.select().from(careTemplates).where(and12(eq13(careTemplates.id, id), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const editableSchema = z6.object({
-      title: z6.string().min(1).max(100).optional(),
-      description: z6.string().max(500).optional()
+    const editableSchema = z7.object({
+      title: z7.string().min(1).max(100).optional(),
+      description: z7.string().max(500).optional()
     });
     const updateData = editableSchema.parse(req.body);
-    const [updated] = await db2.update(careTemplates).set({ ...updateData, updatedAt: /* @__PURE__ */ new Date() }).where(eq12(careTemplates.id, id)).returning();
+    const [updated] = await db2.update(careTemplates).set({ ...updateData, updatedAt: /* @__PURE__ */ new Date() }).where(eq13(careTemplates.id, id)).returning();
     res.json(updated);
   } catch (e) {
-    if (e instanceof z6.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z7.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao atualizar template" });
   }
 });
-router9.delete("/:id", async (req, res) => {
+router10.delete("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(and11(eq12(careTemplates.id, id), ownTemplate(req)));
+    const [template] = await db2.select().from(careTemplates).where(and12(eq13(careTemplates.id, id), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const [{ value: dispatchCount }] = await db2.select({ value: count() }).from(careDispatches).where(eq12(careDispatches.templateId, id));
+    const [{ value: dispatchCount }] = await db2.select({ value: count2() }).from(careDispatches).where(eq13(careDispatches.templateId, id));
     if (Number(dispatchCount) > 0) {
       return res.status(409).json({
         message: "N\xE3o \xE9 poss\xEDvel excluir este template pois ele possui envios vinculados."
       });
     }
-    await db2.delete(careTemplates).where(eq12(careTemplates.id, id));
+    await db2.delete(careTemplates).where(eq13(careTemplates.id, id));
     res.sendStatus(204);
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: "Erro ao excluir template" });
   }
 });
-router9.put("/:id/questions", async (req, res) => {
+router10.put("/:id/questions", async (req, res) => {
   try {
     const templateId = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(and11(eq12(careTemplates.id, templateId), ownTemplate(req)));
+    const [template] = await db2.select().from(careTemplates).where(and12(eq13(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const questionsSchema = z6.array(
-      insertCareTemplateQuestionSchema.omit({ templateId: true }).extend({ orderIndex: z6.number().int() })
+    const questionsSchema = z7.array(
+      insertCareTemplateQuestionSchema.omit({ templateId: true }).extend({ orderIndex: z7.number().int() })
     );
     const questions = questionsSchema.parse(req.body);
-    await db2.delete(careTemplateQuestions).where(eq12(careTemplateQuestions.templateId, templateId));
+    await db2.delete(careTemplateQuestions).where(eq13(careTemplateQuestions.templateId, templateId));
     if (questions.length > 0) {
       await db2.insert(careTemplateQuestions).values(
         questions.map((q, i) => ({
@@ -4907,63 +5087,63 @@ router9.put("/:id/questions", async (req, res) => {
         }))
       );
     }
-    const saved = await db2.select().from(careTemplateQuestions).where(eq12(careTemplateQuestions.templateId, templateId)).orderBy(careTemplateQuestions.orderIndex);
+    const saved = await db2.select().from(careTemplateQuestions).where(eq13(careTemplateQuestions.templateId, templateId)).orderBy(careTemplateQuestions.orderIndex);
     res.json(saved);
   } catch (e) {
-    if (e instanceof z6.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z7.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao salvar perguntas do template" });
   }
 });
-router9.post("/:id/questions", async (req, res) => {
+router10.post("/:id/questions", async (req, res) => {
   try {
     const templateId = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(and11(eq12(careTemplates.id, templateId), ownTemplate(req)));
+    const [template] = await db2.select().from(careTemplates).where(and12(eq13(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
     const data = insertCareTemplateQuestionSchema.parse({ ...req.body, templateId });
     const [q] = await db2.insert(careTemplateQuestions).values(data).returning();
     res.status(201).json(q);
   } catch (e) {
-    if (e instanceof z6.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z7.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao adicionar pergunta" });
   }
 });
-router9.patch("/:id/questions/:qId", async (req, res) => {
+router10.patch("/:id/questions/:qId", async (req, res) => {
   try {
     const templateId = parseInt(req.params.id);
     const qId = parseInt(req.params.qId);
-    const [template] = await db2.select().from(careTemplates).where(and11(eq12(careTemplates.id, templateId), ownTemplate(req)));
+    const [template] = await db2.select().from(careTemplates).where(and12(eq13(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
     const editableQuestionSchema = insertCareTemplateQuestionSchema.omit({ templateId: true }).partial();
     const data = editableQuestionSchema.parse(req.body);
-    const [updated] = await db2.update(careTemplateQuestions).set(data).where(and11(eq12(careTemplateQuestions.id, qId), eq12(careTemplateQuestions.templateId, templateId))).returning();
+    const [updated] = await db2.update(careTemplateQuestions).set(data).where(and12(eq13(careTemplateQuestions.id, qId), eq13(careTemplateQuestions.templateId, templateId))).returning();
     if (!updated) return res.status(404).json({ message: "Pergunta n\xE3o encontrada" });
     res.json(updated);
   } catch (e) {
-    if (e instanceof z6.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z7.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao atualizar pergunta" });
   }
 });
-router9.delete("/:id/questions/:qId", async (req, res) => {
+router10.delete("/:id/questions/:qId", async (req, res) => {
   try {
     const templateId = parseInt(req.params.id);
     const qId = parseInt(req.params.qId);
-    const [template] = await db2.select().from(careTemplates).where(and11(eq12(careTemplates.id, templateId), ownTemplate(req)));
+    const [template] = await db2.select().from(careTemplates).where(and12(eq13(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    await db2.delete(careTemplateQuestions).where(and11(eq12(careTemplateQuestions.id, qId), eq12(careTemplateQuestions.templateId, templateId)));
+    await db2.delete(careTemplateQuestions).where(and12(eq13(careTemplateQuestions.id, qId), eq13(careTemplateQuestions.templateId, templateId)));
     res.sendStatus(204);
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: "Erro ao remover pergunta" });
   }
 });
-var care_templates_default = router9;
+var care_templates_default = router10;
 
 // server/routes/care-dispatch.ts
-import { Router as Router10 } from "express";
-import { eq as eq13, desc as desc4, count as count2, and as and12, or as or3, isNull as isNull4 } from "drizzle-orm";
+import { Router as Router11 } from "express";
+import { eq as eq14, desc as desc4, count as count3, and as and13, or as or3, isNull as isNull6 } from "drizzle-orm";
 
 // server/lib/validate-email.ts
 function isValidEmail(email) {
@@ -5093,13 +5273,13 @@ async function sendCareFormEmail(params) {
 }
 
 // server/routes/care-dispatch.ts
-import { z as z7 } from "zod";
-var router10 = Router10();
+import { z as z8 } from "zod";
+var router11 = Router11();
 var checkAuth3 = (req, res, next) => {
   if (!req.isAuthenticated()) return res.status(401).json({ message: "N\xE3o autenticado" });
   next();
 };
-router10.use(checkAuth3);
+router11.use(checkAuth3);
 function substituteVariables(text3, patientName, psychologistName) {
   const firstName = patientName.split(" ")[0];
   return text3.replace(/\{patient_name\}/g, firstName).replace(/\{patient_full_name\}/g, patientName).replace(/\{psychologist_name\}/g, psychologistName);
@@ -5108,14 +5288,14 @@ async function canAccessPatient(req, patientRow) {
   const user = req.user;
   if (user.role === "admin") return true;
   if (user.role === "psychologist") {
-    const [psychRow] = await db2.select().from(psychologists).where(and12(eq13(psychologists.userId, user.id), eq13(psychologists.companyId, req.companyId)));
+    const [psychRow] = await db2.select().from(psychologists).where(and13(eq14(psychologists.userId, user.id), eq14(psychologists.companyId, req.companyId)));
     const psychId = psychRow?.id ?? -1;
     return patientRow.psychologistId === psychId || patientRow.createdBy === user.id;
   }
   return false;
 }
 async function findPatient(companyId, patientId) {
-  const [patient] = await db2.select().from(patients).where(and12(eq13(patients.id, patientId), eq13(patients.companyId, companyId)));
+  const [patient] = await db2.select().from(patients).where(and13(eq14(patients.id, patientId), eq14(patients.companyId, companyId)));
   return patient;
 }
 function canAccessDispatch(req, dispatch) {
@@ -5123,7 +5303,7 @@ function canAccessDispatch(req, dispatch) {
   if (req.user.role === "admin") return true;
   return dispatch.psychologistId === req.user.id;
 }
-router10.post("/patients/:patientId/dispatch", async (req, res) => {
+router11.post("/patients/:patientId/dispatch", async (req, res) => {
   try {
     const user = req.user;
     const patientId = parseInt(req.params.patientId);
@@ -5144,27 +5324,27 @@ router10.post("/patients/:patientId/dispatch", async (req, res) => {
         message: "O paciente n\xE3o possui e-mail v\xE1lido cadastrado. Atualize o perfil antes de enviar."
       });
     }
-    const [psychUser] = await db2.select().from(users).where(eq13(users.id, user.id));
+    const [psychUser] = await db2.select().from(users).where(eq14(users.id, user.id));
     if (!psychUser) return res.status(400).json({ message: "Usu\xE1rio n\xE3o encontrado" });
     const [template] = await db2.select().from(careTemplates).where(
-      and12(
-        eq13(careTemplates.id, parseInt(template_id)),
+      and13(
+        eq14(careTemplates.id, parseInt(template_id)),
         or3(
-          and12(eq13(careTemplates.psychologistId, user.id), eq13(careTemplates.companyId, req.companyId)),
-          isNull4(careTemplates.psychologistId)
+          and13(eq14(careTemplates.psychologistId, user.id), eq14(careTemplates.companyId, req.companyId)),
+          isNull6(careTemplates.psychologistId)
         )
       )
     );
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const templateQuestions = await db2.select().from(careTemplateQuestions).where(eq13(careTemplateQuestions.templateId, template.id)).orderBy(careTemplateQuestions.orderIndex);
+    const templateQuestions = await db2.select().from(careTemplateQuestions).where(eq14(careTemplateQuestions.templateId, template.id)).orderBy(careTemplateQuestions.orderIndex);
     const psychName = psychUser.fullName || psychUser.username;
-    const overrideSchema = z7.array(
-      z7.object({
-        questionText: z7.string().min(1),
-        questionType: z7.string(),
-        options: z7.array(z7.string()).nullable().optional(),
-        isRequired: z7.boolean(),
-        orderIndex: z7.number().int()
+    const overrideSchema = z8.array(
+      z8.object({
+        questionText: z8.string().min(1),
+        questionType: z8.string(),
+        options: z8.array(z8.string()).nullable().optional(),
+        isRequired: z8.boolean(),
+        orderIndex: z8.number().int()
       })
     );
     let renderedQuestions;
@@ -5241,7 +5421,7 @@ router10.post("/patients/:patientId/dispatch", async (req, res) => {
     res.status(500).json({ message: "Erro ao enviar formul\xE1rio" });
   }
 });
-router10.get("/patients/:patientId/dispatches", async (req, res) => {
+router11.get("/patients/:patientId/dispatches", async (req, res) => {
   try {
     const patientId = parseInt(req.params.patientId);
     const patient = await findPatient(req.companyId, patientId);
@@ -5253,15 +5433,15 @@ router10.get("/patients/:patientId/dispatches", async (req, res) => {
         code: "FORBIDDEN"
       });
     }
-    const dispatches = await db2.select().from(careDispatches).where(and12(eq13(careDispatches.patientId, patientId), eq13(careDispatches.companyId, req.companyId))).orderBy(desc4(careDispatches.sentAt));
+    const dispatches = await db2.select().from(careDispatches).where(and13(eq14(careDispatches.patientId, patientId), eq14(careDispatches.companyId, req.companyId))).orderBy(desc4(careDispatches.sentAt));
     const now = /* @__PURE__ */ new Date();
     const result = await Promise.all(
       dispatches.map(async (d) => {
         if (d.status !== "answered" && d.tokenExpiresAt < now) {
-          await db2.update(careDispatches).set({ status: "expired" }).where(eq13(careDispatches.id, d.id));
+          await db2.update(careDispatches).set({ status: "expired" }).where(eq14(careDispatches.id, d.id));
           d = { ...d, status: "expired" };
         }
-        const [{ value: responseCount }] = await db2.select({ value: count2() }).from(careResponses).where(eq13(careResponses.dispatchId, d.id));
+        const [{ value: responseCount }] = await db2.select({ value: count3() }).from(careResponses).where(eq14(careResponses.dispatchId, d.id));
         return { ...d, responseCount: Number(responseCount) };
       })
     );
@@ -5271,10 +5451,10 @@ router10.get("/patients/:patientId/dispatches", async (req, res) => {
     res.status(500).json({ message: "Erro ao listar hist\xF3rico de envios" });
   }
 });
-router10.get("/dispatches/:dispatchId/responses", async (req, res) => {
+router11.get("/dispatches/:dispatchId/responses", async (req, res) => {
   try {
     const dispatchId = parseInt(req.params.dispatchId);
-    const [dispatch] = await db2.select().from(careDispatches).where(eq13(careDispatches.id, dispatchId));
+    const [dispatch] = await db2.select().from(careDispatches).where(eq14(careDispatches.id, dispatchId));
     if (!dispatch) return res.status(404).json({ message: "Envio n\xE3o encontrado" });
     if (!canAccessDispatch(req, dispatch)) {
       return res.status(403).json({
@@ -5282,8 +5462,8 @@ router10.get("/dispatches/:dispatchId/responses", async (req, res) => {
         code: "FORBIDDEN"
       });
     }
-    const questions = await db2.select().from(careDispatchQuestions).where(eq13(careDispatchQuestions.dispatchId, dispatchId)).orderBy(careDispatchQuestions.orderIndex);
-    const responses = await db2.select().from(careResponses).where(eq13(careResponses.dispatchId, dispatchId));
+    const questions = await db2.select().from(careDispatchQuestions).where(eq14(careDispatchQuestions.dispatchId, dispatchId)).orderBy(careDispatchQuestions.orderIndex);
+    const responses = await db2.select().from(careResponses).where(eq14(careResponses.dispatchId, dispatchId));
     const merged = questions.map((q) => ({
       ...q,
       response: responses.find((r) => r.dispatchQuestionId === q.id) ?? null
@@ -5294,23 +5474,23 @@ router10.get("/dispatches/:dispatchId/responses", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar respostas" });
   }
 });
-var care_dispatch_default = router10;
+var care_dispatch_default = router11;
 
 // server/routes/care-public.ts
-import { Router as Router11 } from "express";
-import { eq as eq14 } from "drizzle-orm";
-import { z as z8 } from "zod";
-var router11 = Router11();
-router11.get("/respond/:token", async (req, res) => {
+import { Router as Router12 } from "express";
+import { eq as eq15 } from "drizzle-orm";
+import { z as z9 } from "zod";
+var router12 = Router12();
+router12.get("/respond/:token", async (req, res) => {
   try {
     const { token } = req.params;
-    const [dispatch] = await db2.select().from(careDispatches).where(eq14(careDispatches.responseToken, token));
+    const [dispatch] = await db2.select().from(careDispatches).where(eq15(careDispatches.responseToken, token));
     if (!dispatch) {
       return res.status(404).json({ error: "not_found", message: "Formul\xE1rio n\xE3o encontrado." });
     }
     if (/* @__PURE__ */ new Date() > dispatch.tokenExpiresAt) {
       if (dispatch.status !== "expired" && dispatch.status !== "answered") {
-        await db2.update(careDispatches).set({ status: "expired" }).where(eq14(careDispatches.id, dispatch.id));
+        await db2.update(careDispatches).set({ status: "expired" }).where(eq15(careDispatches.id, dispatch.id));
       }
       return res.status(410).json({
         error: "expired",
@@ -5324,11 +5504,11 @@ router11.get("/respond/:token", async (req, res) => {
       });
     }
     if (dispatch.status === "sent") {
-      await db2.update(careDispatches).set({ status: "opened", openedAt: /* @__PURE__ */ new Date() }).where(eq14(careDispatches.id, dispatch.id));
+      await db2.update(careDispatches).set({ status: "opened", openedAt: /* @__PURE__ */ new Date() }).where(eq15(careDispatches.id, dispatch.id));
     }
-    const questions = await db2.select().from(careDispatchQuestions).where(eq14(careDispatchQuestions.dispatchId, dispatch.id)).orderBy(careDispatchQuestions.orderIndex);
-    const [patient] = await db2.select({ firstName: patients.fullName }).from(patients).where(eq14(patients.id, dispatch.patientId));
-    const [psychUser] = await db2.select({ fullName: users.fullName, username: users.username }).from(users).where(eq14(users.id, dispatch.psychologistId));
+    const questions = await db2.select().from(careDispatchQuestions).where(eq15(careDispatchQuestions.dispatchId, dispatch.id)).orderBy(careDispatchQuestions.orderIndex);
+    const [patient] = await db2.select({ firstName: patients.fullName }).from(patients).where(eq15(patients.id, dispatch.patientId));
+    const [psychUser] = await db2.select({ fullName: users.fullName, username: users.username }).from(users).where(eq15(users.id, dispatch.psychologistId));
     const clinicName = await clinicDisplayName(dispatch.companyId);
     const patientFirstName = patient?.firstName?.split(" ")[0] ?? "Paciente";
     const psychologistName = psychUser?.fullName || psychUser?.username || "sua psic\xF3loga";
@@ -5345,26 +5525,26 @@ router11.get("/respond/:token", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar formul\xE1rio" });
   }
 });
-var answerSchema = z8.object({
-  answers: z8.array(
-    z8.object({
-      dispatch_question_id: z8.number().int().positive(),
-      answer_text: z8.string().optional().nullable(),
-      answer_choice: z8.string().optional().nullable(),
-      answer_scale: z8.number().int().min(1).max(10).optional().nullable()
+var answerSchema = z9.object({
+  answers: z9.array(
+    z9.object({
+      dispatch_question_id: z9.number().int().positive(),
+      answer_text: z9.string().optional().nullable(),
+      answer_choice: z9.string().optional().nullable(),
+      answer_scale: z9.number().int().min(1).max(10).optional().nullable()
     })
   )
 });
-router11.post("/respond/:token", async (req, res) => {
+router12.post("/respond/:token", async (req, res) => {
   try {
     const { token } = req.params;
-    const [dispatch] = await db2.select().from(careDispatches).where(eq14(careDispatches.responseToken, token));
+    const [dispatch] = await db2.select().from(careDispatches).where(eq15(careDispatches.responseToken, token));
     if (!dispatch) {
       return res.status(404).json({ error: "not_found", message: "Formul\xE1rio n\xE3o encontrado." });
     }
     if (/* @__PURE__ */ new Date() > dispatch.tokenExpiresAt) {
       if (dispatch.status !== "expired") {
-        await db2.update(careDispatches).set({ status: "expired" }).where(eq14(careDispatches.id, dispatch.id));
+        await db2.update(careDispatches).set({ status: "expired" }).where(eq15(careDispatches.id, dispatch.id));
       }
       return res.status(410).json({
         error: "expired",
@@ -5379,7 +5559,7 @@ router11.post("/respond/:token", async (req, res) => {
     }
     const parsed = answerSchema.parse(req.body);
     const { answers } = parsed;
-    const questions = await db2.select().from(careDispatchQuestions).where(eq14(careDispatchQuestions.dispatchId, dispatch.id));
+    const questions = await db2.select().from(careDispatchQuestions).where(eq15(careDispatchQuestions.dispatchId, dispatch.id));
     const validQuestionIds = new Set(questions.map((q) => q.id));
     for (const a of answers) {
       if (!validQuestionIds.has(a.dispatch_question_id)) {
@@ -5410,28 +5590,28 @@ router11.post("/respond/:token", async (req, res) => {
         }))
       );
     }
-    await db2.update(careDispatches).set({ status: "answered", answeredAt: /* @__PURE__ */ new Date() }).where(eq14(careDispatches.id, dispatch.id));
+    await db2.update(careDispatches).set({ status: "answered", answeredAt: /* @__PURE__ */ new Date() }).where(eq15(careDispatches.id, dispatch.id));
     return res.json({ success: true, message: "Respostas enviadas com sucesso!" });
   } catch (e) {
-    if (e instanceof z8.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z9.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error("care respond POST error:", e);
     res.status(500).json({ message: "Erro ao salvar respostas" });
   }
 });
-var care_public_default = router11;
+var care_public_default = router12;
 
 // server/routes/commissions.ts
-import { Router as Router12 } from "express";
-import { eq as eq15, and as and13, gte as gte3, lte as lte3 } from "drizzle-orm";
-import { z as z9 } from "zod";
-var router12 = Router12();
+import { Router as Router13 } from "express";
+import { eq as eq16, and as and14, gte as gte3, lte as lte3 } from "drizzle-orm";
+import { z as z10 } from "zod";
+var router13 = Router13();
 function adminOnly(req, res, next) {
   if (!req.user || req.user.role !== "admin") {
     return res.status(403).json({ message: "Acesso negado. Somente administradores." });
   }
   next();
 }
-router12.use(adminOnly);
+router13.use(adminOnly);
 function hoursFromTime(start, end) {
   const [sh, sm] = start.split(":").map(Number);
   const [eh, em] = end.split(":").map(Number);
@@ -5446,10 +5626,10 @@ async function calcCommissionPreview(companyId, psychologistId, periodStart, per
     roomId: roomBookings.roomId,
     roomName: rooms.name,
     roomHourlyRate: rooms.hourlyRate
-  }).from(roomBookings).leftJoin(rooms, eq15(roomBookings.roomId, rooms.id)).where(
-    and13(
-      eq15(roomBookings.companyId, companyId),
-      eq15(roomBookings.psychologistId, psychologistId),
+  }).from(roomBookings).leftJoin(rooms, eq16(roomBookings.roomId, rooms.id)).where(
+    and14(
+      eq16(roomBookings.companyId, companyId),
+      eq16(roomBookings.psychologistId, psychologistId),
       gte3(roomBookings.date, periodStart),
       lte3(roomBookings.date, periodEnd)
     )
@@ -5486,7 +5666,7 @@ async function calcCommissionPreview(companyId, psychologistId, periodStart, per
   const totalRepasse = items.reduce((acc, i) => acc + i.repasseValue, 0);
   return { items, totalRoomsValue, totalRepasse, totalBookings: items.length };
 }
-router12.get("/dashboard", async (req, res) => {
+router13.get("/dashboard", async (req, res) => {
   try {
     const month = req.query.month || (/* @__PURE__ */ new Date()).toISOString().slice(0, 7);
     const data = await storage.getCommissionDashboard(req.companyId, month);
@@ -5495,7 +5675,7 @@ router12.get("/dashboard", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar dashboard" });
   }
 });
-router12.get("/", async (req, res) => {
+router13.get("/", async (req, res) => {
   try {
     const { psychologistId, status, periodStart, periodEnd } = req.query;
     const list = await storage.listCommissions(req.companyId, {
@@ -5516,7 +5696,7 @@ router12.get("/", async (req, res) => {
     res.status(500).json({ message: "Erro ao listar comissionamentos" });
   }
 });
-router12.get("/preview", async (req, res) => {
+router13.get("/preview", async (req, res) => {
   try {
     const { psychologistId, periodStart, periodEnd } = req.query;
     if (!psychologistId || !periodStart || !periodEnd) {
@@ -5533,7 +5713,7 @@ router12.get("/preview", async (req, res) => {
     res.status(500).json({ message: "Erro ao calcular preview" });
   }
 });
-router12.get("/:id", async (req, res) => {
+router13.get("/:id", async (req, res) => {
   try {
     const c = await storage.getCommission(req.companyId, parseInt(req.params.id));
     if (!c) return res.status(404).json({ message: "Comissionamento n\xE3o encontrado" });
@@ -5544,7 +5724,7 @@ router12.get("/:id", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar comissionamento" });
   }
 });
-router12.get("/:id/items", async (req, res) => {
+router13.get("/:id/items", async (req, res) => {
   try {
     const c = await storage.getCommission(req.companyId, parseInt(req.params.id));
     if (!c) return res.status(404).json({ message: "Comissionamento n\xE3o encontrado" });
@@ -5554,12 +5734,12 @@ router12.get("/:id/items", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar itens" });
   }
 });
-router12.post("/generate", async (req, res) => {
+router13.post("/generate", async (req, res) => {
   try {
-    const schema = z9.object({
-      psychologistId: z9.number(),
-      periodStart: z9.string(),
-      periodEnd: z9.string()
+    const schema = z10.object({
+      psychologistId: z10.number(),
+      periodStart: z10.string(),
+      periodEnd: z10.string()
     });
     const { psychologistId, periodStart, periodEnd } = schema.parse(req.body);
     if (!await storage.getPsychologist(req.companyId, psychologistId)) {
@@ -5603,16 +5783,16 @@ router12.post("/generate", async (req, res) => {
     );
     res.status(201).json(commission);
   } catch (e) {
-    if (e instanceof z9.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z10.ZodError) return res.status(400).json({ message: e.errors[0].message });
     res.status(500).json({ message: "Erro ao gerar comissionamento" });
   }
 });
-router12.patch("/:id/pay", async (req, res) => {
+router13.patch("/:id/pay", async (req, res) => {
   try {
-    const schema = z9.object({
-      paymentDate: z9.string(),
-      paymentMethod: z9.string().min(1, "Informe o m\xE9todo de pagamento"),
-      paymentNotes: z9.string().optional()
+    const schema = z10.object({
+      paymentDate: z10.string(),
+      paymentMethod: z10.string().min(1, "Informe o m\xE9todo de pagamento"),
+      paymentNotes: z10.string().optional()
     });
     const data = schema.parse(req.body);
     const c = await storage.getCommission(req.companyId, parseInt(req.params.id));
@@ -5621,11 +5801,11 @@ router12.patch("/:id/pay", async (req, res) => {
     const updated = await storage.updateCommission(req.companyId, c.id, { ...data, status: "paid" });
     res.json(updated);
   } catch (e) {
-    if (e instanceof z9.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z10.ZodError) return res.status(400).json({ message: e.errors[0].message });
     res.status(500).json({ message: "Erro ao registrar pagamento" });
   }
 });
-router12.patch("/:id/cancel", async (req, res) => {
+router13.patch("/:id/cancel", async (req, res) => {
   try {
     const c = await storage.getCommission(req.companyId, parseInt(req.params.id));
     if (!c) return res.status(404).json({ message: "Comissionamento n\xE3o encontrado" });
@@ -5636,8 +5816,8 @@ router12.patch("/:id/cancel", async (req, res) => {
     res.status(500).json({ message: "Erro ao cancelar comissionamento" });
   }
 });
-var commissions_default = router12;
-var commissionConfigsRouter = Router12();
+var commissions_default = router13;
+var commissionConfigsRouter = Router13();
 commissionConfigsRouter.use(adminOnly);
 commissionConfigsRouter.get("/", async (req, res) => {
   try {
@@ -5660,12 +5840,12 @@ commissionConfigsRouter.get("/", async (req, res) => {
 });
 commissionConfigsRouter.post("/", async (req, res) => {
   try {
-    const schema = z9.object({
-      psychologistId: z9.number(),
-      payoutType: z9.enum(["percentual", "fixed"]),
-      payoutValue: z9.union([z9.string().transform(parseFloat), z9.number()]),
-      validFrom: z9.string(),
-      validUntil: z9.string().nullable().optional()
+    const schema = z10.object({
+      psychologistId: z10.number(),
+      payoutType: z10.enum(["percentual", "fixed"]),
+      payoutValue: z10.union([z10.string().transform(parseFloat), z10.number()]),
+      validFrom: z10.string(),
+      validUntil: z10.string().nullable().optional()
     });
     const data = schema.parse(req.body);
     if (!await storage.getPsychologist(req.companyId, data.psychologistId)) {
@@ -5677,17 +5857,17 @@ commissionConfigsRouter.post("/", async (req, res) => {
     });
     res.status(201).json(config);
   } catch (e) {
-    if (e instanceof z9.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z10.ZodError) return res.status(400).json({ message: e.errors[0].message });
     res.status(500).json({ message: "Erro ao criar configura\xE7\xE3o" });
   }
 });
 commissionConfigsRouter.put("/:id", async (req, res) => {
   try {
-    const schema = z9.object({
-      payoutType: z9.enum(["percentual", "fixed"]).optional(),
-      payoutValue: z9.union([z9.string().transform(parseFloat), z9.number()]).optional(),
-      validFrom: z9.string().optional(),
-      validUntil: z9.string().nullable().optional()
+    const schema = z10.object({
+      payoutType: z10.enum(["percentual", "fixed"]).optional(),
+      payoutValue: z10.union([z10.string().transform(parseFloat), z10.number()]).optional(),
+      validFrom: z10.string().optional(),
+      validUntil: z10.string().nullable().optional()
     });
     const parsed = schema.parse(req.body);
     const updateData = {
@@ -5700,7 +5880,7 @@ commissionConfigsRouter.put("/:id", async (req, res) => {
     if (!updated) return res.status(404).json({ message: "Configura\xE7\xE3o n\xE3o encontrada" });
     res.json(updated);
   } catch (e) {
-    if (e instanceof z9.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z10.ZodError) return res.status(400).json({ message: e.errors[0].message });
     res.status(500).json({ message: "Erro ao atualizar configura\xE7\xE3o" });
   }
 });
@@ -5737,6 +5917,8 @@ async function registerRoutes(app) {
     { method: "POST", path: /^\/api\/reset-password$/ },
     { path: /^\/api\/companies\// },
     // choosing the company itself
+    { path: /^\/api\/platform\// },
+    // platform admin, guarded by requirePlatformAdmin (may have no company)
     { path: /^\/api\/care\/respond\// },
     // patient form link (scoped by its token)
     { method: "GET", path: /^\/api\/google-calendar\/auth\/callback$/ }
@@ -6994,6 +7176,7 @@ async function registerRoutes(app) {
   app.use("/api/admin/psychologists", admin_psychologists_default);
   app.use("/api/admin", admin_access_default);
   app.use("/api/companies", companies_default);
+  app.use("/api/platform", platform_default);
   app.use("/api/care", care_public_default);
   app.use("/api/care/templates", care_templates_default);
   app.use("/api/care", care_dispatch_default);
@@ -7536,7 +7719,7 @@ function getDayOfWeek(date3) {
 }
 
 // server/seed-specializations.ts
-import { sql as sql5 } from "drizzle-orm";
+import { sql as sql6 } from "drizzle-orm";
 var PREDEFINED_AREAS = [
   // Transtornos Clínicos (10)
   { name: "Ansiedade", category: "Transtornos Cl\xEDnicos" },
@@ -7585,8 +7768,8 @@ var PREDEFINED_AREAS = [
 ];
 async function seedSpecializationAreas() {
   try {
-    const [{ count: count3 }] = await db2.select({ count: sql5`count(*)` }).from(specializationAreas);
-    if (Number(count3) >= PREDEFINED_AREAS.length) return;
+    const [{ count: count4 }] = await db2.select({ count: sql6`count(*)` }).from(specializationAreas);
+    if (Number(count4) >= PREDEFINED_AREAS.length) return;
     for (const area of PREDEFINED_AREAS) {
       await db2.insert(specializationAreas).values({ name: area.name, category: area.category, isCustom: false }).onConflictDoNothing();
     }
@@ -7597,11 +7780,11 @@ async function seedSpecializationAreas() {
 }
 
 // server/seed-care.ts
-import { sql as sql6 } from "drizzle-orm";
+import { sql as sql7 } from "drizzle-orm";
 async function seedCareTemplates() {
   try {
-    const [{ count: count3 }] = await db2.select({ count: sql6`count(*)` }).from(careTemplates);
-    if (Number(count3) > 0) return;
+    const [{ count: count4 }] = await db2.select({ count: sql7`count(*)` }).from(careTemplates);
+    if (Number(count4) > 0) return;
     const [template] = await db2.insert(careTemplates).values({
       psychologistId: null,
       title: "Check-in Semanal",

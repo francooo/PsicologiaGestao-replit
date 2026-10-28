@@ -22,6 +22,7 @@ import Meetings from "@/pages/meetings";
 import Perfil from "@/pages/perfil";
 import AdminPsicologas from "@/pages/admin/psicologas";
 import AdminComissoes from "@/pages/admin/comissoes";
+import AdminEmpresas from "@/pages/admin/empresas";
 import ResponderPage from "@/pages/responder";
 import SelectCompanyPage from "@/pages/select-company";
 import { ProtectedRoute } from "./lib/protected-route";
@@ -51,6 +52,7 @@ function Router() {
       <ProtectedRoute path="/perfil" component={Perfil} />
       <ProtectedRoute path="/admin/psicologas" component={AdminPsicologas} roles={ADMIN} />
       <ProtectedRoute path="/admin/comissoes" component={AdminComissoes} roles={ADMIN} />
+      <ProtectedRoute path="/admin/empresas" component={AdminEmpresas} platformOnly />
       <Route path="/selecionar-empresa" component={SelectCompanyPage} />
       <Route path="/auth" component={AuthPage} />
       <Route path="/auth-page" component={AuthPage} />

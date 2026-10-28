@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { Menu, X, Home, CalendarDays, Users, DoorOpen, BarChart3, Lock, Settings, LogOut, UserCircle, FileText, ClipboardList, Contact, HandCoins } from "lucide-react";
+import { Menu, X, Home, CalendarDays, Users, DoorOpen, BarChart3, Lock, Settings, LogOut, UserCircle, FileText, ClipboardList, Contact, HandCoins, Building2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function MobileNav() {
@@ -103,9 +103,13 @@ export default function MobileNav() {
   ];
 
   // Filter items based on user role
-  const filteredItems = navigationItems.filter(item =>
-    item.allowedRoles.includes(user?.role || "")
-  );
+  const filteredItems = [
+    ...navigationItems.filter(item => item.allowedRoles.includes(user?.role || "")),
+    // Platform (super) admin: manages the companies themselves
+    ...(user?.isPlatformAdmin
+      ? [{ name: "Empresas", icon: <Building2 className="w-5 h-5" />, href: "/admin/empresas", allowedRoles: [] }]
+      : []),
+  ];
 
   return (
     <>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { Building2 } from 'lucide-react-native';
+import { router } from 'expo-router';
+import { Building2, Settings2 } from 'lucide-react-native';
 
 import { AuthShell } from '@/components/brand/AuthShell';
 import { AppText } from '@/components/ui/AppText';
@@ -37,7 +38,8 @@ export default function SelectCompanyScreen() {
           title="Você ainda não faz parte de uma clínica"
           description={`Peça ao administrador da sua clínica um convite para o e-mail ${user?.email ?? ''}.`}
         />
-        <Button title="Sair" variant="outline" onPress={signOut} />
+        {user?.isPlatformAdmin && <ManageCompaniesButton />}
+        <Button title="Sair" variant="outline" onPress={signOut} style={styles.signOut} />
       </AuthShell>
     );
   }
@@ -66,8 +68,20 @@ export default function SelectCompanyScreen() {
           </Card>
         ))}
       </View>
+      {user?.isPlatformAdmin && <ManageCompaniesButton />}
       <Button title="Sair" variant="ghost" onPress={signOut} style={styles.signOut} />
     </AuthShell>
+  );
+}
+
+function ManageCompaniesButton() {
+  return (
+    <Button
+      title="Gerenciar empresas"
+      icon={<Settings2 size={18} color={colors.onPrimary} />}
+      onPress={() => router.push('/empresas')}
+      style={styles.signOut}
+    />
   );
 }
 

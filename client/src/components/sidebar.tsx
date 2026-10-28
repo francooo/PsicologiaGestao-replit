@@ -22,6 +22,7 @@ import {
   BookOpen,
   Video,
   HandCoins,
+  Building2,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { BrandLogo } from "@/components/brand/brand-logo";
@@ -148,7 +149,13 @@ export default function Sidebar() {
 
   const visibleMain = mainItems.filter(i => i.roles.includes(userRole));
   const visibleFinancial = financialItems.filter(i => i.roles.includes(userRole));
-  const visibleSystem = systemItems.filter(i => i.roles.includes(userRole));
+  const visibleSystem = [
+    // Platform (super) admin: manages the companies themselves
+    ...(user?.isPlatformAdmin
+      ? [{ name: "Empresas", icon: <Building2 className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />, href: "/admin/empresas", roles: [] }]
+      : []),
+    ...systemItems.filter(i => i.roles.includes(userRole)),
+  ];
 
   // "Acolhimento" look: active item on soft sage, navy text
   const navLinkClass = (active: boolean) => cn(

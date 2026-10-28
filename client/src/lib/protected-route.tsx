@@ -6,11 +6,14 @@ export function ProtectedRoute({
   path,
   component: Component,
   roles,
+  platformOnly,
 }: {
   path: string;
   component: () => React.JSX.Element;
   /** Roles allowed on this route; logged-in users without one go to the dashboard. */
   roles?: string[];
+  /** Platform (super) admin pages: no active company needed. */
+  platformOnly?: boolean;
 }) {
   const { user, isLoading } = useAuth();
 
@@ -28,6 +31,14 @@ export function ProtectedRoute({
     return (
       <Route path={path}>
         <Redirect to="/auth" />
+      </Route>
+    );
+  }
+
+  if (platformOnly) {
+    return user.isPlatformAdmin ? <Route path={path} component={Component} /> : (
+      <Route path={path}>
+        <Redirect to="/" />
       </Route>
     );
   }

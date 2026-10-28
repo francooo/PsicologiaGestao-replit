@@ -20,6 +20,7 @@ import specializationAreasRouter from "./routes/specialization-areas";
 import adminPsychologistsRouter from "./routes/admin-psychologists";
 import adminAccessRouter from "./routes/admin-access";
 import companiesRouter from "./routes/companies";
+import platformRouter from "./routes/platform";
 import careTemplatesRouter from "./routes/care-templates";
 import careDispatchRouter from "./routes/care-dispatch";
 import carePublicRouter from "./routes/care-public";
@@ -63,6 +64,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     { method: "GET", path: /^\/api\/reset-password\/[^/]+$/ },
     { method: "POST", path: /^\/api\/reset-password$/ },
     { path: /^\/api\/companies\// }, // choosing the company itself
+    { path: /^\/api\/platform\// }, // platform admin, guarded by requirePlatformAdmin (may have no company)
     { path: /^\/api\/care\/respond\// }, // patient form link (scoped by its token)
     { method: "GET", path: /^\/api\/google-calendar\/auth\/callback$/ }, // OAuth redirect
   ]));
@@ -1644,6 +1646,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Companies (multi-empresa): the user's companies and switching the active one
   app.use("/api/companies", companiesRouter);
+
+  // Platform (super) admin: manages the companies themselves
+  app.use("/api/platform", platformRouter);
 
   // Care module — public response routes (no auth required) — MUST be mounted FIRST
   // so that /api/care/respond/:token is reachable before the authenticated dispatch

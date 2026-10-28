@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth-guards";
 import { findCompanyAccess, listUserCompanies, resolveCompanyContext, userPayload } from "../lib/companies";
+import { storage } from "../storage";
 
 // Mounted at /api/companies — the logged-in user's companies and the active one.
 const router = Router();
@@ -26,6 +27,21 @@ router.post("/switch", requireAuth, async (req, res) => {
   try {
     const company = await findCompanyAccess(req.user!, parsed.data.companyId);
     if (!company) return res.status(403).json({ message: "Você não tem acesso a esta empresa." });
+
+    // Platform admin entering a company they don't belong to (support): leave a trace there
+    const isMember = (await listUserCompanies(req.user!.id)).some((c) => c.id === company.id);
+    if (!isMember) {
+      await storage.createAuditLog(company.id, {
+        userId: req.user!.id,
+        action: "platform_support_access",
+        resourceType: "company",
+        resourceId: company.id,
+        patientId: null,
+        ipAddress: req.ip || null,
+        userAgent: req.get("user-agent") || null,
+        details: { email: req.user!.email },
+      });
+    }
 
     req.session.companyId = company.id;
     await resolveCompanyContext(req);

@@ -21,6 +21,7 @@ import { StatusBadge } from "@/components/cp/StatusBadge";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { errorMessage } from "@/lib/api-error";
 import { cn } from "@/lib/utils";
 
 type Admin = { id: number; fullName: string; email: string; username: string; status: string; avatarUrl: string | null };
@@ -28,17 +29,6 @@ type Invite = { id: number; email: string; role: string; createdAt: string };
 type AdminsResponse = { admins: Admin[]; invites: Invite[] };
 
 const QUERY_KEY = ["/api/admin/admins"];
-
-/** apiRequest throws "409: {json}" — show the server's message to the user. */
-function errorMessage(error: unknown) {
-  const raw = error instanceof Error ? error.message : String(error);
-  const body = raw.replace(/^\d{3}:\s*/, "");
-  try {
-    return JSON.parse(body).message ?? body;
-  } catch {
-    return body;
-  }
-}
 
 type Pending = { kind: "admin"; id: number; label: string } | { kind: "invite"; id: number; label: string };
 
@@ -89,7 +79,7 @@ export function AdminAccessSection({ className }: { className?: string }) {
         <ShieldCheck className="h-5 w-5 text-cp-muted" />
         Administradores
       </h2>
-      <p className="mb-5 text-sm text-cp-muted">Quem pode gerenciar todo o sistema: psicólogas, salas, financeiro, comissões e permissões.</p>
+      <p className="mb-5 text-sm text-cp-muted">Quem pode gerenciar esta clínica: psicólogas, salas, financeiro, comissões e permissões.</p>
 
       <form onSubmit={submit} className="flex flex-col gap-3 sm:flex-row">
         <IconField icon={Mail} className="flex-1">
