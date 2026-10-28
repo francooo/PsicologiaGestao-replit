@@ -11,7 +11,7 @@ interface SendCareEmailParams {
   patientEmail: string;
   psychologistName: string;
   psychologistEmail: string;
-  /** Name of the dispatch's company, see clinicDisplayName */
+  /** Name of the dispatch's company, see publicClinic */
   clinicName: string;
   subject: string;
   customMessage?: string | null;

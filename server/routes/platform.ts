@@ -4,7 +4,7 @@ import { db } from "../db";
 import { accessInvites, companies, companyMemberships, users } from "@shared/schema";
 import { and, asc, count, eq, isNull } from "drizzle-orm";
 import { requirePlatformAdmin } from "../middleware/auth-guards";
-import { addCompanyAdmin } from "../lib/companies";
+import { addCompanyAdmin, cnpjSchema, companyNameSchema as nameSchema } from "../lib/companies";
 
 // Mounted at /api/platform — the platform (super) admin manages the companies (clínicas).
 // Companies are never deleted here, only suspended, so their data stays intact.
@@ -21,13 +21,6 @@ const companyColumns = {
   createdAt: companies.createdAt,
 };
 
-const nameSchema = z.string().trim().min(2, "Informe o nome da empresa.").max(120);
-const cnpjSchema = z
-  .string()
-  .trim()
-  .transform((v) => v.replace(/\D/g, ""))
-  .refine((v) => v === "" || v.length === 14, "CNPJ deve ter 14 dígitos.")
-  .transform((v) => v || null);
 
 function slugify(name: string) {
   return (

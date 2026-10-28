@@ -20,6 +20,7 @@ interface PublicQuestion {
 
 interface PublicFormData {
   clinicName: string;
+  clinicLogoUrl: string | null;
   patientFirstName: string;
   psychologistName: string;
   subject: string;
@@ -201,7 +202,7 @@ export default function ResponderPage() {
 
   if (submitted) {
     return (
-      <PublicShell clinicName={data.clinicName} psychologistName={data.psychologistName}>
+      <PublicShell clinicName={data.clinicName} clinicLogoUrl={data.clinicLogoUrl} psychologistName={data.psychologistName}>
         <PublicState icon={<CheckCircle2 className="h-8 w-8 text-cp-success" />} title={`Obrigada, ${data.patientFirstName}!`}>
           Suas respostas foram registradas com sucesso. Sua psicóloga irá analisá-las.
         </PublicState>
@@ -212,7 +213,7 @@ export default function ResponderPage() {
   const sortedQuestions = [...data.questions].sort((a, b) => a.orderIndex - b.orderIndex);
 
   return (
-    <PublicShell clinicName={data.clinicName} psychologistName={data.psychologistName}>
+    <PublicShell clinicName={data.clinicName} clinicLogoUrl={data.clinicLogoUrl} psychologistName={data.psychologistName}>
       <div className="space-y-6">
         <div>
           <h1 className="text-[22px] font-bold text-cp-ink">{data.subject}</h1>

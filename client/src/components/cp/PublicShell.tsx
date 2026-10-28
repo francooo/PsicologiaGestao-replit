@@ -6,10 +6,12 @@ import { BrandLogo } from "@/components/brand/brand-logo";
 export function PublicShell({
   children,
   clinicName,
+  clinicLogoUrl,
   psychologistName,
 }: {
   children: ReactNode;
   clinicName?: string;
+  clinicLogoUrl?: string | null;
   psychologistName?: string;
 }) {
   const showClinic = clinicName && clinicName !== "ConsultaPsi";
@@ -22,9 +24,12 @@ export function PublicShell({
         <div className="mx-auto flex max-w-xl flex-wrap items-center justify-between gap-3">
           <BrandLogo size="sm" />
           {(showClinic || psychologistName) && (
-            <div className="text-right text-xs text-cp-muted">
-              {showClinic && <p className="font-semibold text-cp-ink">{clinicName}</p>}
-              {psychologistName && <p>Psicóloga: {psychologistName}</p>}
+            <div className="flex items-center gap-3">
+              <div className="text-right text-xs text-cp-muted">
+                {showClinic && <p className="font-semibold text-cp-ink">{clinicName}</p>}
+                {psychologistName && <p>Psicóloga: {psychologistName}</p>}
+              </div>
+              {clinicLogoUrl && <img src={clinicLogoUrl} alt="" className="h-10 w-10 rounded-lg bg-white object-contain" />}
             </div>
           )}
         </div>

@@ -153,7 +153,18 @@ export default function MobileNav() {
       >
         <div className="p-4 border-b border-neutral-light">
           <h1 className="text-primary font-bold text-2xl">ConsultaPsi</h1>
-          <p className="text-neutral-dark text-sm">Gestão de Consultório</p>
+          {user?.activeCompany ? (
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <p className="truncate text-sm font-medium text-neutral-dark">{user.activeCompany.name}</p>
+              {(user.companies.length > 1 || user.isPlatformAdmin) && (
+                <Link href="/selecionar-empresa" onClick={closeMenu} className="shrink-0 text-xs font-medium text-cp-action">
+                  Trocar
+                </Link>
+              )}
+            </div>
+          ) : (
+            <p className="text-neutral-dark text-sm">Gestão de Consultório</p>
+          )}
         </div>
 
         {/* User Profile Section */}

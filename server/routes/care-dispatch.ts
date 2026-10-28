@@ -14,7 +14,7 @@ import { isValidEmail } from "../lib/validate-email";
 import { generateResponseToken } from "../lib/care-token";
 import { sendCareFormEmail } from "../lib/send-care-email";
 import { z } from "zod";
-import { clinicDisplayName } from "../lib/companies";
+import { publicClinic } from "../lib/companies";
 
 const router = Router();
 
@@ -215,7 +215,7 @@ router.post("/patients/:patientId/dispatch", async (req, res) => {
       patientEmail: patient.email!,
       psychologistName: psychName,
       psychologistEmail: psychUser.email,
-      clinicName: await clinicDisplayName(req.companyId),
+      clinicName: (await publicClinic(req.companyId)).name,
       subject: finalSubject,
       customMessage: custom_message ?? null,
       questions: renderedQuestions,

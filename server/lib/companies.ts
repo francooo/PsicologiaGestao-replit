@@ -2,6 +2,7 @@ import type { Request } from "express";
 import { db } from "../db";
 import { accessInvites, companies, companyMemberships, users, DEFAULT_COMPANY_SLUG, type CompanySummary, type User } from "@shared/schema";
 import { and, eq, isNull, sql } from "drizzle-orm";
+import { z } from "zod";
 import { normalizeEmail } from "./access-invites";
 
 declare module "express-session" {
@@ -158,19 +159,31 @@ export async function resolveCompanyContext(req: Request): Promise<CompanySummar
 const DEFAULT_COMPANY_NAME = "Empresa 1";
 
 /**
- * Clinic name shown to patients (care forms and e-mails). The default company keeps the
- * CLINIC_NAME branding it had before companies existed, until someone renames it.
+ * Clinic name and logo shown to patients (public pages, care forms and e-mails). The
+ * default company keeps the CLINIC_NAME branding it had before companies existed, until
+ * someone renames it.
  */
-export async function clinicDisplayName(companyId: number | null | undefined): Promise<string> {
-  const fallback = process.env.CLINIC_NAME || "ConsultaPsi";
+export async function publicClinic(companyId: number | null | undefined): Promise<{ name: string; logoUrl: string | null }> {
+  const fallback = { name: process.env.CLINIC_NAME || "ConsultaPsi", logoUrl: null };
   if (!companyId) return fallback;
   const [company] = await db
-    .select({ name: companies.name, slug: companies.slug })
+    .select({ name: companies.name, slug: companies.slug, logoUrl: companies.logoUrl })
     .from(companies)
     .where(eq(companies.id, companyId));
   if (!company) return fallback;
-  return company.slug === DEFAULT_COMPANY_SLUG && company.name === DEFAULT_COMPANY_NAME ? fallback : company.name;
+  const untouchedDefault = company.slug === DEFAULT_COMPANY_SLUG && company.name === DEFAULT_COMPANY_NAME;
+  return { name: untouchedDefault ? fallback.name : company.name, logoUrl: company.logoUrl };
 }
+
+export const companyNameSchema = z.string().trim().min(2, "Informe o nome da empresa.").max(120);
+
+/** Accepts the CNPJ with or without punctuation; stores the 14 digits (empty = none). */
+export const cnpjSchema = z
+  .string()
+  .trim()
+  .transform((v) => v.replace(/\D/g, ""))
+  .refine((v) => v === "" || v.length === 14, "CNPJ deve ter 14 dígitos.")
+  .transform((v) => v || null);
 
 /** /api/user shape: the user (without password) plus their companies. */
 export async function userPayload(req: Request) {

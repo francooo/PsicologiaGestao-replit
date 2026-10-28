@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
-import { Building2, Settings2 } from 'lucide-react-native';
+import { Building2, Check, Settings2 } from 'lucide-react-native';
 
 import { AuthShell } from '@/components/brand/AuthShell';
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/States';
+import { CompanyLogo } from '@/components/company/CompanyLogo';
 import { useAuth } from '@/auth/AuthProvider';
 import { colors } from '@/theme/tokens';
 import { roleLabels } from '@/utils/status';
@@ -20,14 +21,18 @@ export default function SelectCompanyScreen() {
   const companies = user?.companies ?? [];
 
   const choose = async (companyId: number) => {
-    setPendingId(companyId);
-    try {
-      await switchCompany(companyId);
-    } catch (e: any) {
-      toast.error('Não foi possível trocar de empresa', e?.message);
-    } finally {
-      setPendingId(null);
+    if (companyId !== user?.activeCompany?.id) {
+      setPendingId(companyId);
+      try {
+        await switchCompany(companyId);
+      } catch (e: any) {
+        toast.error('Não foi possível trocar de empresa', e?.message);
+        return;
+      } finally {
+        setPendingId(null);
+      }
     }
+    router.replace('/');
   };
 
   if (companies.length === 0) {
@@ -53,9 +58,7 @@ export default function SelectCompanyScreen() {
             onPress={pendingId === null ? () => choose(company.id) : undefined}
             accessibilityLabel={`Entrar em ${company.name}`}
             style={styles.item}>
-            <View style={styles.icon}>
-              <Building2 size={20} color={colors.primary} />
-            </View>
+            <CompanyLogo logoUrl={company.logoUrl} size={40} />
             <View style={styles.text}>
               <AppText variant="subtitle" numberOfLines={1}>
                 {company.name}
@@ -64,7 +67,11 @@ export default function SelectCompanyScreen() {
                 {roleLabels[company.role] ?? company.role}
               </AppText>
             </View>
-            {pendingId === company.id && <ActivityIndicator color={colors.primary} />}
+            {pendingId === company.id ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : (
+              company.id === user?.activeCompany?.id && <Check size={20} color={colors.primary} accessibilityLabel="Clínica atual" />
+            )}
           </Card>
         ))}
       </View>
@@ -88,14 +95,6 @@ function ManageCompaniesButton() {
 const styles = StyleSheet.create({
   list: { gap: 12 },
   item: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  icon: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primarySoft,
-  },
   text: { flex: 1, minWidth: 0 },
   signOut: { marginTop: 16 },
 });

@@ -9,7 +9,7 @@ import {
 import { users } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { clinicDisplayName } from "../lib/companies";
+import { publicClinic } from "../lib/companies";
 
 const router = Router();
 
@@ -76,12 +76,13 @@ router.get("/respond/:token", async (req, res) => {
       .from(users)
       .where(eq(users.id, dispatch.psychologistId));
 
-    const clinicName = await clinicDisplayName(dispatch.companyId);
+    const clinic = await publicClinic(dispatch.companyId);
     const patientFirstName = patient?.firstName?.split(" ")[0] ?? "Paciente";
     const psychologistName = psychUser?.fullName || psychUser?.username || "sua psicóloga";
 
     return res.json({
-      clinicName,
+      clinicName: clinic.name,
+      clinicLogoUrl: clinic.logoUrl,
       patientFirstName,
       psychologistName,
       subject: dispatch.subject,

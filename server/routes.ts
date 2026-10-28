@@ -21,6 +21,7 @@ import adminPsychologistsRouter from "./routes/admin-psychologists";
 import adminAccessRouter from "./routes/admin-access";
 import companiesRouter from "./routes/companies";
 import platformRouter from "./routes/platform";
+import { publicClinic } from "./lib/companies";
 import careTemplatesRouter from "./routes/care-templates";
 import careDispatchRouter from "./routes/care-dispatch";
 import carePublicRouter from "./routes/care-public";
@@ -139,6 +140,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         ...psychologist,
+        clinic: await publicClinic(psychologist.companyId),
         user: user ? {
           id: user.id,
           username: user.username,

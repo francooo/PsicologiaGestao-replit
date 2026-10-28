@@ -50,6 +50,8 @@ export default function QuickBooking() {
   const { toast } = useToast();
   const [phase, setPhase] = useState<Phase>("loading");
   const [bookingData, setBookingData] = useState({ date: "", time: "", psychologistId: "", psychologistName: "" });
+  // The psychologist's clinic (name and logo), for the page header
+  const [clinic, setClinic] = useState<{ name: string; logoUrl: string | null } | null>(null);
 
   // The link carries ?date=yyyy-MM-dd&time=HH:mm - HH:mm&psychologist=<id>
   useEffect(() => {
@@ -70,6 +72,7 @@ export default function QuickBooking() {
         if (!response.ok) throw new Error();
         const psychologist = await response.json();
         setBookingData({ date, time, psychologistId, psychologistName: psychologist.user?.fullName || "Psicóloga" });
+        setClinic(psychologist.clinic ?? null);
         setPhase("form");
       } catch {
         setPhase("invalid");
@@ -126,7 +129,7 @@ export default function QuickBooking() {
 
   if (phase === "done") {
     return (
-      <PublicShell psychologistName={bookingData.psychologistName}>
+      <PublicShell clinicName={clinic?.name} clinicLogoUrl={clinic?.logoUrl} psychologistName={bookingData.psychologistName}>
         <PublicState icon={<CheckCircle2 className="h-8 w-8 text-cp-success" />} title="Agendamento solicitado!">
           Recebemos sua solicitação. A equipe entrará em contato para confirmar a consulta em breve.
         </PublicState>
@@ -137,7 +140,7 @@ export default function QuickBooking() {
   }
 
   return (
-    <PublicShell psychologistName={bookingData.psychologistName}>
+    <PublicShell clinicName={clinic?.name} clinicLogoUrl={clinic?.logoUrl} psychologistName={bookingData.psychologistName}>
       <h1 className="text-[22px] font-bold text-cp-ink">Agendamento de Consulta</h1>
       <p className="mb-4 mt-1 text-sm text-cp-muted">Preencha seus dados para reservar este horário com {bookingData.psychologistName}.</p>
       <BookingSummary {...bookingData} />

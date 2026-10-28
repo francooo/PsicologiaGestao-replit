@@ -21,6 +21,7 @@ import { AppText } from '@/components/ui/AppText';
 import { Avatar } from '@/components/ui/Avatar';
 import { Card } from '@/components/ui/Card';
 import { Screen } from '@/components/ui/Screen';
+import { CompanyLogo } from '@/components/company/CompanyLogo';
 import { useAuth } from '@/auth/AuthProvider';
 import { confirm } from '@/utils/confirm';
 import { roleLabels } from '@/utils/status';
@@ -97,6 +98,27 @@ export default function MoreScreen() {
         </View>
         <ChevronRight size={18} color={colors.textSubtle} />
       </Card>
+
+      {user.activeCompany && (
+        <Card style={styles.profile}>
+          <CompanyLogo logoUrl={user.activeCompany.logoUrl} size={44} />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <AppText variant="overline" tone="subtle">
+              Clínica
+            </AppText>
+            <AppText variant="subtitle" numberOfLines={1}>
+              {user.activeCompany.name}
+            </AppText>
+          </View>
+          {(user.companies.length > 1 || user.isPlatformAdmin) && (
+            <Pressable onPress={() => router.push('/selecionar-empresa')} accessibilityRole="button" hitSlop={8}>
+              <AppText variant="label" tone="primary">
+                Trocar
+              </AppText>
+            </Pressable>
+          )}
+        </Card>
+      )}
 
       {visible.map((section) => (
         <View key={section.title} style={{ gap: 8 }}>

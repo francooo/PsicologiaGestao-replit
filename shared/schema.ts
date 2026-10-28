@@ -40,7 +40,9 @@ export const companies = pgTable("companies", {
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
   cnpj: text("cnpj"),
-  logoUrl: text("logo_url"),
+  logoUrl: text("logo_url"), // /api/companies/:id/logo?v=... while there is a logo
+  logoData: bytea("logo_data"),
+  logoMimeType: text("logo_mime_type"),
   status: text("status").notNull().default("active"), // active, suspended
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

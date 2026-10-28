@@ -172,6 +172,28 @@ export default function Sidebar() {
         <BrandLogo size="sm" />
       </div>
 
+      {/* Active company (clínica) */}
+      {user?.activeCompany && (
+        <div className="mx-3 mb-3 flex items-center gap-3 rounded-xl bg-cp-hover px-3 py-2.5" data-testid="active-company">
+          {user.activeCompany.logoUrl ? (
+            <img src={user.activeCompany.logoUrl} alt="" className="h-8 w-8 shrink-0 rounded-lg bg-white object-contain" />
+          ) : (
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cp-sage-soft">
+              <Building2 className="h-4 w-4 text-cp-sage-ink" aria-hidden="true" />
+            </span>
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-cp-muted">Clínica</p>
+            <p className="truncate text-[13px] font-semibold text-cp-ink" title={user.activeCompany.name}>{user.activeCompany.name}</p>
+          </div>
+          {(user.companies.length > 1 || user.isPlatformAdmin) && (
+            <Link href="/selecionar-empresa" className="shrink-0 rounded-lg px-2 py-1 text-[12px] font-medium text-cp-action hover:bg-white" data-testid="link-switch-company">
+              Trocar
+            </Link>
+          )}
+        </div>
+      )}
+
       {/* User */}
       <div className="mx-3 px-2 pb-4 border-b border-cp-divider">
         <div className="flex items-center gap-3">
