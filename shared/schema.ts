@@ -422,6 +422,22 @@ export const passwordResetTokensRelations = relations(passwordResetTokens, ({ on
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
 export type InsertPasswordResetToken = z.infer<typeof insertPasswordResetTokenSchema>;
 
+// Access invites: e-mails pre-authorized by an admin to get a role on their first access.
+// company_id stays null until companies (multi-tenant) exist. Uniqueness of
+// (company, email) is a functional index created in server/migrations.ts.
+export const accessInvites = pgTable("access_invites", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(), // always stored lowercase
+  role: text("role").notNull().default("admin"),
+  companyId: integer("company_id"),
+  invitedByUserId: integer("invited_by_user_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  acceptedAt: timestamp("accepted_at"),
+  acceptedUserId: integer("accepted_user_id").references(() => users.id),
+});
+
+export type AccessInvite = typeof accessInvites.$inferSelect;
+
 // Invoices (Notas Fiscais NFS-e — Leitura Inteligente por IA)
 export const invoices = pgTable(
   "invoices",

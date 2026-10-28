@@ -18,6 +18,7 @@ import meetingsRouter from "./routes/meetings";
 import profileRouter from "./routes/profile";
 import specializationAreasRouter from "./routes/specialization-areas";
 import adminPsychologistsRouter from "./routes/admin-psychologists";
+import adminAccessRouter from "./routes/admin-access";
 import careTemplatesRouter from "./routes/care-templates";
 import careDispatchRouter from "./routes/care-dispatch";
 import carePublicRouter from "./routes/care-public";
@@ -1610,6 +1611,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Admin psychologists management
   app.use("/api/admin/psychologists", adminPsychologistsRouter);
+
+  // System administrators + e-mails pre-authorized as admin (Configurações)
+  app.use("/api/admin", adminAccessRouter);
 
   // Care module — public response routes (no auth required) — MUST be mounted FIRST
   // so that /api/care/respond/:token is reachable before the authenticated dispatch

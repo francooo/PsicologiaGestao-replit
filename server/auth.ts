@@ -8,6 +8,7 @@ import { promisify } from "util";
 import { storage } from "./storage";
 import { User as SelectUser } from "@shared/schema";
 import { bearerSessionBridge } from "./middleware/auth-guards";
+import { applyPendingInvites } from "./lib/access-invites";
 
 declare global {
   namespace Express {
@@ -154,6 +155,9 @@ export function setupAuth(app: Express) {
             });
           }
 
+          // E-mails pre-authorized by an admin get their role on first access
+          user = await applyPendingInvites(user);
+
           if (user?.status !== "active") {
             return done(null, false, { message: "Account is not active." });
           }
@@ -259,7 +263,7 @@ export function setupAuth(app: Express) {
       const status = isAdminCaller && req.body.status ? req.body.status : "active";
 
       // Create the user
-      const user = await storage.createUser({
+      let user = await storage.createUser({
         ...req.body,
         role,
         status,
@@ -275,6 +279,9 @@ export function setupAuth(app: Express) {
           hourlyRate: req.body.hourlyRate
         });
       }
+
+      // E-mails pre-authorized by an admin get their role on first access
+      user = await applyPendingInvites(user);
 
       // Clean up sensitive info before returning
       const { password, ...userResponse } = user;

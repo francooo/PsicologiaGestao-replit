@@ -17,6 +17,7 @@ import { Screen } from '@/components/ui/Screen';
 import { Segmented } from '@/components/ui/Segmented';
 import { LoadingState } from '@/components/ui/States';
 import { TextField } from '@/components/ui/TextField';
+import { AdminAccessCard } from '@/components/profile/AdminAccessCard';
 import { api } from '@/api/client';
 import { useGoogleStatus } from '@/api/meetings';
 import { useAuth } from '@/auth/AuthProvider';
@@ -26,7 +27,7 @@ import { roleLabels } from '@/utils/status';
 import { toast } from '@/utils/toast';
 import { colors } from '@/theme/tokens';
 
-type Tab = 'dados' | 'integracoes';
+type Tab = 'dados' | 'integracoes' | 'admins';
 type GoogleEvent = { id: string; summary?: string; start?: { dateTime?: string; date?: string } };
 
 /** "Configurações" (web /profile): personal data, photo and Google Calendar integration. */
@@ -110,12 +111,15 @@ export default function SettingsScreen() {
           segments={[
             { label: 'Dados pessoais', value: 'dados' },
             { label: 'Integrações', value: 'integracoes' },
+            ...(user.role === 'admin' ? [{ label: 'Administradores', value: 'admins' as Tab }] : []),
           ]}
           value={tab}
           onChange={setTab}
         />
 
-        {tab === 'dados' ? (
+        {tab === 'admins' ? (
+          <AdminAccessCard />
+        ) : tab === 'dados' ? (
           editing ? (
             <Card style={{ gap: 14 }}>
               <TextField label="Nome completo" value={fullName} onChangeText={setFullName} />

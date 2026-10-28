@@ -24,6 +24,7 @@ import { promisify } from "util";
 // shared/schema.ts
 var schema_exports = {};
 __export(schema_exports, {
+  accessInvites: () => accessInvites,
   appointments: () => appointments,
   appointmentsRelations: () => appointmentsRelations,
   auditLogs: () => auditLogs,
@@ -878,6 +879,17 @@ var passwordResetTokensRelations = relations2(passwordResetTokens, ({ one }) => 
     references: [users.id]
   })
 }));
+var accessInvites = pgTable2("access_invites", {
+  id: serial2("id").primaryKey(),
+  email: text2("email").notNull(),
+  // always stored lowercase
+  role: text2("role").notNull().default("admin"),
+  companyId: integer2("company_id"),
+  invitedByUserId: integer2("invited_by_user_id").references(() => users.id),
+  createdAt: timestamp2("created_at").notNull().defaultNow(),
+  acceptedAt: timestamp2("accepted_at"),
+  acceptedUserId: integer2("accepted_user_id").references(() => users.id)
+});
 var invoices = pgTable2(
   "invoices",
   {
@@ -1728,6 +1740,19 @@ function requireRole(...roles) {
 }
 var requireAdmin = requireRole("admin");
 
+// server/lib/access-invites.ts
+import { and as and2, eq as eq2, isNull, sql as sql2 } from "drizzle-orm";
+var normalizeEmail = (email) => email.trim().toLowerCase();
+async function applyPendingInvites(user) {
+  if (!user.email) return user;
+  const pending = await db2.select().from(accessInvites).where(and2(sql2`lower(${accessInvites.email}) = ${normalizeEmail(user.email)}`, isNull(accessInvites.acceptedAt)));
+  if (pending.length === 0) return user;
+  const role = pending.some((i) => i.role === "admin") ? "admin" : pending[0].role;
+  await db2.update(users).set({ role, status: "active" }).where(eq2(users.id, user.id));
+  await db2.update(accessInvites).set({ acceptedAt: /* @__PURE__ */ new Date(), acceptedUserId: user.id }).where(and2(sql2`lower(${accessInvites.email}) = ${normalizeEmail(user.email)}`, isNull(accessInvites.acceptedAt)));
+  return { ...user, role, status: "active" };
+}
+
 // server/auth.ts
 var scryptAsync = promisify(scrypt);
 async function hashPassword(password) {
@@ -1834,6 +1859,7 @@ function setupAuth(app) {
               hourlyRate: 0
             });
           }
+          user = await applyPendingInvites(user);
           if (user?.status !== "active") {
             return done(null, false, { message: "Account is not active." });
           }
@@ -1912,7 +1938,7 @@ function setupAuth(app) {
       const isAdminCaller = req.isAuthenticated() && req.user.role === "admin";
       const role = isAdminCaller && req.body.role ? req.body.role : "psychologist";
       const status = isAdminCaller && req.body.status ? req.body.status : "active";
-      const user = await storage.createUser({
+      let user = await storage.createUser({
         ...req.body,
         role,
         status,
@@ -1926,6 +1952,7 @@ function setupAuth(app) {
           hourlyRate: req.body.hourlyRate
         });
       }
+      user = await applyPendingInvites(user);
       const { password, ...userResponse } = user;
       if (req.isAuthenticated()) {
         return res.status(201).json(userResponse);
@@ -2195,7 +2222,7 @@ import { Router } from "express";
 // server/services/google-calendar.ts
 import { google } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
-import { eq as eq2 } from "drizzle-orm";
+import { eq as eq3 } from "drizzle-orm";
 var SCOPES = [
   "https://www.googleapis.com/auth/calendar",
   "https://www.googleapis.com/auth/gmail.send"
@@ -2234,7 +2261,7 @@ async function handleAuthCode(code, userId) {
       return false;
     }
     tokenCache[userId] = tokens;
-    const existingTokens = await db2.select().from(googleTokens).where(eq2(googleTokens.userId, userId));
+    const existingTokens = await db2.select().from(googleTokens).where(eq3(googleTokens.userId, userId));
     const expiryDate = tokens.expiry_date ? new Date(tokens.expiry_date) : new Date(Date.now() + 3600 * 1e3);
     if (existingTokens.length > 0) {
       await db2.update(googleTokens).set({
@@ -2242,7 +2269,7 @@ async function handleAuthCode(code, userId) {
         refreshToken: tokens.refresh_token ?? existingTokens[0].refreshToken,
         expiryDate,
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq2(googleTokens.userId, userId));
+      }).where(eq3(googleTokens.userId, userId));
     } else {
       await db2.insert(googleTokens).values({
         userId,
@@ -2266,7 +2293,7 @@ async function getUserTokens(userId) {
       return tokenCache[userId];
     }
   }
-  const tokens = await db2.select().from(googleTokens).where(eq2(googleTokens.userId, userId));
+  const tokens = await db2.select().from(googleTokens).where(eq3(googleTokens.userId, userId));
   if (tokens.length === 0) {
     return null;
   }
@@ -2285,7 +2312,7 @@ async function getUserTokens(userId) {
         accessToken: credentials2.access_token,
         expiryDate,
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq2(googleTokens.userId, userId));
+      }).where(eq3(googleTokens.userId, userId));
       tokenCache[userId] = credentials2;
       return credentials2;
     } catch (error) {
@@ -2422,7 +2449,7 @@ async function listUpcomingEvents(userId, maxResults = 10) {
 }
 async function isUserAuthenticated(userId) {
   try {
-    const tokens = await db2.select().from(googleTokens).where(eq2(googleTokens.userId, userId));
+    const tokens = await db2.select().from(googleTokens).where(eq3(googleTokens.userId, userId));
     return tokens.length > 0;
   } catch (error) {
     console.error("Erro ao verificar autentica\xE7\xE3o do usu\xE1rio:", error);
@@ -2430,7 +2457,7 @@ async function isUserAuthenticated(userId) {
   }
 }
 async function disconnectUser(userId) {
-  const [row] = await db2.select().from(googleTokens).where(eq2(googleTokens.userId, userId));
+  const [row] = await db2.select().from(googleTokens).where(eq3(googleTokens.userId, userId));
   const token = row?.refreshToken || row?.accessToken;
   if (token) {
     try {
@@ -2439,7 +2466,7 @@ async function disconnectUser(userId) {
       console.warn("N\xE3o foi poss\xEDvel revogar o token do Google (seguindo com a remo\xE7\xE3o local):", error);
     }
   }
-  await db2.delete(googleTokens).where(eq2(googleTokens.userId, userId));
+  await db2.delete(googleTokens).where(eq3(googleTokens.userId, userId));
   delete tokenCache[userId];
 }
 function getAppointmentSchedulingLink(psychologistUserId, eventData) {
@@ -2584,7 +2611,7 @@ async function sendMeetLinkEmail(params) {
 }
 
 // server/routes/google-calendar.ts
-import { eq as eq3 } from "drizzle-orm";
+import { eq as eq4 } from "drizzle-orm";
 var router = Router();
 router.get("/auth", (req, res) => {
   if (!req.isAuthenticated()) {
@@ -2639,12 +2666,12 @@ router.post("/sync/:appointmentId", async (req, res) => {
   }
   const appointmentId = parseInt(req.params.appointmentId, 10);
   try {
-    const appointmentResults = await db.select().from(appointments).where(eq3(appointments.id, appointmentId));
+    const appointmentResults = await db.select().from(appointments).where(eq4(appointments.id, appointmentId));
     if (appointmentResults.length === 0) {
       return res.status(404).json({ error: "Agendamento n\xE3o encontrado" });
     }
     const appointment = appointmentResults[0];
-    const existingSync = await db.select().from(calendarEvents).where(eq3(calendarEvents.appointmentId, appointmentId));
+    const existingSync = await db.select().from(calendarEvents).where(eq4(calendarEvents.appointmentId, appointmentId));
     if (existingSync.length > 0) {
       return res.status(409).json({
         error: "Agendamento j\xE1 sincronizado",
@@ -2654,7 +2681,7 @@ router.post("/sync/:appointmentId", async (req, res) => {
     const psychologistResults = await db.select({
       fullName: users.fullName,
       email: users.email
-    }).from(users).where(eq3(users.id, appointment.psychologistId));
+    }).from(users).where(eq4(users.id, appointment.psychologistId));
     const psychologist = psychologistResults[0];
     const appointmentDate = appointment.date;
     const startTime = appointment.startTime;
@@ -2697,12 +2724,12 @@ router.put("/sync/:appointmentId", async (req, res) => {
   }
   const appointmentId = parseInt(req.params.appointmentId, 10);
   try {
-    const appointmentResults = await db.select().from(appointments).where(eq3(appointments.id, appointmentId));
+    const appointmentResults = await db.select().from(appointments).where(eq4(appointments.id, appointmentId));
     if (appointmentResults.length === 0) {
       return res.status(404).json({ error: "Agendamento n\xE3o encontrado" });
     }
     const appointment = appointmentResults[0];
-    const eventResults = await db.select().from(calendarEvents).where(eq3(calendarEvents.appointmentId, appointmentId));
+    const eventResults = await db.select().from(calendarEvents).where(eq4(calendarEvents.appointmentId, appointmentId));
     if (eventResults.length === 0) {
       return res.status(404).json({ error: "Evento n\xE3o encontrado no Google Calendar" });
     }
@@ -2726,7 +2753,7 @@ router.put("/sync/:appointmentId", async (req, res) => {
     if (!success) {
       return res.status(500).json({ error: "Erro ao atualizar evento no Google Calendar" });
     }
-    await db.update(calendarEvents).set({ lastSynced: /* @__PURE__ */ new Date() }).where(eq3(calendarEvents.id, calendarEvent.id));
+    await db.update(calendarEvents).set({ lastSynced: /* @__PURE__ */ new Date() }).where(eq4(calendarEvents.id, calendarEvent.id));
     res.status(200).json({ success: true });
   } catch (error) {
     console.error("Erro ao atualizar evento no Google Calendar:", error);
@@ -2739,7 +2766,7 @@ router.delete("/sync/:appointmentId", async (req, res) => {
   }
   const appointmentId = parseInt(req.params.appointmentId, 10);
   try {
-    const eventResults = await db.select().from(calendarEvents).where(eq3(calendarEvents.appointmentId, appointmentId));
+    const eventResults = await db.select().from(calendarEvents).where(eq4(calendarEvents.appointmentId, appointmentId));
     if (eventResults.length === 0) {
       return res.status(404).json({ error: "Evento n\xE3o encontrado no Google Calendar" });
     }
@@ -2751,7 +2778,7 @@ router.delete("/sync/:appointmentId", async (req, res) => {
     if (!success) {
       return res.status(500).json({ error: "Erro ao remover evento do Google Calendar" });
     }
-    await db.delete(calendarEvents).where(eq3(calendarEvents.id, calendarEvent.id));
+    await db.delete(calendarEvents).where(eq4(calendarEvents.id, calendarEvent.id));
     res.status(200).json({ success: true });
   } catch (error) {
     console.error("Erro ao remover evento do Google Calendar:", error);
@@ -3100,7 +3127,7 @@ async function analyzeInvoiceImage(imageBase64, imageType, psychologistProfile) 
 }
 
 // server/routes/patient-records.ts
-import { eq as eq4 } from "drizzle-orm";
+import { eq as eq5 } from "drizzle-orm";
 var router2 = Router2();
 var MAX_FILE_SIZE_MB = 4;
 var MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -3219,7 +3246,7 @@ router2.get("/", async (req, res) => {
       patientsList = patientsList.filter((p) => isPatientOwned(p, psychologistId, user.id));
     }
     if (user.role === "admin") {
-      const allPsychologists = await db2.select({ id: psychologists.id, fullName: users.fullName }).from(psychologists).innerJoin(users, eq4(psychologists.userId, users.id));
+      const allPsychologists = await db2.select({ id: psychologists.id, fullName: users.fullName }).from(psychologists).innerJoin(users, eq5(psychologists.userId, users.id));
       const psychologistNames = {};
       for (const row of allPsychologists) {
         psychologistNames[row.id] = row.fullName;
@@ -3705,7 +3732,7 @@ var patient_records_default = router2;
 
 // server/routes/meetings.ts
 import { Router as Router3 } from "express";
-import { eq as eq5, and as and4, gte as gte2, lte as lte2, desc as desc2 } from "drizzle-orm";
+import { eq as eq6, and as and5, gte as gte2, lte as lte2, desc as desc2 } from "drizzle-orm";
 import { z as z3 } from "zod";
 var router3 = Router3();
 function requireAuth2(req, res, next) {
@@ -3730,9 +3757,9 @@ router3.get("/", requireAuth2, async (req, res) => {
     const user = req.user;
     const { status, dateFrom, dateTo, patientId } = req.query;
     const conditions = [];
-    conditions.push(eq5(meetings.psychologistId, user.id));
+    conditions.push(eq6(meetings.psychologistId, user.id));
     if (status && status !== "all") {
-      conditions.push(eq5(meetings.status, status));
+      conditions.push(eq6(meetings.status, status));
     }
     if (dateFrom) {
       conditions.push(gte2(meetings.scheduledAt, new Date(dateFrom)));
@@ -3741,7 +3768,7 @@ router3.get("/", requireAuth2, async (req, res) => {
       conditions.push(lte2(meetings.scheduledAt, new Date(dateTo)));
     }
     if (patientId) {
-      conditions.push(eq5(meetings.patientId, parseInt(patientId)));
+      conditions.push(eq6(meetings.patientId, parseInt(patientId)));
     }
     const baseQuery = db2.select({
       id: meetings.id,
@@ -3766,8 +3793,8 @@ router3.get("/", requireAuth2, async (req, res) => {
       patientFullName: patients.fullName,
       patientPhone: patients.phone,
       patientPhotoUrl: patients.photoUrl
-    }).from(meetings).leftJoin(patients, eq5(meetings.patientId, patients.id)).orderBy(desc2(meetings.scheduledAt));
-    const rows = conditions.length > 0 ? await baseQuery.where(and4(...conditions)) : await baseQuery;
+    }).from(meetings).leftJoin(patients, eq6(meetings.patientId, patients.id)).orderBy(desc2(meetings.scheduledAt));
+    const rows = conditions.length > 0 ? await baseQuery.where(and5(...conditions)) : await baseQuery;
     const today = /* @__PURE__ */ new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -3808,7 +3835,7 @@ router3.get("/:id", requireAuth2, async (req, res) => {
       patientFullName: patients.fullName,
       patientPhone: patients.phone,
       patientPhotoUrl: patients.photoUrl
-    }).from(meetings).leftJoin(patients, eq5(meetings.patientId, patients.id)).where(eq5(meetings.id, id));
+    }).from(meetings).leftJoin(patients, eq6(meetings.patientId, patients.id)).where(eq6(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
     if (!canAccessMeeting(user, meeting)) {
@@ -3833,13 +3860,13 @@ router3.post("/", requireAuth2, async (req, res) => {
     const user = req.user;
     const body = createSchema.parse(req.body);
     const psychologistId = user.id;
-    const patientRows = await db2.select().from(patients).where(eq5(patients.id, body.patientId));
+    const patientRows = await db2.select().from(patients).where(eq6(patients.id, body.patientId));
     if (!patientRows.length) return res.status(404).json({ error: "Paciente n\xE3o encontrado" });
     const patient = patientRows[0];
     const scheduledAt = new Date(body.scheduledAt);
     const endDateTime = new Date(scheduledAt.getTime() + body.durationMinutes * 6e4);
     const title = body.title || `Sess\xE3o com ${patient.fullName}`;
-    const tokenRows = await db2.select().from(googleTokens).where(eq5(googleTokens.userId, psychologistId));
+    const tokenRows = await db2.select().from(googleTokens).where(eq6(googleTokens.userId, psychologistId));
     const hasGoogleCalendar = tokenRows.length > 0;
     let googleEventId = null;
     let meetLink = null;
@@ -3880,7 +3907,7 @@ router3.post("/", requireAuth2, async (req, res) => {
     }).returning();
     let emailSent = false;
     if (body.sendLinkNow && patient.email && meetLink) {
-      const psychUser = await db2.select({ fullName: users.fullName, email: users.email }).from(users).where(eq5(users.id, psychologistId));
+      const psychUser = await db2.select({ fullName: users.fullName, email: users.email }).from(users).where(eq6(users.id, psychologistId));
       const psych = psychUser[0];
       try {
         emailSent = await sendMeetLinkEmail({
@@ -3905,7 +3932,7 @@ router3.post("/", requireAuth2, async (req, res) => {
         }
       }
       if (emailSent) {
-        await db2.update(meetings).set({ linkSentAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq5(meetings.id, meeting.id));
+        await db2.update(meetings).set({ linkSentAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq6(meetings.id, meeting.id));
       }
     }
     res.status(201).json({ ...meeting, emailSent, hasGoogleCalendar });
@@ -3924,7 +3951,7 @@ router3.patch("/:id", requireAuth2, async (req, res) => {
   try {
     const user = req.user;
     const id = parseInt(req.params.id);
-    const rows = await db2.select().from(meetings).where(eq5(meetings.id, id));
+    const rows = await db2.select().from(meetings).where(eq6(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
     if (!canAccessMeeting(user, meeting)) {
@@ -3959,7 +3986,7 @@ router3.patch("/:id", requireAuth2, async (req, res) => {
         }
       }
     }
-    const [updated] = await db2.update(meetings).set(updates).where(eq5(meetings.id, id)).returning();
+    const [updated] = await db2.update(meetings).set(updates).where(eq6(meetings.id, id)).returning();
     res.json(updated);
   } catch (error) {
     if (isGoogleTokenExpired(error)) return handleGoogleError(res, error);
@@ -3970,13 +3997,13 @@ router3.post("/:id/start", requireAuth2, async (req, res) => {
   try {
     const user = req.user;
     const id = parseInt(req.params.id);
-    const rows = await db2.select().from(meetings).where(eq5(meetings.id, id));
+    const rows = await db2.select().from(meetings).where(eq6(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
     if (!canAccessMeeting(user, meeting)) {
       return res.status(403).json({ error: "Acesso negado" });
     }
-    const [updated] = await db2.update(meetings).set({ status: "active", startedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq5(meetings.id, id)).returning();
+    const [updated] = await db2.update(meetings).set({ status: "active", startedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq6(meetings.id, id)).returning();
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: "Erro ao iniciar reuni\xE3o" });
@@ -3986,7 +4013,7 @@ router3.post("/:id/end", requireAuth2, async (req, res) => {
   try {
     const user = req.user;
     const id = parseInt(req.params.id);
-    const rows = await db2.select().from(meetings).where(eq5(meetings.id, id));
+    const rows = await db2.select().from(meetings).where(eq6(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
     if (!canAccessMeeting(user, meeting)) {
@@ -4002,7 +4029,7 @@ router3.post("/:id/end", requireAuth2, async (req, res) => {
       actualDuration,
       notes: notes || meeting.notes,
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq5(meetings.id, id)).returning();
+    }).where(eq6(meetings.id, id)).returning();
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: "Erro ao encerrar reuni\xE3o" });
@@ -4012,13 +4039,13 @@ router3.patch("/:id/notes", requireAuth2, async (req, res) => {
   try {
     const user = req.user;
     const id = parseInt(req.params.id);
-    const rows = await db2.select().from(meetings).where(eq5(meetings.id, id));
+    const rows = await db2.select().from(meetings).where(eq6(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
     if (!canAccessMeeting(user, meeting)) {
       return res.status(403).json({ error: "Acesso negado" });
     }
-    const [updated] = await db2.update(meetings).set({ notes: req.body.notes, updatedAt: /* @__PURE__ */ new Date() }).where(eq5(meetings.id, id)).returning();
+    const [updated] = await db2.update(meetings).set({ notes: req.body.notes, updatedAt: /* @__PURE__ */ new Date() }).where(eq6(meetings.id, id)).returning();
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: "Erro ao salvar anota\xE7\xF5es" });
@@ -4028,7 +4055,7 @@ router3.post("/:id/send-link", requireAuth2, async (req, res) => {
   try {
     const user = req.user;
     const id = parseInt(req.params.id);
-    const rows = await db2.select().from(meetings).where(eq5(meetings.id, id));
+    const rows = await db2.select().from(meetings).where(eq6(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
     if (!canAccessMeeting(user, meeting)) {
@@ -4036,7 +4063,7 @@ router3.post("/:id/send-link", requireAuth2, async (req, res) => {
     }
     if (!meeting.meetLink) return res.status(400).json({ error: "Sem link do Meet" });
     if (!meeting.patientEmail) return res.status(400).json({ error: "Paciente sem e-mail" });
-    const psychUser = await db2.select({ fullName: users.fullName, email: users.email }).from(users).where(eq5(users.id, meeting.psychologistId));
+    const psychUser = await db2.select({ fullName: users.fullName, email: users.email }).from(users).where(eq6(users.id, meeting.psychologistId));
     const psych = psychUser[0];
     try {
       const sent = await sendMeetLinkEmail({
@@ -4050,7 +4077,7 @@ router3.post("/:id/send-link", requireAuth2, async (req, res) => {
         durationMinutes: meeting.durationMinutes
       });
       if (sent) {
-        await db2.update(meetings).set({ linkSentAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq5(meetings.id, id));
+        await db2.update(meetings).set({ linkSentAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq6(meetings.id, id));
       }
       res.json({ sent });
     } catch (emailErr) {
@@ -4068,7 +4095,7 @@ router3.delete("/:id", requireAuth2, async (req, res) => {
   try {
     const user = req.user;
     const id = parseInt(req.params.id);
-    const rows = await db2.select().from(meetings).where(eq5(meetings.id, id));
+    const rows = await db2.select().from(meetings).where(eq6(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
     if (!canAccessMeeting(user, meeting)) {
@@ -4083,7 +4110,7 @@ router3.delete("/:id", requireAuth2, async (req, res) => {
         }
       }
     }
-    await db2.update(meetings).set({ status: "cancelled", updatedAt: /* @__PURE__ */ new Date() }).where(eq5(meetings.id, id));
+    await db2.update(meetings).set({ status: "cancelled", updatedAt: /* @__PURE__ */ new Date() }).where(eq6(meetings.id, id));
     res.json({ success: true });
   } catch (error) {
     if (isGoogleTokenExpired(error)) return handleGoogleError(res, error);
@@ -4094,7 +4121,7 @@ var meetings_default = router3;
 
 // server/routes/profile.ts
 import { Router as Router4 } from "express";
-import { eq as eq6 } from "drizzle-orm";
+import { eq as eq7 } from "drizzle-orm";
 import multer2 from "multer";
 var router4 = Router4();
 var avatarUpload = multer2({
@@ -4124,12 +4151,12 @@ router4.use(requireAuth3);
 router4.get("/", async (req, res) => {
   try {
     const user = req.user;
-    const [userData] = await db2.select().from(users).where(eq6(users.id, user.id));
+    const [userData] = await db2.select().from(users).where(eq7(users.id, user.id));
     if (!userData) return res.status(404).json({ error: "Usu\xE1rio n\xE3o encontrado." });
-    const [psychData] = await db2.select().from(psychologists).where(eq6(psychologists.userId, user.id));
+    const [psychData] = await db2.select().from(psychologists).where(eq7(psychologists.userId, user.id));
     let specializations = [];
     if (psychData) {
-      const rows = await db2.select({ id: specializationAreas.id, name: specializationAreas.name, category: specializationAreas.category }).from(psychologistSpecializations).innerJoin(specializationAreas, eq6(psychologistSpecializations.specializationAreaId, specializationAreas.id)).where(eq6(psychologistSpecializations.psychologistId, psychData.id));
+      const rows = await db2.select({ id: specializationAreas.id, name: specializationAreas.name, category: specializationAreas.category }).from(psychologistSpecializations).innerJoin(specializationAreas, eq7(psychologistSpecializations.specializationAreaId, specializationAreas.id)).where(eq7(psychologistSpecializations.psychologistId, psychData.id));
       specializations = rows;
     }
     const { password, profileImageData, ...safeUser } = userData;
@@ -4152,20 +4179,20 @@ router4.patch("/", async (req, res) => {
     if (fullName !== void 0) userUpdate.fullName = fullName;
     if (birthDate !== void 0) userUpdate.birthDate = birthDate || null;
     if (Object.keys(userUpdate).length > 0) {
-      await db2.update(users).set(userUpdate).where(eq6(users.id, user.id));
+      await db2.update(users).set(userUpdate).where(eq7(users.id, user.id));
     }
     const psychUpdate = {};
     if (phone !== void 0) psychUpdate.phone = phone || null;
     if (crpNumber !== void 0) psychUpdate.crpNumber = crpNumber || null;
     if (bio !== void 0) psychUpdate.bio = bio || null;
     if (Object.keys(psychUpdate).length > 0) {
-      const [existing] = await db2.select().from(psychologists).where(eq6(psychologists.userId, user.id));
+      const [existing] = await db2.select().from(psychologists).where(eq7(psychologists.userId, user.id));
       if (existing) {
-        await db2.update(psychologists).set(psychUpdate).where(eq6(psychologists.userId, user.id));
+        await db2.update(psychologists).set(psychUpdate).where(eq7(psychologists.userId, user.id));
       }
     }
-    const [updated] = await db2.select().from(users).where(eq6(users.id, user.id));
-    const [updatedPsych] = await db2.select().from(psychologists).where(eq6(psychologists.userId, user.id));
+    const [updated] = await db2.select().from(users).where(eq7(users.id, user.id));
+    const [updatedPsych] = await db2.select().from(psychologists).where(eq7(psychologists.userId, user.id));
     const { password, profileImageData, ...safeUser } = updated;
     return res.json({ ...safeUser, psychologist: updatedPsych || null, age: calcAge(updated.birthDate) });
   } catch (e) {
@@ -4180,15 +4207,15 @@ router4.put("/specializations", async (req, res) => {
     if (!Array.isArray(specializationIds)) {
       return res.status(400).json({ error: "specializationIds deve ser um array." });
     }
-    const [psych] = await db2.select().from(psychologists).where(eq6(psychologists.userId, user.id));
+    const [psych] = await db2.select().from(psychologists).where(eq7(psychologists.userId, user.id));
     if (!psych) return res.status(404).json({ error: "Perfil de psic\xF3loga n\xE3o encontrado." });
-    await db2.delete(psychologistSpecializations).where(eq6(psychologistSpecializations.psychologistId, psych.id));
+    await db2.delete(psychologistSpecializations).where(eq7(psychologistSpecializations.psychologistId, psych.id));
     if (specializationIds.length > 0) {
       await db2.insert(psychologistSpecializations).values(
         specializationIds.map((id) => ({ psychologistId: psych.id, specializationAreaId: id }))
       );
     }
-    const rows = await db2.select({ id: specializationAreas.id, name: specializationAreas.name, category: specializationAreas.category }).from(psychologistSpecializations).innerJoin(specializationAreas, eq6(psychologistSpecializations.specializationAreaId, specializationAreas.id)).where(eq6(psychologistSpecializations.psychologistId, psych.id));
+    const rows = await db2.select({ id: specializationAreas.id, name: specializationAreas.name, category: specializationAreas.category }).from(psychologistSpecializations).innerJoin(specializationAreas, eq7(psychologistSpecializations.specializationAreaId, specializationAreas.id)).where(eq7(psychologistSpecializations.psychologistId, psych.id));
     return res.json({ specializations: rows });
   } catch (e) {
     console.error("PUT /api/profile/specializations error:", e);
@@ -4212,14 +4239,14 @@ router4.post(
     try {
       const user = req.user;
       if (!req.file) return res.status(400).json({ error: "Nenhum arquivo enviado." });
-      const [existingUser] = await db2.select().from(users).where(eq6(users.id, user.id));
+      const [existingUser] = await db2.select().from(users).where(eq7(users.id, user.id));
       if (!existingUser) return res.status(404).json({ error: "Usu\xE1rio n\xE3o encontrado." });
       const imageUrl = `/api/users/${user.id}/photo`;
       await db2.update(users).set({
         profileImage: imageUrl,
         profileImageData: req.file.buffer,
         profileImageMimeType: req.file.mimetype
-      }).where(eq6(users.id, user.id));
+      }).where(eq7(users.id, user.id));
       return res.json({ profileImage: imageUrl });
     } catch (e) {
       console.error("POST /api/profile/avatar error:", e);
@@ -4231,7 +4258,7 @@ var profile_default = router4;
 
 // server/routes/specialization-areas.ts
 import { Router as Router5 } from "express";
-import { eq as eq7 } from "drizzle-orm";
+import { eq as eq8 } from "drizzle-orm";
 var router5 = Router5();
 function requireAuth4(req, res, next) {
   if (!req.isAuthenticated()) return res.status(401).json({ error: "N\xE3o autenticado." });
@@ -4257,7 +4284,7 @@ router5.post("/", async (req, res) => {
   try {
     const { name, category } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: "Nome \xE9 obrigat\xF3rio." });
-    const [existing] = await db2.select().from(specializationAreas).where(eq7(specializationAreas.name, name.trim()));
+    const [existing] = await db2.select().from(specializationAreas).where(eq8(specializationAreas.name, name.trim()));
     if (existing) return res.json(existing);
     const [created] = await db2.insert(specializationAreas).values({ name: name.trim(), category: category || "Personalizada", isCustom: true }).returning();
     return res.status(201).json(created);
@@ -4270,7 +4297,7 @@ var specialization_areas_default = router5;
 
 // server/routes/admin-psychologists.ts
 import { Router as Router6 } from "express";
-import { eq as eq8, and as and5, sql as sql2 } from "drizzle-orm";
+import { eq as eq9, and as and6, sql as sql3 } from "drizzle-orm";
 var router6 = Router6();
 function requireAdmin2(req, res, next) {
   if (!req.isAuthenticated()) return res.status(401).json({ error: "N\xE3o autenticado." });
@@ -4297,12 +4324,12 @@ function monthsAgo(dateStr) {
   return (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
 }
 async function getSpecializationsForPsych(psychId) {
-  return db2.select({ id: specializationAreas.id, name: specializationAreas.name, category: specializationAreas.category }).from(psychologistSpecializations).innerJoin(specializationAreas, eq8(psychologistSpecializations.specializationAreaId, specializationAreas.id)).where(eq8(psychologistSpecializations.psychologistId, psychId));
+  return db2.select({ id: specializationAreas.id, name: specializationAreas.name, category: specializationAreas.category }).from(psychologistSpecializations).innerJoin(specializationAreas, eq9(psychologistSpecializations.specializationAreaId, specializationAreas.id)).where(eq9(psychologistSpecializations.psychologistId, psychId));
 }
 router6.get("/", async (req, res) => {
   try {
     const { search, status, specializationId } = req.query;
-    let psychList = await db2.select({ psych: psychologists, user: users }).from(psychologists).innerJoin(users, eq8(psychologists.userId, users.id)).orderBy(users.fullName);
+    let psychList = await db2.select({ psych: psychologists, user: users }).from(psychologists).innerJoin(users, eq9(psychologists.userId, users.id)).orderBy(users.fullName);
     if (search) {
       const lower = search.toLowerCase();
       psychList = psychList.filter(
@@ -4320,8 +4347,8 @@ router6.get("/", async (req, res) => {
         if (specializationId && !specs.some((s) => s.id === parseInt(specializationId))) {
           return null;
         }
-        const activePatientsCount = await db2.select({ count: sql2`count(*)` }).from(patients).where(and5(eq8(patients.psychologistId, psych.id), eq8(patients.status, "active")));
-        const sessionsCount = await db2.select({ count: sql2`count(*)` }).from(clinicalSessions).where(eq8(clinicalSessions.psychologistId, psych.id));
+        const activePatientsCount = await db2.select({ count: sql3`count(*)` }).from(patients).where(and6(eq9(patients.psychologistId, psych.id), eq9(patients.status, "active")));
+        const sessionsCount = await db2.select({ count: sql3`count(*)` }).from(clinicalSessions).where(eq9(clinicalSessions.psychologistId, psych.id));
         const { password, ...safeUser } = user;
         return {
           ...psych,
@@ -4343,13 +4370,13 @@ router6.get("/", async (req, res) => {
 router6.get("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [psych] = await db2.select().from(psychologists).where(eq8(psychologists.id, id));
+    const [psych] = await db2.select().from(psychologists).where(eq9(psychologists.id, id));
     if (!psych) return res.status(404).json({ error: "Psic\xF3loga n\xE3o encontrada." });
-    const [user] = await db2.select().from(users).where(eq8(users.id, psych.userId));
+    const [user] = await db2.select().from(users).where(eq9(users.id, psych.userId));
     if (!user) return res.status(404).json({ error: "Usu\xE1rio n\xE3o encontrado." });
     const specs = await getSpecializationsForPsych(psych.id);
-    const activePatientsCount = await db2.select({ count: sql2`count(*)` }).from(patients).where(and5(eq8(patients.psychologistId, psych.id), eq8(patients.status, "active")));
-    const sessionsCount = await db2.select({ count: sql2`count(*)` }).from(clinicalSessions).where(eq8(clinicalSessions.psychologistId, psych.id));
+    const activePatientsCount = await db2.select({ count: sql3`count(*)` }).from(patients).where(and6(eq9(patients.psychologistId, psych.id), eq9(patients.status, "active")));
+    const sessionsCount = await db2.select({ count: sql3`count(*)` }).from(clinicalSessions).where(eq9(clinicalSessions.psychologistId, psych.id));
     const { password, ...safeUser } = user;
     return res.json({
       ...psych,
@@ -4368,7 +4395,7 @@ router6.get("/:id", async (req, res) => {
 router6.patch("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [psych] = await db2.select().from(psychologists).where(eq8(psychologists.id, id));
+    const [psych] = await db2.select().from(psychologists).where(eq9(psychologists.id, id));
     if (!psych) return res.status(404).json({ error: "Psic\xF3loga n\xE3o encontrada." });
     const { fullName, email, birthDate, status, phone, crpNumber, bio, startedAtClinic } = req.body;
     const userUpdate = {};
@@ -4377,7 +4404,7 @@ router6.patch("/:id", async (req, res) => {
     if (birthDate !== void 0) userUpdate.birthDate = birthDate || null;
     if (status !== void 0) userUpdate.status = status;
     if (Object.keys(userUpdate).length > 0) {
-      await db2.update(users).set(userUpdate).where(eq8(users.id, psych.userId));
+      await db2.update(users).set(userUpdate).where(eq9(users.id, psych.userId));
     }
     const psychUpdate = {};
     if (phone !== void 0) psychUpdate.phone = phone || null;
@@ -4385,10 +4412,10 @@ router6.patch("/:id", async (req, res) => {
     if (bio !== void 0) psychUpdate.bio = bio || null;
     if (startedAtClinic !== void 0) psychUpdate.startedAtClinic = startedAtClinic || null;
     if (Object.keys(psychUpdate).length > 0) {
-      await db2.update(psychologists).set(psychUpdate).where(eq8(psychologists.id, id));
+      await db2.update(psychologists).set(psychUpdate).where(eq9(psychologists.id, id));
     }
-    const [updatedUser] = await db2.select().from(users).where(eq8(users.id, psych.userId));
-    const [updatedPsych] = await db2.select().from(psychologists).where(eq8(psychologists.id, id));
+    const [updatedUser] = await db2.select().from(users).where(eq9(users.id, psych.userId));
+    const [updatedPsych] = await db2.select().from(psychologists).where(eq9(psychologists.id, id));
     const specs = await getSpecializationsForPsych(id);
     const { password, ...safeUser } = updatedUser;
     return res.json({
@@ -4409,9 +4436,9 @@ router6.put("/:id/specializations", async (req, res) => {
     if (!Array.isArray(specializationIds)) {
       return res.status(400).json({ error: "specializationIds deve ser um array." });
     }
-    const [psych] = await db2.select().from(psychologists).where(eq8(psychologists.id, id));
+    const [psych] = await db2.select().from(psychologists).where(eq9(psychologists.id, id));
     if (!psych) return res.status(404).json({ error: "Psic\xF3loga n\xE3o encontrada." });
-    await db2.delete(psychologistSpecializations).where(eq8(psychologistSpecializations.psychologistId, id));
+    await db2.delete(psychologistSpecializations).where(eq9(psychologistSpecializations.psychologistId, id));
     if (specializationIds.length > 0) {
       await db2.insert(psychologistSpecializations).values(
         specializationIds.map((sid) => ({ psychologistId: id, specializationAreaId: sid }))
@@ -4427,12 +4454,12 @@ router6.put("/:id/specializations", async (req, res) => {
 router6.post("/:id/toggle-active", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [psych] = await db2.select().from(psychologists).where(eq8(psychologists.id, id));
+    const [psych] = await db2.select().from(psychologists).where(eq9(psychologists.id, id));
     if (!psych) return res.status(404).json({ error: "Psic\xF3loga n\xE3o encontrada." });
-    const [user] = await db2.select().from(users).where(eq8(users.id, psych.userId));
+    const [user] = await db2.select().from(users).where(eq9(users.id, psych.userId));
     if (!user) return res.status(404).json({ error: "Usu\xE1rio n\xE3o encontrado." });
     const newStatus = user.status === "active" ? "inactive" : "active";
-    await db2.update(users).set({ status: newStatus }).where(eq8(users.id, psych.userId));
+    await db2.update(users).set({ status: newStatus }).where(eq9(users.id, psych.userId));
     return res.json({ status: newStatus, isActive: newStatus === "active" });
   } catch (e) {
     console.error("POST /api/admin/psychologists/:id/toggle-active error:", e);
@@ -4441,23 +4468,99 @@ router6.post("/:id/toggle-active", async (req, res) => {
 });
 var admin_psychologists_default = router6;
 
-// server/routes/care-templates.ts
+// server/routes/admin-access.ts
 import { Router as Router7 } from "express";
-import { eq as eq9, or as or2, isNull, and as and6, count } from "drizzle-orm";
 import { z as z4 } from "zod";
+import { and as and7, desc as desc3, eq as eq10, isNull as isNull2, ne, sql as sql4 } from "drizzle-orm";
 var router7 = Router7();
+var adminColumns = {
+  id: users.id,
+  fullName: users.fullName,
+  email: users.email,
+  username: users.username,
+  status: users.status,
+  avatarUrl: users.avatarUrl
+};
+var emailSchema = z4.object({ email: z4.string().trim().email("Informe um e-mail v\xE1lido.") });
+router7.get("/admins", requireAdmin, async (_req, res) => {
+  try {
+    const admins = await db2.select(adminColumns).from(users).where(eq10(users.role, "admin")).orderBy(users.fullName);
+    const invites = await db2.select({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt }).from(accessInvites).where(and7(isNull2(accessInvites.acceptedAt), eq10(accessInvites.role, "admin"))).orderBy(desc3(accessInvites.createdAt));
+    res.json({ admins, invites });
+  } catch (error) {
+    console.error("GET /api/admin/admins:", error);
+    res.status(500).json({ message: "Erro ao carregar administradores." });
+  }
+});
+router7.post("/admins", requireAdmin, async (req, res) => {
+  const parsed = emailSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0].message });
+  const email = normalizeEmail(parsed.data.email);
+  try {
+    const [existing] = await db2.select(adminColumns).from(users).where(sql4`lower(${users.email}) = ${email}`).limit(1);
+    if (existing) {
+      const [current] = await db2.select({ role: users.role }).from(users).where(eq10(users.id, existing.id));
+      if (current?.role === "admin") return res.status(409).json({ message: "Este e-mail j\xE1 \xE9 administrador." });
+      await db2.update(users).set({ role: "admin", status: "active" }).where(eq10(users.id, existing.id));
+      return res.status(200).json({ type: "promoted", admin: { ...existing, status: "active" } });
+    }
+    const [pending] = await db2.select({ id: accessInvites.id }).from(accessInvites).where(and7(sql4`lower(${accessInvites.email}) = ${email}`, isNull2(accessInvites.acceptedAt), isNull2(accessInvites.companyId))).limit(1);
+    if (pending) return res.status(409).json({ message: "Este e-mail j\xE1 est\xE1 pr\xE9-autorizado." });
+    await db2.delete(accessInvites).where(and7(sql4`lower(${accessInvites.email}) = ${email}`, isNull2(accessInvites.companyId)));
+    const [invite] = await db2.insert(accessInvites).values({ email, role: "admin", invitedByUserId: req.user.id }).returning({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt });
+    res.status(201).json({ type: "invited", invite });
+  } catch (error) {
+    console.error("POST /api/admin/admins:", error);
+    res.status(500).json({ message: "Erro ao adicionar administrador." });
+  }
+});
+router7.delete("/admins/:userId", requireAdmin, async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isInteger(userId)) return res.status(400).json({ message: "Usu\xE1rio inv\xE1lido." });
+  if (userId === req.user.id) return res.status(400).json({ message: "Voc\xEA n\xE3o pode remover o seu pr\xF3prio acesso de administrador." });
+  try {
+    const [target] = await db2.select({ role: users.role }).from(users).where(eq10(users.id, userId));
+    if (!target || target.role !== "admin") return res.status(404).json({ message: "Administrador n\xE3o encontrado." });
+    const [{ count: count3 }] = await db2.select({ count: sql4`count(*)::int` }).from(users).where(and7(eq10(users.role, "admin"), eq10(users.status, "active"), ne(users.id, userId)));
+    if (count3 === 0) return res.status(400).json({ message: "O sistema precisa de pelo menos um administrador." });
+    await db2.update(users).set({ role: "psychologist" }).where(eq10(users.id, userId));
+    res.status(204).end();
+  } catch (error) {
+    console.error("DELETE /api/admin/admins:", error);
+    res.status(500).json({ message: "Erro ao remover administrador." });
+  }
+});
+router7.delete("/invites/:id", requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ message: "Convite inv\xE1lido." });
+  try {
+    const deleted = await db2.delete(accessInvites).where(and7(eq10(accessInvites.id, id), isNull2(accessInvites.acceptedAt))).returning({ id: accessInvites.id });
+    if (deleted.length === 0) return res.status(404).json({ message: "Convite n\xE3o encontrado." });
+    res.status(204).end();
+  } catch (error) {
+    console.error("DELETE /api/admin/invites:", error);
+    res.status(500).json({ message: "Erro ao cancelar convite." });
+  }
+});
+var admin_access_default = router7;
+
+// server/routes/care-templates.ts
+import { Router as Router8 } from "express";
+import { eq as eq11, or as or2, isNull as isNull3, and as and8, count } from "drizzle-orm";
+import { z as z5 } from "zod";
+var router8 = Router8();
 var checkAuth2 = (req, res, next) => {
   if (!req.isAuthenticated()) return res.status(401).json({ message: "N\xE3o autenticado" });
   next();
 };
-router7.use(checkAuth2);
-router7.get("/", async (req, res) => {
+router8.use(checkAuth2);
+router8.get("/", async (req, res) => {
   try {
     const userId = req.user.id;
-    const templates = await db2.select().from(careTemplates).where(or2(eq9(careTemplates.psychologistId, userId), isNull(careTemplates.psychologistId)));
+    const templates = await db2.select().from(careTemplates).where(or2(eq11(careTemplates.psychologistId, userId), isNull3(careTemplates.psychologistId)));
     const result = await Promise.all(
       templates.map(async (t) => {
-        const questions = await db2.select().from(careTemplateQuestions).where(eq9(careTemplateQuestions.templateId, t.id)).orderBy(careTemplateQuestions.orderIndex);
+        const questions = await db2.select().from(careTemplateQuestions).where(eq11(careTemplateQuestions.templateId, t.id)).orderBy(careTemplateQuestions.orderIndex);
         return { ...t, questions, questionCount: questions.length };
       })
     );
@@ -4467,7 +4570,7 @@ router7.get("/", async (req, res) => {
     res.status(500).json({ message: "Erro ao listar templates" });
   }
 });
-router7.post("/", async (req, res) => {
+router8.post("/", async (req, res) => {
   try {
     const userId = req.user.id;
     const { questions = [], ...body } = req.body;
@@ -4483,81 +4586,81 @@ router7.post("/", async (req, res) => {
       );
       await db2.insert(careTemplateQuestions).values(qs);
     }
-    const allQuestions = await db2.select().from(careTemplateQuestions).where(eq9(careTemplateQuestions.templateId, template.id)).orderBy(careTemplateQuestions.orderIndex);
+    const allQuestions = await db2.select().from(careTemplateQuestions).where(eq11(careTemplateQuestions.templateId, template.id)).orderBy(careTemplateQuestions.orderIndex);
     res.status(201).json({ ...template, questions: allQuestions });
   } catch (e) {
-    if (e instanceof z4.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z5.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao criar template" });
   }
 });
-router7.get("/:id", async (req, res) => {
+router8.get("/:id", async (req, res) => {
   try {
     const userId = req.user.id;
     const id = parseInt(req.params.id);
     const [template] = await db2.select().from(careTemplates).where(
-      and6(
-        eq9(careTemplates.id, id),
-        or2(eq9(careTemplates.psychologistId, userId), isNull(careTemplates.psychologistId))
+      and8(
+        eq11(careTemplates.id, id),
+        or2(eq11(careTemplates.psychologistId, userId), isNull3(careTemplates.psychologistId))
       )
     );
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const questions = await db2.select().from(careTemplateQuestions).where(eq9(careTemplateQuestions.templateId, id)).orderBy(careTemplateQuestions.orderIndex);
+    const questions = await db2.select().from(careTemplateQuestions).where(eq11(careTemplateQuestions.templateId, id)).orderBy(careTemplateQuestions.orderIndex);
     res.json({ ...template, questions });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: "Erro ao buscar template" });
   }
 });
-router7.patch("/:id", async (req, res) => {
+router8.patch("/:id", async (req, res) => {
   try {
     const userId = req.user.id;
     const id = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(and6(eq9(careTemplates.id, id), eq9(careTemplates.psychologistId, userId)));
+    const [template] = await db2.select().from(careTemplates).where(and8(eq11(careTemplates.id, id), eq11(careTemplates.psychologistId, userId)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const editableSchema = z4.object({
-      title: z4.string().min(1).max(100).optional(),
-      description: z4.string().max(500).optional()
+    const editableSchema = z5.object({
+      title: z5.string().min(1).max(100).optional(),
+      description: z5.string().max(500).optional()
     });
     const updateData = editableSchema.parse(req.body);
-    const [updated] = await db2.update(careTemplates).set({ ...updateData, updatedAt: /* @__PURE__ */ new Date() }).where(eq9(careTemplates.id, id)).returning();
+    const [updated] = await db2.update(careTemplates).set({ ...updateData, updatedAt: /* @__PURE__ */ new Date() }).where(eq11(careTemplates.id, id)).returning();
     res.json(updated);
   } catch (e) {
-    if (e instanceof z4.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z5.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao atualizar template" });
   }
 });
-router7.delete("/:id", async (req, res) => {
+router8.delete("/:id", async (req, res) => {
   try {
     const userId = req.user.id;
     const id = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(and6(eq9(careTemplates.id, id), eq9(careTemplates.psychologistId, userId)));
+    const [template] = await db2.select().from(careTemplates).where(and8(eq11(careTemplates.id, id), eq11(careTemplates.psychologistId, userId)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const [{ value: dispatchCount }] = await db2.select({ value: count() }).from(careDispatches).where(eq9(careDispatches.templateId, id));
+    const [{ value: dispatchCount }] = await db2.select({ value: count() }).from(careDispatches).where(eq11(careDispatches.templateId, id));
     if (Number(dispatchCount) > 0) {
       return res.status(409).json({
         message: "N\xE3o \xE9 poss\xEDvel excluir este template pois ele possui envios vinculados."
       });
     }
-    await db2.delete(careTemplates).where(eq9(careTemplates.id, id));
+    await db2.delete(careTemplates).where(eq11(careTemplates.id, id));
     res.sendStatus(204);
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: "Erro ao excluir template" });
   }
 });
-router7.put("/:id/questions", async (req, res) => {
+router8.put("/:id/questions", async (req, res) => {
   try {
     const userId = req.user.id;
     const templateId = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(and6(eq9(careTemplates.id, templateId), eq9(careTemplates.psychologistId, userId)));
+    const [template] = await db2.select().from(careTemplates).where(and8(eq11(careTemplates.id, templateId), eq11(careTemplates.psychologistId, userId)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const questionsSchema = z4.array(
-      insertCareTemplateQuestionSchema.omit({ templateId: true }).extend({ orderIndex: z4.number().int() })
+    const questionsSchema = z5.array(
+      insertCareTemplateQuestionSchema.omit({ templateId: true }).extend({ orderIndex: z5.number().int() })
     );
     const questions = questionsSchema.parse(req.body);
-    await db2.delete(careTemplateQuestions).where(eq9(careTemplateQuestions.templateId, templateId));
+    await db2.delete(careTemplateQuestions).where(eq11(careTemplateQuestions.templateId, templateId));
     if (questions.length > 0) {
       await db2.insert(careTemplateQuestions).values(
         questions.map((q, i) => ({
@@ -4567,66 +4670,66 @@ router7.put("/:id/questions", async (req, res) => {
         }))
       );
     }
-    const saved = await db2.select().from(careTemplateQuestions).where(eq9(careTemplateQuestions.templateId, templateId)).orderBy(careTemplateQuestions.orderIndex);
+    const saved = await db2.select().from(careTemplateQuestions).where(eq11(careTemplateQuestions.templateId, templateId)).orderBy(careTemplateQuestions.orderIndex);
     res.json(saved);
   } catch (e) {
-    if (e instanceof z4.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z5.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao salvar perguntas do template" });
   }
 });
-router7.post("/:id/questions", async (req, res) => {
+router8.post("/:id/questions", async (req, res) => {
   try {
     const userId = req.user.id;
     const templateId = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(and6(eq9(careTemplates.id, templateId), eq9(careTemplates.psychologistId, userId)));
+    const [template] = await db2.select().from(careTemplates).where(and8(eq11(careTemplates.id, templateId), eq11(careTemplates.psychologistId, userId)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
     const data = insertCareTemplateQuestionSchema.parse({ ...req.body, templateId });
     const [q] = await db2.insert(careTemplateQuestions).values(data).returning();
     res.status(201).json(q);
   } catch (e) {
-    if (e instanceof z4.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z5.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao adicionar pergunta" });
   }
 });
-router7.patch("/:id/questions/:qId", async (req, res) => {
+router8.patch("/:id/questions/:qId", async (req, res) => {
   try {
     const userId = req.user.id;
     const templateId = parseInt(req.params.id);
     const qId = parseInt(req.params.qId);
-    const [template] = await db2.select().from(careTemplates).where(and6(eq9(careTemplates.id, templateId), eq9(careTemplates.psychologistId, userId)));
+    const [template] = await db2.select().from(careTemplates).where(and8(eq11(careTemplates.id, templateId), eq11(careTemplates.psychologistId, userId)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
     const editableQuestionSchema = insertCareTemplateQuestionSchema.omit({ templateId: true }).partial();
     const data = editableQuestionSchema.parse(req.body);
-    const [updated] = await db2.update(careTemplateQuestions).set(data).where(and6(eq9(careTemplateQuestions.id, qId), eq9(careTemplateQuestions.templateId, templateId))).returning();
+    const [updated] = await db2.update(careTemplateQuestions).set(data).where(and8(eq11(careTemplateQuestions.id, qId), eq11(careTemplateQuestions.templateId, templateId))).returning();
     if (!updated) return res.status(404).json({ message: "Pergunta n\xE3o encontrada" });
     res.json(updated);
   } catch (e) {
-    if (e instanceof z4.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z5.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao atualizar pergunta" });
   }
 });
-router7.delete("/:id/questions/:qId", async (req, res) => {
+router8.delete("/:id/questions/:qId", async (req, res) => {
   try {
     const userId = req.user.id;
     const templateId = parseInt(req.params.id);
     const qId = parseInt(req.params.qId);
-    const [template] = await db2.select().from(careTemplates).where(and6(eq9(careTemplates.id, templateId), eq9(careTemplates.psychologistId, userId)));
+    const [template] = await db2.select().from(careTemplates).where(and8(eq11(careTemplates.id, templateId), eq11(careTemplates.psychologistId, userId)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    await db2.delete(careTemplateQuestions).where(and6(eq9(careTemplateQuestions.id, qId), eq9(careTemplateQuestions.templateId, templateId)));
+    await db2.delete(careTemplateQuestions).where(and8(eq11(careTemplateQuestions.id, qId), eq11(careTemplateQuestions.templateId, templateId)));
     res.sendStatus(204);
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: "Erro ao remover pergunta" });
   }
 });
-var care_templates_default = router7;
+var care_templates_default = router8;
 
 // server/routes/care-dispatch.ts
-import { Router as Router8 } from "express";
-import { eq as eq10, desc as desc3, count as count2, and as and7, or as or3, isNull as isNull2 } from "drizzle-orm";
+import { Router as Router9 } from "express";
+import { eq as eq12, desc as desc4, count as count2, and as and9, or as or3, isNull as isNull4 } from "drizzle-orm";
 
 // server/lib/validate-email.ts
 function isValidEmail(email) {
@@ -4756,13 +4859,13 @@ async function sendCareFormEmail(params) {
 }
 
 // server/routes/care-dispatch.ts
-import { z as z5 } from "zod";
-var router8 = Router8();
+import { z as z6 } from "zod";
+var router9 = Router9();
 var checkAuth3 = (req, res, next) => {
   if (!req.isAuthenticated()) return res.status(401).json({ message: "N\xE3o autenticado" });
   next();
 };
-router8.use(checkAuth3);
+router9.use(checkAuth3);
 function substituteVariables(text3, patientName, psychologistName) {
   const firstName = patientName.split(" ")[0];
   return text3.replace(/\{patient_name\}/g, firstName).replace(/\{patient_full_name\}/g, patientName).replace(/\{psychologist_name\}/g, psychologistName);
@@ -4770,7 +4873,7 @@ function substituteVariables(text3, patientName, psychologistName) {
 async function canAccessPatient(user, patientRow) {
   if (user.role === "admin") return true;
   if (user.role === "psychologist") {
-    const [psychRow] = await db2.select().from(psychologists).where(eq10(psychologists.userId, user.id));
+    const [psychRow] = await db2.select().from(psychologists).where(eq12(psychologists.userId, user.id));
     const psychId = psychRow?.id ?? -1;
     return patientRow.psychologistId === psychId || patientRow.createdBy === user.id;
   }
@@ -4780,13 +4883,13 @@ function canAccessDispatch(user, dispatch) {
   if (user.role === "admin") return true;
   return dispatch.psychologistId === user.id;
 }
-router8.post("/patients/:patientId/dispatch", async (req, res) => {
+router9.post("/patients/:patientId/dispatch", async (req, res) => {
   try {
     const user = req.user;
     const patientId = parseInt(req.params.patientId);
     const { template_id, subject, custom_message, override_questions } = req.body;
     if (!template_id) return res.status(400).json({ message: "template_id \xE9 obrigat\xF3rio" });
-    const [patient] = await db2.select().from(patients).where(eq10(patients.id, patientId));
+    const [patient] = await db2.select().from(patients).where(eq12(patients.id, patientId));
     if (!patient) return res.status(404).json({ message: "Paciente n\xE3o encontrado" });
     const authorized = await canAccessPatient(user, patient);
     if (!authorized) {
@@ -4801,24 +4904,24 @@ router8.post("/patients/:patientId/dispatch", async (req, res) => {
         message: "O paciente n\xE3o possui e-mail v\xE1lido cadastrado. Atualize o perfil antes de enviar."
       });
     }
-    const [psychUser] = await db2.select().from(users).where(eq10(users.id, user.id));
+    const [psychUser] = await db2.select().from(users).where(eq12(users.id, user.id));
     if (!psychUser) return res.status(400).json({ message: "Usu\xE1rio n\xE3o encontrado" });
     const [template] = await db2.select().from(careTemplates).where(
-      and7(
-        eq10(careTemplates.id, parseInt(template_id)),
-        or3(eq10(careTemplates.psychologistId, user.id), isNull2(careTemplates.psychologistId))
+      and9(
+        eq12(careTemplates.id, parseInt(template_id)),
+        or3(eq12(careTemplates.psychologistId, user.id), isNull4(careTemplates.psychologistId))
       )
     );
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const templateQuestions = await db2.select().from(careTemplateQuestions).where(eq10(careTemplateQuestions.templateId, template.id)).orderBy(careTemplateQuestions.orderIndex);
+    const templateQuestions = await db2.select().from(careTemplateQuestions).where(eq12(careTemplateQuestions.templateId, template.id)).orderBy(careTemplateQuestions.orderIndex);
     const psychName = psychUser.fullName || psychUser.username;
-    const overrideSchema = z5.array(
-      z5.object({
-        questionText: z5.string().min(1),
-        questionType: z5.string(),
-        options: z5.array(z5.string()).nullable().optional(),
-        isRequired: z5.boolean(),
-        orderIndex: z5.number().int()
+    const overrideSchema = z6.array(
+      z6.object({
+        questionText: z6.string().min(1),
+        questionType: z6.string(),
+        options: z6.array(z6.string()).nullable().optional(),
+        isRequired: z6.boolean(),
+        orderIndex: z6.number().int()
       })
     );
     let renderedQuestions;
@@ -4893,11 +4996,11 @@ router8.post("/patients/:patientId/dispatch", async (req, res) => {
     res.status(500).json({ message: "Erro ao enviar formul\xE1rio" });
   }
 });
-router8.get("/patients/:patientId/dispatches", async (req, res) => {
+router9.get("/patients/:patientId/dispatches", async (req, res) => {
   try {
     const user = req.user;
     const patientId = parseInt(req.params.patientId);
-    const [patient] = await db2.select().from(patients).where(eq10(patients.id, patientId));
+    const [patient] = await db2.select().from(patients).where(eq12(patients.id, patientId));
     if (!patient) return res.status(404).json({ message: "Paciente n\xE3o encontrado" });
     const authorized = await canAccessPatient(user, patient);
     if (!authorized) {
@@ -4906,15 +5009,15 @@ router8.get("/patients/:patientId/dispatches", async (req, res) => {
         code: "FORBIDDEN"
       });
     }
-    const dispatches = await db2.select().from(careDispatches).where(eq10(careDispatches.patientId, patientId)).orderBy(desc3(careDispatches.sentAt));
+    const dispatches = await db2.select().from(careDispatches).where(eq12(careDispatches.patientId, patientId)).orderBy(desc4(careDispatches.sentAt));
     const now = /* @__PURE__ */ new Date();
     const result = await Promise.all(
       dispatches.map(async (d) => {
         if (d.status !== "answered" && d.tokenExpiresAt < now) {
-          await db2.update(careDispatches).set({ status: "expired" }).where(eq10(careDispatches.id, d.id));
+          await db2.update(careDispatches).set({ status: "expired" }).where(eq12(careDispatches.id, d.id));
           d = { ...d, status: "expired" };
         }
-        const [{ value: responseCount }] = await db2.select({ value: count2() }).from(careResponses).where(eq10(careResponses.dispatchId, d.id));
+        const [{ value: responseCount }] = await db2.select({ value: count2() }).from(careResponses).where(eq12(careResponses.dispatchId, d.id));
         return { ...d, responseCount: Number(responseCount) };
       })
     );
@@ -4924,11 +5027,11 @@ router8.get("/patients/:patientId/dispatches", async (req, res) => {
     res.status(500).json({ message: "Erro ao listar hist\xF3rico de envios" });
   }
 });
-router8.get("/dispatches/:dispatchId/responses", async (req, res) => {
+router9.get("/dispatches/:dispatchId/responses", async (req, res) => {
   try {
     const user = req.user;
     const dispatchId = parseInt(req.params.dispatchId);
-    const [dispatch] = await db2.select().from(careDispatches).where(eq10(careDispatches.id, dispatchId));
+    const [dispatch] = await db2.select().from(careDispatches).where(eq12(careDispatches.id, dispatchId));
     if (!dispatch) return res.status(404).json({ message: "Envio n\xE3o encontrado" });
     if (!canAccessDispatch(user, dispatch)) {
       return res.status(403).json({
@@ -4936,8 +5039,8 @@ router8.get("/dispatches/:dispatchId/responses", async (req, res) => {
         code: "FORBIDDEN"
       });
     }
-    const questions = await db2.select().from(careDispatchQuestions).where(eq10(careDispatchQuestions.dispatchId, dispatchId)).orderBy(careDispatchQuestions.orderIndex);
-    const responses = await db2.select().from(careResponses).where(eq10(careResponses.dispatchId, dispatchId));
+    const questions = await db2.select().from(careDispatchQuestions).where(eq12(careDispatchQuestions.dispatchId, dispatchId)).orderBy(careDispatchQuestions.orderIndex);
+    const responses = await db2.select().from(careResponses).where(eq12(careResponses.dispatchId, dispatchId));
     const merged = questions.map((q) => ({
       ...q,
       response: responses.find((r) => r.dispatchQuestionId === q.id) ?? null
@@ -4948,23 +5051,23 @@ router8.get("/dispatches/:dispatchId/responses", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar respostas" });
   }
 });
-var care_dispatch_default = router8;
+var care_dispatch_default = router9;
 
 // server/routes/care-public.ts
-import { Router as Router9 } from "express";
-import { eq as eq11 } from "drizzle-orm";
-import { z as z6 } from "zod";
-var router9 = Router9();
-router9.get("/respond/:token", async (req, res) => {
+import { Router as Router10 } from "express";
+import { eq as eq13 } from "drizzle-orm";
+import { z as z7 } from "zod";
+var router10 = Router10();
+router10.get("/respond/:token", async (req, res) => {
   try {
     const { token } = req.params;
-    const [dispatch] = await db2.select().from(careDispatches).where(eq11(careDispatches.responseToken, token));
+    const [dispatch] = await db2.select().from(careDispatches).where(eq13(careDispatches.responseToken, token));
     if (!dispatch) {
       return res.status(404).json({ error: "not_found", message: "Formul\xE1rio n\xE3o encontrado." });
     }
     if (/* @__PURE__ */ new Date() > dispatch.tokenExpiresAt) {
       if (dispatch.status !== "expired" && dispatch.status !== "answered") {
-        await db2.update(careDispatches).set({ status: "expired" }).where(eq11(careDispatches.id, dispatch.id));
+        await db2.update(careDispatches).set({ status: "expired" }).where(eq13(careDispatches.id, dispatch.id));
       }
       return res.status(410).json({
         error: "expired",
@@ -4978,11 +5081,11 @@ router9.get("/respond/:token", async (req, res) => {
       });
     }
     if (dispatch.status === "sent") {
-      await db2.update(careDispatches).set({ status: "opened", openedAt: /* @__PURE__ */ new Date() }).where(eq11(careDispatches.id, dispatch.id));
+      await db2.update(careDispatches).set({ status: "opened", openedAt: /* @__PURE__ */ new Date() }).where(eq13(careDispatches.id, dispatch.id));
     }
-    const questions = await db2.select().from(careDispatchQuestions).where(eq11(careDispatchQuestions.dispatchId, dispatch.id)).orderBy(careDispatchQuestions.orderIndex);
-    const [patient] = await db2.select({ firstName: patients.fullName }).from(patients).where(eq11(patients.id, dispatch.patientId));
-    const [psychUser] = await db2.select({ fullName: users.fullName, username: users.username }).from(users).where(eq11(users.id, dispatch.psychologistId));
+    const questions = await db2.select().from(careDispatchQuestions).where(eq13(careDispatchQuestions.dispatchId, dispatch.id)).orderBy(careDispatchQuestions.orderIndex);
+    const [patient] = await db2.select({ firstName: patients.fullName }).from(patients).where(eq13(patients.id, dispatch.patientId));
+    const [psychUser] = await db2.select({ fullName: users.fullName, username: users.username }).from(users).where(eq13(users.id, dispatch.psychologistId));
     const clinicName = process.env.CLINIC_NAME || "ConsultaPsi";
     const patientFirstName = patient?.firstName?.split(" ")[0] ?? "Paciente";
     const psychologistName = psychUser?.fullName || psychUser?.username || "sua psic\xF3loga";
@@ -4999,26 +5102,26 @@ router9.get("/respond/:token", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar formul\xE1rio" });
   }
 });
-var answerSchema = z6.object({
-  answers: z6.array(
-    z6.object({
-      dispatch_question_id: z6.number().int().positive(),
-      answer_text: z6.string().optional().nullable(),
-      answer_choice: z6.string().optional().nullable(),
-      answer_scale: z6.number().int().min(1).max(10).optional().nullable()
+var answerSchema = z7.object({
+  answers: z7.array(
+    z7.object({
+      dispatch_question_id: z7.number().int().positive(),
+      answer_text: z7.string().optional().nullable(),
+      answer_choice: z7.string().optional().nullable(),
+      answer_scale: z7.number().int().min(1).max(10).optional().nullable()
     })
   )
 });
-router9.post("/respond/:token", async (req, res) => {
+router10.post("/respond/:token", async (req, res) => {
   try {
     const { token } = req.params;
-    const [dispatch] = await db2.select().from(careDispatches).where(eq11(careDispatches.responseToken, token));
+    const [dispatch] = await db2.select().from(careDispatches).where(eq13(careDispatches.responseToken, token));
     if (!dispatch) {
       return res.status(404).json({ error: "not_found", message: "Formul\xE1rio n\xE3o encontrado." });
     }
     if (/* @__PURE__ */ new Date() > dispatch.tokenExpiresAt) {
       if (dispatch.status !== "expired") {
-        await db2.update(careDispatches).set({ status: "expired" }).where(eq11(careDispatches.id, dispatch.id));
+        await db2.update(careDispatches).set({ status: "expired" }).where(eq13(careDispatches.id, dispatch.id));
       }
       return res.status(410).json({
         error: "expired",
@@ -5033,7 +5136,7 @@ router9.post("/respond/:token", async (req, res) => {
     }
     const parsed = answerSchema.parse(req.body);
     const { answers } = parsed;
-    const questions = await db2.select().from(careDispatchQuestions).where(eq11(careDispatchQuestions.dispatchId, dispatch.id));
+    const questions = await db2.select().from(careDispatchQuestions).where(eq13(careDispatchQuestions.dispatchId, dispatch.id));
     const validQuestionIds = new Set(questions.map((q) => q.id));
     for (const a of answers) {
       if (!validQuestionIds.has(a.dispatch_question_id)) {
@@ -5064,28 +5167,28 @@ router9.post("/respond/:token", async (req, res) => {
         }))
       );
     }
-    await db2.update(careDispatches).set({ status: "answered", answeredAt: /* @__PURE__ */ new Date() }).where(eq11(careDispatches.id, dispatch.id));
+    await db2.update(careDispatches).set({ status: "answered", answeredAt: /* @__PURE__ */ new Date() }).where(eq13(careDispatches.id, dispatch.id));
     return res.json({ success: true, message: "Respostas enviadas com sucesso!" });
   } catch (e) {
-    if (e instanceof z6.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z7.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error("care respond POST error:", e);
     res.status(500).json({ message: "Erro ao salvar respostas" });
   }
 });
-var care_public_default = router9;
+var care_public_default = router10;
 
 // server/routes/commissions.ts
-import { Router as Router10 } from "express";
-import { eq as eq12, and as and8, gte as gte3, lte as lte3 } from "drizzle-orm";
-import { z as z7 } from "zod";
-var router10 = Router10();
+import { Router as Router11 } from "express";
+import { eq as eq14, and as and10, gte as gte3, lte as lte3 } from "drizzle-orm";
+import { z as z8 } from "zod";
+var router11 = Router11();
 function adminOnly(req, res, next) {
   if (!req.user || req.user.role !== "admin") {
     return res.status(403).json({ message: "Acesso negado. Somente administradores." });
   }
   next();
 }
-router10.use(adminOnly);
+router11.use(adminOnly);
 function hoursFromTime(start, end) {
   const [sh, sm] = start.split(":").map(Number);
   const [eh, em] = end.split(":").map(Number);
@@ -5100,9 +5203,9 @@ async function calcCommissionPreview(psychologistId, periodStart, periodEnd) {
     roomId: roomBookings.roomId,
     roomName: rooms.name,
     roomHourlyRate: rooms.hourlyRate
-  }).from(roomBookings).leftJoin(rooms, eq12(roomBookings.roomId, rooms.id)).where(
-    and8(
-      eq12(roomBookings.psychologistId, psychologistId),
+  }).from(roomBookings).leftJoin(rooms, eq14(roomBookings.roomId, rooms.id)).where(
+    and10(
+      eq14(roomBookings.psychologistId, psychologistId),
       gte3(roomBookings.date, periodStart),
       lte3(roomBookings.date, periodEnd)
     )
@@ -5139,7 +5242,7 @@ async function calcCommissionPreview(psychologistId, periodStart, periodEnd) {
   const totalRepasse = items.reduce((acc, i) => acc + i.repasseValue, 0);
   return { items, totalRoomsValue, totalRepasse, totalBookings: items.length };
 }
-router10.get("/dashboard", async (req, res) => {
+router11.get("/dashboard", async (req, res) => {
   try {
     const month = req.query.month || (/* @__PURE__ */ new Date()).toISOString().slice(0, 7);
     const data = await storage.getCommissionDashboard(month);
@@ -5148,7 +5251,7 @@ router10.get("/dashboard", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar dashboard" });
   }
 });
-router10.get("/", async (req, res) => {
+router11.get("/", async (req, res) => {
   try {
     const { psychologistId, status, periodStart, periodEnd } = req.query;
     const list = await storage.listCommissions({
@@ -5169,7 +5272,7 @@ router10.get("/", async (req, res) => {
     res.status(500).json({ message: "Erro ao listar comissionamentos" });
   }
 });
-router10.get("/preview", async (req, res) => {
+router11.get("/preview", async (req, res) => {
   try {
     const { psychologistId, periodStart, periodEnd } = req.query;
     if (!psychologistId || !periodStart || !periodEnd) {
@@ -5185,7 +5288,7 @@ router10.get("/preview", async (req, res) => {
     res.status(500).json({ message: "Erro ao calcular preview" });
   }
 });
-router10.get("/:id", async (req, res) => {
+router11.get("/:id", async (req, res) => {
   try {
     const c = await storage.getCommission(parseInt(req.params.id));
     if (!c) return res.status(404).json({ message: "Comissionamento n\xE3o encontrado" });
@@ -5196,7 +5299,7 @@ router10.get("/:id", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar comissionamento" });
   }
 });
-router10.get("/:id/items", async (req, res) => {
+router11.get("/:id/items", async (req, res) => {
   try {
     const items = await storage.listCommissionItems(parseInt(req.params.id));
     res.json(items);
@@ -5204,12 +5307,12 @@ router10.get("/:id/items", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar itens" });
   }
 });
-router10.post("/generate", async (req, res) => {
+router11.post("/generate", async (req, res) => {
   try {
-    const schema = z7.object({
-      psychologistId: z7.number(),
-      periodStart: z7.string(),
-      periodEnd: z7.string()
+    const schema = z8.object({
+      psychologistId: z8.number(),
+      periodStart: z8.string(),
+      periodEnd: z8.string()
     });
     const { psychologistId, periodStart, periodEnd } = schema.parse(req.body);
     const existing = await storage.listCommissions({ psychologistId, exactPeriod: { periodStart, periodEnd } });
@@ -5249,16 +5352,16 @@ router10.post("/generate", async (req, res) => {
     );
     res.status(201).json(commission);
   } catch (e) {
-    if (e instanceof z7.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z8.ZodError) return res.status(400).json({ message: e.errors[0].message });
     res.status(500).json({ message: "Erro ao gerar comissionamento" });
   }
 });
-router10.patch("/:id/pay", async (req, res) => {
+router11.patch("/:id/pay", async (req, res) => {
   try {
-    const schema = z7.object({
-      paymentDate: z7.string(),
-      paymentMethod: z7.string().min(1, "Informe o m\xE9todo de pagamento"),
-      paymentNotes: z7.string().optional()
+    const schema = z8.object({
+      paymentDate: z8.string(),
+      paymentMethod: z8.string().min(1, "Informe o m\xE9todo de pagamento"),
+      paymentNotes: z8.string().optional()
     });
     const data = schema.parse(req.body);
     const c = await storage.getCommission(parseInt(req.params.id));
@@ -5267,11 +5370,11 @@ router10.patch("/:id/pay", async (req, res) => {
     const updated = await storage.updateCommission(c.id, { ...data, status: "paid" });
     res.json(updated);
   } catch (e) {
-    if (e instanceof z7.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z8.ZodError) return res.status(400).json({ message: e.errors[0].message });
     res.status(500).json({ message: "Erro ao registrar pagamento" });
   }
 });
-router10.patch("/:id/cancel", async (req, res) => {
+router11.patch("/:id/cancel", async (req, res) => {
   try {
     const c = await storage.getCommission(parseInt(req.params.id));
     if (!c) return res.status(404).json({ message: "Comissionamento n\xE3o encontrado" });
@@ -5282,8 +5385,8 @@ router10.patch("/:id/cancel", async (req, res) => {
     res.status(500).json({ message: "Erro ao cancelar comissionamento" });
   }
 });
-var commissions_default = router10;
-var commissionConfigsRouter = Router10();
+var commissions_default = router11;
+var commissionConfigsRouter = Router11();
 commissionConfigsRouter.use(adminOnly);
 commissionConfigsRouter.get("/", async (req, res) => {
   try {
@@ -5305,12 +5408,12 @@ commissionConfigsRouter.get("/", async (req, res) => {
 });
 commissionConfigsRouter.post("/", async (req, res) => {
   try {
-    const schema = z7.object({
-      psychologistId: z7.number(),
-      payoutType: z7.enum(["percentual", "fixed"]),
-      payoutValue: z7.union([z7.string().transform(parseFloat), z7.number()]),
-      validFrom: z7.string(),
-      validUntil: z7.string().nullable().optional()
+    const schema = z8.object({
+      psychologistId: z8.number(),
+      payoutType: z8.enum(["percentual", "fixed"]),
+      payoutValue: z8.union([z8.string().transform(parseFloat), z8.number()]),
+      validFrom: z8.string(),
+      validUntil: z8.string().nullable().optional()
     });
     const data = schema.parse(req.body);
     const config = await storage.createCommissionPayoutConfig({
@@ -5319,17 +5422,17 @@ commissionConfigsRouter.post("/", async (req, res) => {
     });
     res.status(201).json(config);
   } catch (e) {
-    if (e instanceof z7.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z8.ZodError) return res.status(400).json({ message: e.errors[0].message });
     res.status(500).json({ message: "Erro ao criar configura\xE7\xE3o" });
   }
 });
 commissionConfigsRouter.put("/:id", async (req, res) => {
   try {
-    const schema = z7.object({
-      payoutType: z7.enum(["percentual", "fixed"]).optional(),
-      payoutValue: z7.union([z7.string().transform(parseFloat), z7.number()]).optional(),
-      validFrom: z7.string().optional(),
-      validUntil: z7.string().nullable().optional()
+    const schema = z8.object({
+      payoutType: z8.enum(["percentual", "fixed"]).optional(),
+      payoutValue: z8.union([z8.string().transform(parseFloat), z8.number()]).optional(),
+      validFrom: z8.string().optional(),
+      validUntil: z8.string().nullable().optional()
     });
     const parsed = schema.parse(req.body);
     const updateData = {
@@ -5342,7 +5445,7 @@ commissionConfigsRouter.put("/:id", async (req, res) => {
     if (!updated) return res.status(404).json({ message: "Configura\xE7\xE3o n\xE3o encontrada" });
     res.json(updated);
   } catch (e) {
-    if (e instanceof z7.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z8.ZodError) return res.status(400).json({ message: e.errors[0].message });
     res.status(500).json({ message: "Erro ao atualizar configura\xE7\xE3o" });
   }
 });
@@ -6603,6 +6706,7 @@ async function registerRoutes(app) {
   app.use("/api/profile", profile_default);
   app.use("/api/specialization-areas", specialization_areas_default);
   app.use("/api/admin/psychologists", admin_psychologists_default);
+  app.use("/api/admin", admin_access_default);
   app.use("/api/care", care_public_default);
   app.use("/api/care/templates", care_templates_default);
   app.use("/api/care", care_dispatch_default);
@@ -7145,7 +7249,7 @@ function getDayOfWeek(date3) {
 }
 
 // server/seed-specializations.ts
-import { sql as sql3 } from "drizzle-orm";
+import { sql as sql5 } from "drizzle-orm";
 var PREDEFINED_AREAS = [
   // Transtornos Clínicos (10)
   { name: "Ansiedade", category: "Transtornos Cl\xEDnicos" },
@@ -7194,7 +7298,7 @@ var PREDEFINED_AREAS = [
 ];
 async function seedSpecializationAreas() {
   try {
-    const [{ count: count3 }] = await db2.select({ count: sql3`count(*)` }).from(specializationAreas);
+    const [{ count: count3 }] = await db2.select({ count: sql5`count(*)` }).from(specializationAreas);
     if (Number(count3) >= PREDEFINED_AREAS.length) return;
     for (const area of PREDEFINED_AREAS) {
       await db2.insert(specializationAreas).values({ name: area.name, category: area.category, isCustom: false }).onConflictDoNothing();
@@ -7206,10 +7310,10 @@ async function seedSpecializationAreas() {
 }
 
 // server/seed-care.ts
-import { sql as sql4 } from "drizzle-orm";
+import { sql as sql6 } from "drizzle-orm";
 async function seedCareTemplates() {
   try {
-    const [{ count: count3 }] = await db2.select({ count: sql4`count(*)` }).from(careTemplates);
+    const [{ count: count3 }] = await db2.select({ count: sql6`count(*)` }).from(careTemplates);
     if (Number(count3) > 0) return;
     const [template] = await db2.insert(careTemplates).values({
       psychologistId: null,
@@ -7269,6 +7373,22 @@ async function runStartupMigrations() {
     await pool.query(`
       ALTER TABLE appointments
         ADD COLUMN IF NOT EXISTS session_type text
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS access_invites (
+        id serial PRIMARY KEY,
+        email text NOT NULL,
+        role text NOT NULL DEFAULT 'admin',
+        company_id integer,
+        invited_by_user_id integer REFERENCES users(id),
+        created_at timestamp NOT NULL DEFAULT now(),
+        accepted_at timestamp,
+        accepted_user_id integer REFERENCES users(id)
+      )
+    `);
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS access_invites_company_email_idx
+        ON access_invites (COALESCE(company_id, 0), lower(email))
     `);
   } catch (error) {
     log(`startup migration failed: ${error.message}`);
