@@ -3,12 +3,13 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Building2, Clock, FileText, Loader2, LogIn, Mail, Pause, Pencil, Play, Plus, Trash2, UserPlus } from "lucide-react";
+import { Building2, Clock, FileText, Loader2, LogIn, Mail, Pause, Pencil, Play, Plus, Trash2, UserPlus, UserRoundX } from "lucide-react";
 import Sidebar from "@/components/sidebar";
 import MobileNav from "@/components/mobile-nav";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,6 +24,7 @@ import { PageHeader, cpButton } from "@/components/cp/PageHeader";
 import { IconField, InfoBanner, ModalHeader } from "@/components/cp/fields";
 import { StatusBadge } from "@/components/cp/StatusBadge";
 import { roleName } from "@/components/cp/status";
+import { UnlinkedAccountsTab, useUnlinkedAccounts } from "@/components/admin/UnlinkedAccountsTab";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -46,6 +48,11 @@ type CompanyDetail = { company: Company; members: Member[]; invites: Invite[] };
 type AdminResult = { type: "promoted" | "invited" };
 
 const LIST_KEY = ["/api/platform/companies"];
+
+const tabTrigger = [
+  "relative flex items-center gap-2 rounded-xl px-4 py-2.5 text-[15px] font-medium transition-all",
+  "text-cp-ink hover:bg-cp-hover data-[state=active]:bg-cp-sage-soft data-[state=active]:text-cp-sage-ink data-[state=active]:shadow-none",
+].join(" ");
 const detailKey = (id: number) => ["/api/platform/companies", id];
 
 const formatCnpj = (v: string | null) =>
@@ -65,8 +72,10 @@ export default function AdminEmpresas() {
   const [, navigate] = useLocation();
   const [creating, setCreating] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
+  const [tab, setTab] = useState("companies");
 
   const { data: companies = [], isLoading } = useQuery<Company[]>({ queryKey: LIST_KEY });
+  const { data: waiting = [] } = useUnlinkedAccounts("waiting");
 
   const enter = (c: Company) => {
     if (c.id === user?.activeCompany?.id) return navigate("/");
@@ -92,67 +101,89 @@ export default function AdminEmpresas() {
             icon={Building2}
             subtitle="Clínicas da plataforma: crie, acompanhe e entre para dar suporte."
             actions={
-              <button type="button" className={cpButton.primary} onClick={() => setCreating(true)} data-testid="button-new-company">
-                <Plus className="h-4 w-4" />
-                Nova empresa
-              </button>
+              tab === "companies" && (
+                <button type="button" className={cpButton.primary} onClick={() => setCreating(true)} data-testid="button-new-company">
+                  <Plus className="h-4 w-4" />
+                  Nova empresa
+                </button>
+              )
             }
           />
 
-          {isLoading ? (
-            <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-cp-action" /></div>
-          ) : (
-            <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {companies.map((c) => {
-                const isActive = c.id === user?.activeCompany?.id;
-                const entering = switchCompanyMutation.isPending && switchCompanyMutation.variables === c.id;
-                return (
-                  <li key={c.id} className="flex flex-col rounded-2xl border border-cp-divider bg-white p-5 shadow-sm" data-testid={`company-${c.id}`}>
-                    <div className="flex items-start gap-3">
-                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-cp-sage-soft">
-                        <Building2 className="h-5 w-5 text-cp-sage-ink" aria-hidden="true" />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[16px] font-semibold text-cp-ink">{c.name}</p>
-                        <p className="text-xs text-cp-muted">Criada em {format(new Date(c.createdAt), "dd/MM/yyyy", { locale: ptBR })}</p>
-                      </div>
-                      {c.status === "suspended" ? (
-                        <StatusBadge label="Suspensa" tone="danger" />
-                      ) : isActive ? (
-                        <StatusBadge label="Você está aqui" tone="success" />
-                      ) : null}
-                    </div>
+          <Tabs value={tab} onValueChange={setTab} className="space-y-6">
+            <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-2xl border border-cp-divider bg-white p-1.5 shadow-[0_10px_40px_-22px_rgba(36,54,71,0.2)]">
+              <TabsTrigger value="companies" className={tabTrigger} data-testid="tab-companies">
+                <Building2 className="h-4 w-4" />
+                Clínicas
+              </TabsTrigger>
+              <TabsTrigger value="unlinked" className={tabTrigger} data-testid="tab-unlinked">
+                <UserRoundX className="h-4 w-4" />
+                Contas sem clínica
+                {waiting.length > 0 && <StatusBadge label={String(waiting.length)} tone="warning" />}
+              </TabsTrigger>
+            </TabsList>
 
-                    <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
-                      <Stat label="Membros" value={c.membersCount} />
-                      <Stat label="Admins" value={c.adminsCount} />
-                      <Stat label="Convites" value={c.pendingInvitesCount} />
-                    </dl>
-                    {c.adminsCount === 0 && c.pendingInvitesCount === 0 && (
-                      <InfoBanner variant="warning" className="mt-3">Sem administrador: convide alguém em Detalhes.</InfoBanner>
-                    )}
+            <TabsContent value="unlinked">
+              <UnlinkedAccountsTab />
+            </TabsContent>
 
-                    <div className="mt-4 flex gap-2">
-                      <button type="button" className={cn(cpButton.secondary, "flex-1 px-3")} onClick={() => setOpenId(c.id)}>
-                        <Pencil className="h-4 w-4" />
-                        Detalhes
-                      </button>
-                      <button
-                        type="button"
-                        className={cn(cpButton.primary, "flex-1 px-3")}
-                        onClick={() => enter(c)}
-                        disabled={c.status === "suspended" || switchCompanyMutation.isPending}
-                        title={c.status === "suspended" ? "Reative a empresa para entrar" : undefined}
-                      >
-                        {entering ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
-                        {isActive ? "Abrir" : "Entrar"}
-                      </button>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+            <TabsContent value="companies">
+              {isLoading ? (
+                <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-cp-action" /></div>
+              ) : (
+                <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {companies.map((c) => {
+                    const isActive = c.id === user?.activeCompany?.id;
+                    const entering = switchCompanyMutation.isPending && switchCompanyMutation.variables === c.id;
+                    return (
+                      <li key={c.id} className="flex flex-col rounded-2xl border border-cp-divider bg-white p-5 shadow-sm" data-testid={`company-${c.id}`}>
+                        <div className="flex items-start gap-3">
+                          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-cp-sage-soft">
+                            <Building2 className="h-5 w-5 text-cp-sage-ink" aria-hidden="true" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-[16px] font-semibold text-cp-ink">{c.name}</p>
+                            <p className="text-xs text-cp-muted">Criada em {format(new Date(c.createdAt), "dd/MM/yyyy", { locale: ptBR })}</p>
+                          </div>
+                          {c.status === "suspended" ? (
+                            <StatusBadge label="Suspensa" tone="danger" />
+                          ) : isActive ? (
+                            <StatusBadge label="Você está aqui" tone="success" />
+                          ) : null}
+                        </div>
+
+                        <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
+                          <Stat label="Membros" value={c.membersCount} />
+                          <Stat label="Admins" value={c.adminsCount} />
+                          <Stat label="Convites" value={c.pendingInvitesCount} />
+                        </dl>
+                        {c.adminsCount === 0 && c.pendingInvitesCount === 0 && (
+                          <InfoBanner variant="warning" className="mt-3">Sem administrador: convide alguém em Detalhes.</InfoBanner>
+                        )}
+
+                        <div className="mt-4 flex gap-2">
+                          <button type="button" className={cn(cpButton.secondary, "flex-1 px-3")} onClick={() => setOpenId(c.id)}>
+                            <Pencil className="h-4 w-4" />
+                            Detalhes
+                          </button>
+                          <button
+                            type="button"
+                            className={cn(cpButton.primary, "flex-1 px-3")}
+                            onClick={() => enter(c)}
+                            disabled={c.status === "suspended" || switchCompanyMutation.isPending}
+                            title={c.status === "suspended" ? "Reative a empresa para entrar" : undefined}
+                          >
+                            {entering ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+                            {isActive ? "Abrir" : "Entrar"}
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </TabsContent>
+          </Tabs>
         </main>
       </div>
 

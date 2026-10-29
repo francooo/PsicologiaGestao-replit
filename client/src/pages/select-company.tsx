@@ -1,15 +1,27 @@
+import { useState } from "react";
 import { Link, Redirect, useLocation } from "wouter";
-import { Building2, Check, Loader2, LogOut, Settings2 } from "lucide-react";
+import { Building2, Check, Loader2, LogOut, RefreshCw, Settings2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { BrandLogo } from "@/components/brand/brand-logo";
 import { PublicState } from "@/components/cp/PublicShell";
 import { cpButton } from "@/components/cp/PageHeader";
 import { roleName } from "@/components/cp/status";
+import { queryClient } from "@/lib/queryClient";
+import type { AuthUser } from "@shared/schema";
 
 /** Chooses the active company — shown after login when there is more than one, or none yet. */
 export default function SelectCompanyPage() {
   const { user, isLoading, switchCompanyMutation, logoutMutation } = useAuth();
   const [, navigate] = useLocation();
+  const [checking, setChecking] = useState(false);
+
+  // Someone may have linked the account in the meantime (Empresas → Contas sem clínica)
+  const checkAgain = async () => {
+    setChecking(true);
+    await queryClient.refetchQueries({ queryKey: ["/api/user"] });
+    setChecking(false);
+    if (queryClient.getQueryData<AuthUser>(["/api/user"])?.activeCompany) navigate("/");
+  };
 
   if (isLoading) {
     return (
@@ -86,6 +98,12 @@ export default function SelectCompanyPage() {
           )}
 
           <div className="mt-8 flex flex-wrap justify-center gap-3">
+            {user.companies.length === 0 && (
+              <button type="button" className={cpButton.primary} onClick={checkAgain} disabled={checking}>
+                {checking ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" aria-hidden="true" />}
+                Atualizar
+              </button>
+            )}
             {user.isPlatformAdmin && (
               <Link href="/admin/empresas" className={cpButton.primary}>
                 <Settings2 className="h-4 w-4" aria-hidden="true" />

@@ -9,7 +9,7 @@ import { storage } from "./storage";
 import { User as SelectUser } from "@shared/schema";
 import { bearerSessionBridge, companyContext, requireCompany } from "./middleware/auth-guards";
 import { applyPendingInvites } from "./lib/access-invites";
-import { resolveCompanyContext, upsertMembership, userPayload } from "./lib/companies";
+import { ensurePsychologistProfileFor, resolveCompanyContext, upsertMembership, userPayload } from "./lib/companies";
 
 declare global {
   namespace Express {
@@ -56,22 +56,7 @@ declare module "express-session" {
  */
 async function ensurePsychologistProfile(req: Request) {
   if (!req.user || req.user.role !== "psychologist" || !req.companyId) return;
-  const companyId = req.companyId;
-  const existingProfile = await storage.getPsychologistByUserId(companyId, req.user.id);
-  if (existingProfile) return;
-  const newProfile = await storage.createPsychologist(companyId, {
-    userId: req.user.id,
-    specialization: null,
-    bio: null,
-    hourlyRate: 0,
-  });
-  // Fix any existing appointments/bookings that were saved with psychologistId=0
-  // (caused by missing profile at creation time)
-  const allAppointments = await storage.getAllAppointments(companyId);
-  const orphaned = allAppointments.filter(a => a.psychologistId === 0);
-  for (const appt of orphaned) {
-    await storage.updateAppointment(companyId, appt.id, { psychologistId: newProfile.id });
-  }
+  await ensurePsychologistProfileFor(req.companyId, req.user.id);
 }
 
 export function setupAuth(app: Express) {

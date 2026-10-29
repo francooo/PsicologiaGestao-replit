@@ -44,3 +44,25 @@ export function adminResultMessage(res: AddAdminResult | null) {
     ? 'A conta já existia e agora administra a empresa.'
     : 'E-mail pré-autorizado: no primeiro acesso a pessoa já entra como administradora.';
 }
+
+/** Accounts without an active company (Empresas → Sem clínica). */
+export interface UnlinkedAccount {
+  id: number;
+  fullName: string;
+  email: string;
+  avatarUrl: string | null;
+  status: string;
+  createdAt: string | null;
+  viaGoogle: boolean;
+  lastCompanyName: string | null;
+}
+
+export type UnlinkedFilter = 'waiting' | 'inactive';
+
+export const UNLINKED_KEY = ['/api/platform/unlinked-accounts'];
+
+export const useUnlinkedAccounts = (status: UnlinkedFilter) =>
+  useQuery({
+    queryKey: [...UNLINKED_KEY, status],
+    queryFn: () => api<UnlinkedAccount[]>(`/api/platform/unlinked-accounts?status=${status}`),
+  });

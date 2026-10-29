@@ -35,6 +35,9 @@ export async function runStartupMigrations() {
       CREATE UNIQUE INDEX IF NOT EXISTS access_invites_company_email_idx
         ON access_invites (COALESCE(company_id, 0), lower(email))
     `);
+    // Sign-up date (Contas sem clínica); accounts that already exist stay without one
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at timestamp`);
+    await pool.query(`ALTER TABLE users ALTER COLUMN created_at SET DEFAULT now()`);
     await migrateCompanies();
   } catch (error) {
     log(`startup migration failed: ${(error as Error).message}`);

@@ -20,6 +20,8 @@ export const users = pgTable("users", {
   googleId: text("google_id").unique(),
   avatarUrl: text("avatar_url"),
   birthDate: date("birth_date"),
+  // Null for accounts created before the column existed
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({

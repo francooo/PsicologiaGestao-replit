@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
-import { Building2, Check, Settings2 } from 'lucide-react-native';
+import { Building2, Check, RefreshCw, Settings2 } from 'lucide-react-native';
 
 import { AuthShell } from '@/components/brand/AuthShell';
 import { AppText } from '@/components/ui/AppText';
@@ -16,8 +16,9 @@ import { toast } from '@/utils/toast';
 
 /** Logged in without an active company: pick one, or learn there is none yet. */
 export default function SelectCompanyScreen() {
-  const { user, switchCompany, signOut } = useAuth();
+  const { user, switchCompany, signOut, refreshUser } = useAuth();
   const [pendingId, setPendingId] = useState<number | null>(null);
+  const [checking, setChecking] = useState(false);
   const companies = user?.companies ?? [];
 
   const choose = async (companyId: number) => {
@@ -35,6 +36,20 @@ export default function SelectCompanyScreen() {
     router.replace('/');
   };
 
+  // Someone may have linked the account in the meantime (Empresas → Sem clínica)
+  const checkAgain = async () => {
+    setChecking(true);
+    try {
+      const me = await refreshUser();
+      if (me.activeCompany) router.replace('/');
+      else toast.info('Ainda sem clínica', 'Assim que alguém vincular sua conta, toque em Atualizar de novo.');
+    } catch (e: any) {
+      toast.error('Não foi possível atualizar', e?.message);
+    } finally {
+      setChecking(false);
+    }
+  };
+
   if (companies.length === 0) {
     return (
       <AuthShell title="Nenhuma clínica vinculada">
@@ -42,6 +57,13 @@ export default function SelectCompanyScreen() {
           icon={Building2}
           title="Você ainda não faz parte de uma clínica"
           description={`Peça ao administrador da sua clínica um convite para o e-mail ${user?.email ?? ''}.`}
+        />
+        <Button
+          title="Atualizar"
+          icon={<RefreshCw size={18} color={colors.onPrimary} />}
+          loading={checking}
+          onPress={checkAgain}
+          style={styles.signOut}
         />
         {user?.isPlatformAdmin && <ManageCompaniesButton />}
         <Button title="Sair" variant="outline" onPress={signOut} style={styles.signOut} />

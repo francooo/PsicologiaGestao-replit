@@ -4,6 +4,7 @@ import { accessInvites, companies, companyMemberships, users, DEFAULT_COMPANY_SL
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { normalizeEmail } from "./access-invites";
+import { storage } from "../storage";
 
 declare module "express-session" {
   interface SessionData {
@@ -67,6 +68,28 @@ export async function upsertMembership(userId: number, companyId: number, role: 
       target: [companyMemberships.userId, companyMemberships.companyId],
       set: { role, status: "active" },
     });
+}
+
+/**
+ * A psychologist needs a profile in each company she works in. Created on login and when the
+ * platform admin links an account, so the agenda works without logging in again.
+ */
+export async function ensurePsychologistProfileFor(companyId: number, userId: number) {
+  const existingProfile = await storage.getPsychologistByUserId(companyId, userId);
+  if (existingProfile) return;
+  const newProfile = await storage.createPsychologist(companyId, {
+    userId,
+    specialization: null,
+    bio: null,
+    hourlyRate: 0,
+  });
+  // Fix any existing appointments/bookings that were saved with psychologistId=0
+  // (caused by missing profile at creation time)
+  const allAppointments = await storage.getAllAppointments(companyId);
+  const orphaned = allAppointments.filter(a => a.psychologistId === 0);
+  for (const appt of orphaned) {
+    await storage.updateAppointment(companyId, appt.id, { psychologistId: newProfile.id });
+  }
 }
 
 const adminColumns = {

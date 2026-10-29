@@ -14,8 +14,8 @@ type AuthContextValue = {
   signIn: (username: string, password: string) => Promise<void>;
   signInWithToken: (token: string) => Promise<void>;
   signOut: () => Promise<void>;
-  /** Re-reads /api/user (after profile/photo changes). */
-  refreshUser: () => Promise<void>;
+  /** Re-reads /api/user (after profile/photo changes) and returns it. */
+  refreshUser: () => Promise<User>;
   /** Makes another company active; cached data belongs to the old one, so it is dropped. */
   switchCompany: (companyId: number) => Promise<void>;
   hasRole: (...roles: Role[]) => boolean;
@@ -85,7 +85,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearSession]);
 
   const refreshUser = useCallback(async () => {
-    setUser(await authApi.me());
+    const me = await authApi.me();
+    setUser(me);
+    return me;
   }, []);
 
   const switchCompany = useCallback(
