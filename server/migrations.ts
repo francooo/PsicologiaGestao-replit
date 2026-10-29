@@ -39,6 +39,7 @@ export async function runStartupMigrations() {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at timestamp`);
     await pool.query(`ALTER TABLE users ALTER COLUMN created_at SET DEFAULT now()`);
     await migrateCompanies();
+    await migrateAgent();
   } catch (error) {
     log(`startup migration failed: ${(error as Error).message}`);
     throw error;
@@ -190,6 +191,48 @@ async function migrateCompanies() {
       }
     });
   }
+}
+
+/** Assistente (agente de IA): conversations, the model transcript and pending actions. */
+async function migrateAgent() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS agent_conversations (
+      id serial PRIMARY KEY,
+      company_id integer NOT NULL REFERENCES companies(id),
+      user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at timestamp NOT NULL DEFAULT now(),
+      updated_at timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS agent_conversations_user_idx ON agent_conversations (user_id, company_id)`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS agent_messages (
+      id serial PRIMARY KEY,
+      conversation_id integer NOT NULL REFERENCES agent_conversations(id) ON DELETE CASCADE,
+      role text NOT NULL,
+      content text NOT NULL DEFAULT '',
+      tool_calls jsonb,
+      tool_call_id text,
+      action_id integer,
+      via_audio boolean NOT NULL DEFAULT false,
+      created_at timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS agent_messages_conversation_idx ON agent_messages (conversation_id, id)`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS agent_actions (
+      id serial PRIMARY KEY,
+      company_id integer NOT NULL REFERENCES companies(id),
+      user_id integer NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      conversation_id integer NOT NULL REFERENCES agent_conversations(id) ON DELETE CASCADE,
+      type text NOT NULL,
+      payload jsonb NOT NULL,
+      status text NOT NULL DEFAULT 'pending',
+      result jsonb,
+      created_at timestamp NOT NULL DEFAULT now(),
+      resolved_at timestamp
+    )
+  `);
 }
 
 type Client = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };

@@ -697,6 +697,46 @@ export const commissionItems = pgTable("commission_items", {
 
 export type CommissionItem = typeof commissionItems.$inferSelect;
 
+// ─── Assistente (agente de IA) ────────────────────────────────────────────────
+// One conversation per user per company is "current"; older ones are kept.
+export const agentConversations = pgTable("agent_conversations", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// The model's transcript: user/assistant text plus tool calls and results (role "tool")
+export const agentMessages = pgTable("agent_messages", {
+  id: serial("id").primaryKey(),
+  conversationId: integer("conversation_id").notNull().references(() => agentConversations.id, { onDelete: "cascade" }),
+  role: text("role").notNull(), // user | assistant | tool
+  content: text("content").notNull().default(""),
+  toolCalls: jsonb("tool_calls"),
+  toolCallId: text("tool_call_id"),
+  actionId: integer("action_id"),
+  viaAudio: boolean("via_audio").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// Writes the assistant proposes; nothing happens until the user confirms
+export const agentActions = pgTable("agent_actions", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  conversationId: integer("conversation_id").notNull().references(() => agentConversations.id, { onDelete: "cascade" }),
+  type: text("type").notNull(), // room_booking.create | room_booking.cancel
+  payload: jsonb("payload").notNull(),
+  status: text("status").notNull().default("pending"), // pending | confirmed | cancelled | expired | failed
+  result: jsonb("result"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  resolvedAt: timestamp("resolved_at"),
+});
+
+export type AgentMessage = typeof agentMessages.$inferSelect;
+export type AgentAction = typeof agentActions.$inferSelect;
+
 // Export all patient record schemas
 export * from "./patient-schema";
 

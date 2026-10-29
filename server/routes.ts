@@ -21,6 +21,8 @@ import adminPsychologistsRouter from "./routes/admin-psychologists";
 import adminAccessRouter from "./routes/admin-access";
 import companiesRouter from "./routes/companies";
 import platformRouter from "./routes/platform";
+import agentRouter from "./routes/agent";
+import { BookingError, createRoomBookingChecked } from "./lib/room-bookings";
 import { publicClinic } from "./lib/companies";
 import careTemplatesRouter from "./routes/care-templates";
 import careDispatchRouter from "./routes/care-dispatch";
@@ -1079,27 +1081,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/room-bookings", requireAuth, async (req, res) => {
     try {
       const data = insertRoomBookingSchema.parse(req.body);
-      const foreign = await foreignReference(req.companyId!, data);
-      if (foreign) return res.status(400).json({ message: foreign });
-
-      // Check if room is available
-      const isRoomAvailable = await storage.checkRoomAvailability(req.companyId!,
-        data.roomId,
-        new Date(data.date),
-        data.startTime,
-        data.endTime
-      );
-
-      if (!isRoomAvailable) {
-        return res.status(409).json({ message: "Room is not available for the specified time" });
-      }
-
-      const booking = await storage.createRoomBooking(req.companyId!, data);
+      const booking = await createRoomBookingChecked(req.companyId!, data);
       res.status(201).json(booking);
     } catch (error) {
       if (error instanceof ZodError) {
         return res.status(400).json(handleZodError(error));
       }
+      if (error instanceof BookingError) return res.status(error.status).json({ message: error.message });
       res.status(500).json({ message: "Error creating room booking" });
     }
   });
@@ -1651,6 +1639,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Platform (super) admin: manages the companies themselves
   app.use("/api/platform", platformRouter);
+  app.use("/api/agent", agentRouter);
 
   // Care module — public response routes (no auth required) — MUST be mounted FIRST
   // so that /api/care/respond/:token is reachable before the authenticated dispatch

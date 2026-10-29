@@ -44,6 +44,12 @@
           "cameraPermission": "O ConsultaPsi usa a câmera para fotografar notas fiscais e documentos.",
           "microphonePermission": false
         }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "O ConsultaPsi usa o microfone para você mandar mensagens de voz ao assistente."
+        }
       ]
     ],
     "experiments": {

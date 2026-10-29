@@ -14,18 +14,18 @@ if (!process.env.GROQ_API_KEY) {
   console.warn("GROQ_API_KEY not set. AI summarization and invoice NFS-e image analysis will not work.");
 }
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+export const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 /**
  * Groq retires models periodically (llama-3.3-70b-versatile and llama-4-scout were
  * removed), so the model names come from env vars and can be swapped on Vercel
  * without a code change. Defaults were checked against the Groq model list.
  */
-const GROQ_TEXT_MODEL = process.env.GROQ_TEXT_MODEL || "openai/gpt-oss-120b";
+export const GROQ_TEXT_MODEL = process.env.GROQ_TEXT_MODEL || "openai/gpt-oss-120b";
 const GROQ_VISION_MODEL = process.env.GROQ_VISION_MODEL || "qwen/qwen3.8-27b";
 
 /** Reasoning models spend tokens "thinking" before answering; keep that short. */
-function reasoningOptions(model: string) {
+export function reasoningOptions(model: string) {
   if (model.startsWith("openai/gpt-oss")) return { reasoning_effort: "low" as const };
   // Qwen3 "thinking" would eat the vision model's small output budget
   if (model.startsWith("qwen/qwen3")) return { reasoning_effort: "none" as const };
@@ -33,7 +33,7 @@ function reasoningOptions(model: string) {
 }
 
 /** Logs the real Groq failure (status, code, model) — the user only sees a generic message. */
-function logGroqError(context: string, model: string, error: unknown) {
+export function logGroqError(context: string, model: string, error: unknown) {
   const err = error as { status?: number; error?: { error?: { message?: string; code?: string } }; message?: string };
   console.error(`[${context}] Groq error`, {
     model,

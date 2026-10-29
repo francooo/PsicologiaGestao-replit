@@ -17,6 +17,8 @@ export default function AppLayout() {
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       {/* admin/ has its own Stack (with role guard) and headers */}
       <Stack.Screen name="admin" options={{ headerShown: false }} />
+      {/* The assistant, opened by the floating button over the tabs */}
+      <Stack.Screen name="assistente" options={{ presentation: 'modal', title: 'Assistente' }} />
     </Stack>
   );
 }

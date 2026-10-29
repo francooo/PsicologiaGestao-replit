@@ -27,6 +27,7 @@ import ResponderPage from "@/pages/responder";
 import SelectCompanyPage from "@/pages/select-company";
 import { ProtectedRoute } from "./lib/protected-route";
 import { AuthProvider } from "./hooks/use-auth";
+import { AgentLauncher } from "@/components/agent/AgentLauncher";
 
 const ADMIN = ["admin"];
 
@@ -70,6 +71,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <Router />
+        <AgentLauncher />
         <Toaster />
       </AuthProvider>
     </QueryClientProvider>
