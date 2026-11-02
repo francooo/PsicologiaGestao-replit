@@ -4,11 +4,13 @@ import { db } from '../db';
 import { googleTokens, calendarEvents, appointments } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
 
-// Escopo necessário para ler e escrever eventos no calendário e enviar e-mails
-const SCOPES = [
-  'https://www.googleapis.com/auth/calendar',
-  'https://www.googleapis.com/auth/gmail.send',
-];
+// Único escopo pedido: criar, editar e excluir eventos (é o que a Política de Privacidade
+// declara para a verificação do Google). Convites saem pelo próprio Calendar (sendUpdates).
+const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
+
+// Marca os eventos criados pelo sistema; a listagem só mostra esses (não lemos o resto da agenda)
+const APP_EVENT_TAG = 'consultapsi';
+const appEventProperties = { private: { [APP_EVENT_TAG]: '1' } };
 
 // Redirect URI para o callback do Google Calendar OAuth
 // Usa GOOGLE_REDIRECT_URI se definido, caso contrário constrói a partir do domínio do Replit
@@ -225,6 +227,7 @@ export async function addEventToCalendar(
         reminders: {
           useDefault: true,
         },
+        extendedProperties: appEventProperties,
       },
     });
 
@@ -248,7 +251,9 @@ export async function updateCalendarEvent(
     startDateTime?: string;
     endDateTime?: string;
     attendees?: Array<{ email: string }>;
-  }
+  },
+  // 'all' avisa os convidados (ex.: a paciente de uma reunião remarcada)
+  sendUpdates: 'all' | 'none' = 'none'
 ): Promise<boolean> {
   const calendar = await setupClientForUser(userId);
 
@@ -295,6 +300,7 @@ export async function updateCalendarEvent(
       calendarId: 'primary',
       eventId: eventId,
       requestBody: requestBody,
+      sendUpdates,
     });
 
     return true;
@@ -307,7 +313,11 @@ export async function updateCalendarEvent(
 /**
  * Remove um evento do Google Calendar do usuário
  */
-export async function deleteCalendarEvent(userId: number, eventId: string): Promise<boolean> {
+export async function deleteCalendarEvent(
+  userId: number,
+  eventId: string,
+  sendUpdates: 'all' | 'none' = 'none'
+): Promise<boolean> {
   const calendar = await setupClientForUser(userId);
 
   if (!calendar) {
@@ -318,6 +328,7 @@ export async function deleteCalendarEvent(userId: number, eventId: string): Prom
     await calendar.events.delete({
       calendarId: 'primary',
       eventId: eventId,
+      sendUpdates,
     });
 
     return true;
@@ -328,7 +339,7 @@ export async function deleteCalendarEvent(userId: number, eventId: string): Prom
 }
 
 /**
- * Lista os próximos eventos do calendário do usuário
+ * Lista os próximos eventos criados pelo sistema na agenda do usuário
  */
 export async function listUpcomingEvents(userId: number, maxResults = 10): Promise<any[] | null> {
   const calendar = await setupClientForUser(userId);
@@ -344,6 +355,7 @@ export async function listUpcomingEvents(userId: number, maxResults = 10): Promi
       maxResults: maxResults,
       singleEvents: true,
       orderBy: 'startTime',
+      privateExtendedProperty: [`${APP_EVENT_TAG}=1`],
     });
 
     return response.data.items || [];
@@ -403,21 +415,6 @@ export function getAppointmentSchedulingLink(
 }
 
 /**
- * Retorna um cliente OAuth2 configurado com os tokens do usuário
- */
-export async function getUserOAuthClient(userId: number): Promise<OAuth2Client | null> {
-  const tokens = await getUserTokens(userId);
-  if (!tokens) return null;
-  const client = new OAuth2Client(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    REDIRECT_URI
-  );
-  client.setCredentials(tokens);
-  return client;
-}
-
-/**
  * Cria um evento de reunião no Google Calendar com link do Google Meet
  */
 export async function createMeetingEvent(
@@ -427,7 +424,8 @@ export async function createMeetingEvent(
     description?: string;
     startDateTime: string;
     endDateTime: string;
-    attendeeEmail?: string;
+    /** Convidada que recebe o convite do Google Calendar (com o link do Meet) */
+    inviteEmail?: string;
     requestId: string;
   }
 ): Promise<{ googleEventId: string; meetLink: string | null } | null> {
@@ -436,11 +434,12 @@ export async function createMeetingEvent(
 
   try {
     const attendees: Array<{ email: string }> = [];
-    if (event.attendeeEmail) attendees.push({ email: event.attendeeEmail });
+    if (event.inviteEmail) attendees.push({ email: event.inviteEmail });
 
     const response = await calendar.events.insert({
       calendarId: 'primary',
       conferenceDataVersion: 1,
+      sendUpdates: attendees.length > 0 ? 'all' : 'none',
       requestBody: {
         summary: event.summary,
         description: event.description || 'Sessão de psicologia — ConsultaPsi',
@@ -466,6 +465,7 @@ export async function createMeetingEvent(
             { method: 'popup', minutes: 10 },
           ],
         },
+        extendedProperties: appEventProperties,
       },
     });
 
@@ -481,16 +481,6 @@ export async function createMeetingEvent(
     console.error('Erro ao criar evento de reunião:', error);
     return null;
   }
-}
-
-/**
- * Retorna um cliente Gmail configurado com os tokens do usuário.
- * Lança GoogleTokenExpiredError se o token estiver expirado.
- */
-export async function getGmailClient(userId: number) {
-  const oauthClient = await getUserOAuthClient(userId);
-  if (!oauthClient) return null;
-  return google.gmail({ version: 'v1', auth: oauthClient });
 }
 
 /**
@@ -510,94 +500,26 @@ export function isGoogleTokenExpired(error: unknown): boolean {
 }
 
 /**
- * Envia o link do Google Meet para a paciente via Gmail API
+ * Convida a paciente para o evento da reunião: o próprio Google Calendar envia o convite
+ * por e-mail com o link do Meet (sem Gmail). Lança o erro de token expirado para a rota.
  */
-export async function sendMeetLinkEmail(params: {
-  userId: number;
-  patientName: string;
-  patientEmail: string;
-  psychologistName: string;
-  psychologistEmail: string;
-  meetLink: string;
-  scheduledAt: Date;
-  durationMinutes: number;
-}): Promise<boolean> {
+export async function inviteToMeetingEvent(userId: number, eventId: string, email: string): Promise<boolean> {
+  const calendar = await setupClientForUser(userId);
+  if (!calendar) return false;
+
   try {
-    const gmail = await getGmailClient(params.userId);
-    if (!gmail) return false;
-
-    const dataHora = params.scheduledAt.toLocaleString('pt-BR', {
-      timeZone: 'America/Sao_Paulo',
-      weekday: 'long',
-      day: '2-digit',
-      month: 'long',
-      hour: '2-digit',
-      minute: '2-digit',
+    const current = await calendar.events.get({ calendarId: 'primary', eventId });
+    const others = (current.data.attendees ?? []).filter((a) => a.email?.toLowerCase() !== email.toLowerCase());
+    await calendar.events.patch({
+      calendarId: 'primary',
+      eventId,
+      sendUpdates: 'all',
+      requestBody: { attendees: [...others, { email }] },
     });
-
-    const emailBody = `
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"></head>
-<body style="font-family: 'DM Sans', Arial, sans-serif; max-width: 560px; margin: 0 auto; color: #1f2937; background: #f9fafb; padding: 20px;">
-  <div style="background: #0D9488; padding: 24px; border-radius: 12px 12px 0 0; text-align: center;">
-    <h1 style="color: white; margin: 0; font-size: 22px; font-weight: 700;">ConsultaPsi</h1>
-    <p style="color: #ccfbf1; margin: 4px 0 0; font-size: 14px;">Sua sessão está confirmada</p>
-  </div>
-  <div style="background: white; padding: 32px; border-radius: 0 0 12px 12px; border: 1px solid #e5e7eb; border-top: none;">
-    <p style="font-size: 16px; margin: 0 0 16px;">Olá, <strong>${params.patientName}</strong>!</p>
-    <p style="color: #6b7280; margin: 0 0 24px;">Sua sessão com <strong>${params.psychologistName}</strong> está confirmada. Use o link abaixo para participar:</p>
-    
-    <div style="background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 8px; padding: 16px; margin: 0 0 24px;">
-      <p style="margin: 0 0 8px; font-size: 14px; color: #0f766e;"><strong>📅 Data e horário:</strong> ${dataHora}</p>
-      <p style="margin: 0; font-size: 14px; color: #0f766e;"><strong>⏱️ Duração:</strong> ${params.durationMinutes} minutos</p>
-    </div>
-    
-    <div style="text-align: center; margin: 32px 0;">
-      <a href="${params.meetLink}" 
-         style="background: #0D9488; color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px; display: inline-block;">
-        🎥 Entrar na Sessão
-      </a>
-    </div>
-    
-    <p style="font-size: 13px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 16px; margin: 0;">
-      Ou acesse pelo link: <a href="${params.meetLink}" style="color: #0D9488;">${params.meetLink}</a><br>
-      <em>Não é necessário ter conta Google para participar.</em>
-    </p>
-  </div>
-</body>
-</html>`;
-
-    const subjectEncoded = Buffer.from(
-      `Sua sessão está agendada — ${dataHora}`
-    ).toString('base64');
-
-    const rawMessage = [
-      `To: ${params.patientEmail}`,
-      `From: ${params.psychologistName} <${params.psychologistEmail}>`,
-      `Subject: =?utf-8?B?${subjectEncoded}?=`,
-      'MIME-Version: 1.0',
-      'Content-Type: text/html; charset=utf-8',
-      '',
-      emailBody,
-    ].join('\r\n');
-
-    const encodedMessage = Buffer.from(rawMessage)
-      .toString('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
-
-    await gmail.users.messages.send({
-      userId: 'me',
-      requestBody: { raw: encodedMessage },
-    });
-
     return true;
   } catch (error) {
-    // Re-throw token-expiry errors so the route layer can map them to 401
     if (isGoogleTokenExpired(error)) throw error;
-    console.error('Erro ao enviar e-mail do Meet:', error);
+    console.error('Erro ao convidar a paciente para a reunião:', error);
     return false;
   }
 }

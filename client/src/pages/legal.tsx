@@ -13,7 +13,7 @@ const UPDATED = "2 de novembro de 2026";
 function LegalShell({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
   useEffect(() => {
     const previous = document.title;
-    document.title = `${title} – Gestão para Clínicas`;
+    document.title = `${title} – ConsultaPsi`;
     window.scrollTo(0, 0);
     return () => {
       document.title = previous;
@@ -96,7 +96,7 @@ export function PrivacyPage() {
   return (
     <LegalShell title="Política de Privacidade" icon={<ShieldCheck className="h-6 w-6" aria-hidden="true" />}>
       <p>
-        Esta Política explica como o Gestão para Clínicas ("Sistema"), operado por {OPERATOR}, inscrito no CNPJ {CNPJ}, com sede em{" "}
+        Esta Política explica como o ConsultaPsi ("Sistema"), operado por {OPERATOR}, inscrito no CNPJ {CNPJ}, com sede em{" "}
         {CITY} ("nós"), coleta, usa, armazena e protege dados pessoais, em conformidade com a Lei Geral de Proteção de Dados (Lei nº
         13.709/2018 – LGPD).
       </p>
@@ -238,7 +238,7 @@ export function TermsPage() {
   return (
     <LegalShell title="Termos de Uso" icon={<FileText className="h-6 w-6" aria-hidden="true" />}>
       <p>
-        Estes Termos regulam o uso do Gestão para Clínicas ("Sistema"), oferecido por {OPERATOR}, CNPJ {CNPJ}. Ao acessar o Sistema, você
+        Estes Termos regulam o uso do ConsultaPsi ("Sistema"), oferecido por {OPERATOR}, CNPJ {CNPJ}. Ao acessar o Sistema, você
         concorda com estes Termos e com a{" "}
         <Link href="/privacidade" className="text-cp-action hover:underline">
           Política de Privacidade

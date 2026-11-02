@@ -8,11 +8,41 @@ if (!process.env.RESEND_API_KEY) {
 }
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+// Sender of the system's e-mails. onboarding@resend.dev only delivers to the Resend account owner:
+// set EMAIL_FROM to an address on a domain verified at resend.com/domains to reach anyone.
+const EMAIL_FROM = process.env.EMAIL_FROM || 'ConsultaPsi <onboarding@resend.dev>';
+
+/** Sends one HTML e-mail through Resend; returns false (and logs) when it could not be sent. */
+export async function sendAppEmail(params: { to: string; subject: string; html: string; replyTo?: string; fromName?: string }) {
+  const from = params.fromName ? `${params.fromName} <${EMAIL_FROM.match(/<(.+)>/)?.[1] ?? EMAIL_FROM}>` : EMAIL_FROM;
+  try {
+    const { error } = await resend.emails.send({
+      from,
+      to: [params.to],
+      subject: params.subject,
+      html: params.html,
+      replyTo: params.replyTo,
+    });
+    if (error) {
+      console.error('sendAppEmail: Resend refused the e-mail:', error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('sendAppEmail error:', error);
+    return false;
+  }
+}
+
 // Get the public URL for the application
-const getAppUrl = () => {
-  // First check for explicitly set APP_URL
-  if (process.env.APP_URL) {
-    return process.env.APP_URL;
+export const getAppUrl = () => {
+  // First check for explicitly set APP_URL / BASE_URL
+  if (process.env.APP_URL || process.env.BASE_URL) {
+    return (process.env.APP_URL || process.env.BASE_URL)!.replace(/\/+$/, '');
+  }
+  // Production domain Vercel exposes to every deployment
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
   }
   // Use Replit's dev domain if available
   if (process.env.REPLIT_DEV_DOMAIN) {
@@ -43,7 +73,7 @@ export const sendPasswordResetEmail = async (user: User, resetToken: string) => 
     console.log('📧 Enviando email para:', user.email);
 
     const { data, error } = await resend.emails.send({
-      from: 'ConsultaPsi <onboarding@resend.dev>',
+      from: EMAIL_FROM,
       to: [user.email],
       subject: 'Recuperação de Senha - ConsultaPsi',
       html: `
@@ -119,7 +149,7 @@ export const sendPasswordResetEmail = async (user: User, resetToken: string) => 
     console.log('📨 Detalhes do envio:', {
       to: user.email,
       messageId: data?.id,
-      from: 'ConsultaPsi <onboarding@resend.dev>',
+      from: EMAIL_FROM,
       timestamp: new Date().toISOString()
     });
 

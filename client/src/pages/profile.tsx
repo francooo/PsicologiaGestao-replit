@@ -179,7 +179,9 @@ export default function ProfilePage() {
                         <h3 className="font-semibold text-cp-ink">Google Calendar</h3>
                         {!isLoadingStatus && <StatusBadge label={connected ? "Conectado" : "Não conectado"} tone={connected ? "success" : "neutral"} />}
                       </div>
-                      <p className="text-sm text-cp-muted">Agenda, links do Google Meet e convites por e-mail</p>
+                      <p className="text-sm text-cp-muted">
+                        Ao conectar, as reuniões criadas no sistema vão para a sua agenda Google, com link do Meet e convite para a paciente
+                      </p>
                     </div>
                   </div>
 
@@ -198,11 +200,16 @@ export default function ProfilePage() {
 
                 {connected ? (
                   <div className="mt-4 space-y-4">
-                    <InfoBanner variant="success" title="Sincronização ativa">
-                      Seus agendamentos são sincronizados automaticamente com o seu Google Calendar.
+                    <InfoBanner variant="success" title="Agenda conectada">
+                      O sistema só cria, edita e exclui os eventos das suas reuniões; o resto da sua agenda não é lido. Ao desconectar,
+                      apagamos o acesso guardado. Você também pode remover o acesso em{" "}
+                      <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer" className="underline">
+                        myaccount.google.com/permissions
+                      </a>
+                      .
                     </InfoBanner>
                     <div>
-                      <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-cp-muted">Próximos eventos</h4>
+                      <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-cp-muted">Próximos eventos criados pelo sistema</h4>
                       {isLoadingEvents ? (
                         <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-cp-action" /></div>
                       ) : googleCalendarEvents && googleCalendarEvents.length > 0 ? (
@@ -225,7 +232,7 @@ export default function ProfilePage() {
                 ) : (
                   !isLoadingStatus && (
                     <InfoBanner variant="info" className="mt-4">
-                      Sem a conexão não é possível gerar links do Google Meet nem enviar convites por e-mail nas Reuniões.
+                      Sem a conexão não é possível gerar links do Google Meet nem enviar o convite da reunião para a paciente.
                     </InfoBanner>
                   )
                 )}

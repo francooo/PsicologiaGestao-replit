@@ -13,6 +13,7 @@ import { eq, desc, count, and, or, isNull } from "drizzle-orm";
 import { isValidEmail } from "../lib/validate-email";
 import { generateResponseToken } from "../lib/care-token";
 import { sendCareFormEmail } from "../lib/send-care-email";
+import { getAppUrl } from "../services/email";
 import { z } from "zod";
 import { publicClinic } from "../lib/companies";
 
@@ -205,9 +206,8 @@ router.post("/patients/:patientId/dispatch", async (req, res) => {
       );
     }
 
-    // 11. Send email via Gmail API
-    const appUrl = process.env.APP_URL || `https://${process.env.REPLIT_DEV_DOMAIN}`;
-    const responseUrl = `${appUrl}/responder/${responseToken}`;
+    // 11. Send email (Resend, from the system's address)
+    const responseUrl = `${getAppUrl()}/responder/${responseToken}`;
 
     const emailSent = await sendCareFormEmail({
       psychologistUserId: user.id,
@@ -227,7 +227,7 @@ router.post("/patients/:patientId/dispatch", async (req, res) => {
       return res.json({
         success: true,
         dispatch,
-        warning: "O formulário foi salvo mas o e-mail não pôde ser enviado (Google não conectado). Compartilhe o link manualmente.",
+        warning: "O formulário foi salvo, mas o e-mail não pôde ser enviado. Compartilhe o link com a paciente.",
         responseUrl,
       });
     }

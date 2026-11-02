@@ -1,4 +1,4 @@
-import { getGmailClient, isGoogleTokenExpired } from "../services/google-calendar";
+import { sendAppEmail } from "../services/email";
 
 interface CareDispatchQuestion {
   questionText: string;
@@ -22,12 +22,6 @@ interface SendCareEmailParams {
 
 export async function sendCareFormEmail(params: SendCareEmailParams): Promise<boolean> {
   try {
-    const gmail = await getGmailClient(params.psychologistUserId);
-    if (!gmail) {
-      console.warn("sendCareFormEmail: no Gmail client — user not connected to Google");
-      return false;
-    }
-
     const clinicName = params.clinicName;
     const firstName = params.patientName.split(" ")[0];
 
@@ -122,32 +116,15 @@ export async function sendCareFormEmail(params: SendCareEmailParams): Promise<bo
 </body>
 </html>`;
 
-    const subjectEncoded = Buffer.from(params.subject).toString("base64");
-
-    const rawMessage = [
-      `To: ${params.patientEmail}`,
-      `From: ${params.psychologistName} <${params.psychologistEmail}>`,
-      `Subject: =?utf-8?B?${subjectEncoded}?=`,
-      "MIME-Version: 1.0",
-      "Content-Type: text/html; charset=utf-8",
-      "",
-      bodyHtml,
-    ].join("\r\n");
-
-    const encodedMessage = Buffer.from(rawMessage)
-      .toString("base64")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/, "");
-
-    await gmail.users.messages.send({
-      userId: "me",
-      requestBody: { raw: encodedMessage },
+    // Sent from the system's address in the psychologist's name; replies go to her own e-mail
+    return await sendAppEmail({
+      to: params.patientEmail,
+      subject: params.subject,
+      html: bodyHtml,
+      fromName: params.psychologistName,
+      replyTo: params.psychologistEmail || undefined,
     });
-
-    return true;
   } catch (error) {
-    if (isGoogleTokenExpired(error)) throw error;
     console.error("sendCareFormEmail error:", error);
     return false;
   }

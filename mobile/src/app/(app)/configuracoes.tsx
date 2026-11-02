@@ -22,6 +22,7 @@ import { CompanyCard } from '@/components/profile/CompanyCard';
 import { api } from '@/api/client';
 import { useGoogleStatus } from '@/api/meetings';
 import { useAuth } from '@/auth/AuthProvider';
+import { confirm } from '@/utils/confirm';
 import { appendFile, pickImage } from '@/utils/files';
 import { formatDate } from '@/utils/format';
 import { roleLabels } from '@/utils/status';
@@ -81,6 +82,27 @@ export default function SettingsScreen() {
     } catch {
       toast.error('Erro', 'Não foi possível conectar ao Google Calendar. Tente novamente mais tarde.');
     }
+  };
+
+  const disconnectGoogle = useMutation({
+    mutationFn: () => api('/api/google-calendar/auth', { method: 'DELETE' }),
+    onSuccess: () => {
+      queryClient.setQueryData(['/api/google-calendar/status'], { authenticated: false });
+      queryClient.removeQueries({ queryKey: ['/api/google-calendar/events'] });
+      toast.success('Google Calendar desconectado');
+    },
+    onError: () => toast.error('Erro', 'Não foi possível desconectar o Google Calendar.'),
+  });
+
+  const askDisconnectGoogle = async () => {
+    const ok = await confirm({
+      title: 'Desconectar o Google Calendar?',
+      message:
+        'As novas reuniões ficam sem link do Meet até você conectar de novo. Os eventos que já estão na sua agenda não são apagados.',
+      confirmLabel: 'Desconectar',
+      destructive: true,
+    });
+    if (ok) disconnectGoogle.mutate();
   };
 
   if (!user) return <LoadingState />;
@@ -172,7 +194,7 @@ export default function SettingsScreen() {
               <View style={{ flex: 1 }}>
                 <AppText weight="semibold">Google Calendar</AppText>
                 <AppText variant="caption" tone="muted">
-                  Sincronize seus agendamentos e gere links do Google Meet
+                  Ao conectar, as reuniões criadas no sistema vão para a sua agenda Google, com link do Meet e convite para a paciente
                 </AppText>
               </View>
             </View>
@@ -183,10 +205,10 @@ export default function SettingsScreen() {
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <CheckCircle2 size={18} color={colors.success} />
                   <AppText tone="success" weight="medium">
-                    Conectado — sincronização ativa
+                    Conectado
                   </AppText>
                 </View>
-                <AppText variant="label">Próximos eventos</AppText>
+                <AppText variant="label">Próximos eventos criados pelo sistema</AppText>
                 {events.isLoading ? (
                   <AppText tone="subtle">Carregando eventos...</AppText>
                 ) : !(events.data ?? []).length ? (
@@ -207,6 +229,10 @@ export default function SettingsScreen() {
                   })
                 )}
                 <Button title="Reconectar" variant="ghost" size="sm" onPress={connectGoogle} />
+                <Button title="Desconectar" variant="ghost" size="sm" onPress={askDisconnectGoogle} loading={disconnectGoogle.isPending} />
+                <AppText variant="caption" tone="muted">
+                  Ao desconectar, apagamos o acesso guardado. Você também pode remover em myaccount.google.com/permissions.
+                </AppText>
               </>
             ) : (
               <Button title="Conectar" onPress={connectGoogle} />

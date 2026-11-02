@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { db } from '../db';
-import { meetings, googleTokens, users } from '@shared/schema';
+import { meetings, googleTokens } from '@shared/schema';
 import { patients } from '@shared/patient-schema';
 import { eq, and, gte, lte, desc } from 'drizzle-orm';
 import {
   createMeetingEvent,
-  sendMeetLinkEmail,
+  inviteToMeetingEvent,
   updateCalendarEvent,
   deleteCalendarEvent,
   isGoogleTokenExpired,
@@ -208,6 +208,9 @@ router.post('/', requireAuth, async (req, res) => {
 
     let googleEventId: string | null = null;
     let meetLink: string | null = null;
+    // The patient's invite (with the Meet link) is sent by Google Calendar itself
+    const inviteEmail = body.sendLinkNow && patient.email ? patient.email : undefined;
+    let emailSent = false;
 
     if (hasGoogleCalendar) {
       try {
@@ -216,12 +219,13 @@ router.post('/', requireAuth, async (req, res) => {
           description: body.description,
           startDateTime: scheduledAt.toISOString(),
           endDateTime: endDateTime.toISOString(),
-          attendeeEmail: patient.email || undefined,
+          inviteEmail,
           requestId: `consultapsi-${Date.now()}-${body.patientId}`,
         });
         if (calResult) {
           googleEventId = calResult.googleEventId;
           meetLink = calResult.meetLink;
+          emailSent = !!inviteEmail;
         }
       } catch (googleErr) {
         if (isGoogleTokenExpired(googleErr)) {
@@ -248,47 +252,9 @@ router.post('/', requireAuth, async (req, res) => {
         durationMinutes: body.durationMinutes,
         patientEmail: patient.email ?? null,
         patientName: patient.fullName,
+        linkSentAt: emailSent ? new Date() : null,
       })
       .returning();
-
-    // Send email if requested
-    let emailSent = false;
-    if (body.sendLinkNow && patient.email && meetLink) {
-      const psychUser = await db
-        .select({ fullName: users.fullName, email: users.email })
-        .from(users)
-        .where(eq(users.id, psychologistId));
-      const psych = psychUser[0];
-      try {
-        emailSent = await sendMeetLinkEmail({
-          userId: psychologistId,
-          patientName: patient.fullName,
-          patientEmail: patient.email,
-          psychologistName: psych?.fullName || user.fullName,
-          psychologistEmail: psych?.email || user.email,
-          meetLink,
-          scheduledAt,
-          durationMinutes: body.durationMinutes,
-        });
-      } catch (emailErr) {
-        if (isGoogleTokenExpired(emailErr)) {
-          // Meeting was created — don't fail the whole request, just warn
-          return res.status(201).json({
-            ...meeting,
-            emailSent: false,
-            hasGoogleCalendar,
-            warning: 'GOOGLE_TOKEN_EXPIRED_EMAIL',
-            warningMessage: 'Reunião criada, mas não foi possível enviar o e-mail: token Google expirado. Reconecte sua conta.',
-          });
-        }
-      }
-      if (emailSent) {
-        await db
-          .update(meetings)
-          .set({ linkSentAt: new Date(), updatedAt: new Date() })
-          .where(eq(meetings.id, meeting.id));
-      }
-    }
 
     res.status(201).json({ ...meeting, emailSent, hasGoogleCalendar });
   } catch (error) {
@@ -328,12 +294,18 @@ router.patch('/:id', requireAuth, async (req, res) => {
     if (meeting.googleEventId && (scheduledAt || durationMinutes || title)) {
       try {
         const endDt = new Date(newScheduledAt.getTime() + newDuration * 60000);
-        await updateCalendarEvent(meeting.psychologistId, meeting.googleEventId, {
-          summary: title || meeting.title,
-          description,
-          startDateTime: newScheduledAt.toISOString(),
-          endDateTime: endDt.toISOString(),
-        });
+        // 'all': an invited patient gets the new time by e-mail from Google Calendar
+        await updateCalendarEvent(
+          meeting.psychologistId,
+          meeting.googleEventId,
+          {
+            summary: title || meeting.title,
+            description,
+            startDateTime: newScheduledAt.toISOString(),
+            endDateTime: endDt.toISOString(),
+          },
+          'all'
+        );
       } catch (googleErr) {
         if (isGoogleTokenExpired(googleErr)) {
           return handleGoogleError(res, googleErr);
@@ -432,10 +404,9 @@ router.patch('/:id/notes', requireAuth, async (req, res) => {
   }
 });
 
-// ─── Send link email ──────────────────────────────────────────────────────────
+// ─── Send link (Google Calendar invite) ───────────────────────────────────────
 router.post('/:id/send-link', requireAuth, async (req, res) => {
   try {
-    const user = req.user as { id: number; role: string; email: string; fullName: string };
     const id = parseInt(req.params.id);
 
     const rows = await db.select().from(meetings).where(eq(meetings.id, id));
@@ -445,26 +416,11 @@ router.post('/:id/send-link', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado' });
     }
 
-    if (!meeting.meetLink) return res.status(400).json({ error: 'Sem link do Meet' });
+    if (!meeting.meetLink || !meeting.googleEventId) return res.status(400).json({ error: 'Sem link do Meet' });
     if (!meeting.patientEmail) return res.status(400).json({ error: 'Paciente sem e-mail' });
 
-    const psychUser = await db
-      .select({ fullName: users.fullName, email: users.email })
-      .from(users)
-      .where(eq(users.id, meeting.psychologistId));
-    const psych = psychUser[0];
-
     try {
-      const sent = await sendMeetLinkEmail({
-        userId: meeting.psychologistId,
-        patientName: meeting.patientName || 'Paciente',
-        patientEmail: meeting.patientEmail,
-        psychologistName: psych?.fullName || user.fullName,
-        psychologistEmail: psych?.email || user.email,
-        meetLink: meeting.meetLink,
-        scheduledAt: meeting.scheduledAt,
-        durationMinutes: meeting.durationMinutes,
-      });
+      const sent = await inviteToMeetingEvent(meeting.psychologistId, meeting.googleEventId, meeting.patientEmail);
 
       if (sent) {
         await db
@@ -500,7 +456,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
 
     if (meeting.googleEventId) {
       try {
-        await deleteCalendarEvent(meeting.psychologistId, meeting.googleEventId);
+        await deleteCalendarEvent(meeting.psychologistId, meeting.googleEventId, 'all');
       } catch (googleErr) {
         if (isGoogleTokenExpired(googleErr)) {
           // Log but don't block cancellation
