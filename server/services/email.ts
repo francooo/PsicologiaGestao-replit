@@ -1,5 +1,6 @@
 
 import { Resend } from 'resend';
+import nodemailer, { type Transporter } from 'nodemailer';
 import { User } from '@shared/schema';
 
 // Initialize Resend with API key
@@ -12,8 +13,36 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 // set EMAIL_FROM to an address on a domain verified at resend.com/domains to reach anyone.
 const EMAIL_FROM = process.env.EMAIL_FROM || 'ConsultaPsi <onboarding@resend.dev>';
 
-/** Sends one HTML e-mail through Resend; returns false (and logs) when it could not be sent. */
+// Without a domain of our own: a Gmail account dedicated to the system (SMTP_USER) with an
+// app password (SMTP_PASS). When both are set, every e-mail goes through it instead of Resend.
+const smtpConfigured = () => !!(process.env.SMTP_USER && process.env.SMTP_PASS);
+let smtp: Transporter | null = null;
+const smtpTransport = () =>
+  (smtp ??= nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+  }));
+
+/** Sends one HTML e-mail (Gmail SMTP when configured, otherwise Resend); returns false (and logs) when it could not be sent. */
 export async function sendAppEmail(params: { to: string; subject: string; html: string; replyTo?: string; fromName?: string }) {
+  if (smtpConfigured()) {
+    try {
+      await smtpTransport().sendMail({
+        from: { name: params.fromName || 'ConsultaPsi', address: process.env.SMTP_USER! },
+        to: params.to,
+        subject: params.subject,
+        html: params.html,
+        replyTo: params.replyTo,
+      });
+      return true;
+    } catch (error) {
+      console.error('sendAppEmail: SMTP refused the e-mail:', error);
+      return false;
+    }
+  }
+
   const from = params.fromName ? `${params.fromName} <${EMAIL_FROM.match(/<(.+)>/)?.[1] ?? EMAIL_FROM}>` : EMAIL_FROM;
   try {
     const { error } = await resend.emails.send({
@@ -72,11 +101,8 @@ export const sendPasswordResetEmail = async (user: User, resetToken: string) => 
 
     console.log('📧 Enviando email para:', user.email);
 
-    const { data, error } = await resend.emails.send({
-      from: EMAIL_FROM,
-      to: [user.email],
-      subject: 'Recuperação de Senha - ConsultaPsi',
-      html: `
+    const subject = 'Recuperação de Senha - ConsultaPsi';
+    const html = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <div style="text-align: center; margin-bottom: 30px;">
             <h1 style="color: #0097FB; margin: 0; font-size: 28px;">ConsultaPsi</h1>
@@ -122,8 +148,15 @@ export const sendPasswordResetEmail = async (user: User, resetToken: string) => 
             </p>
           </div>
         </div>
-      `
-    });
+      `;
+
+    if (smtpConfigured()) {
+      if (!(await sendAppEmail({ to: user.email, subject, html }))) throw new Error('Falha no envio do email via SMTP');
+      console.log('✅ Email de recuperação enviado via SMTP');
+      return { id: 'smtp', email: user.email };
+    }
+
+    const { data, error } = await resend.emails.send({ from: EMAIL_FROM, to: [user.email], subject, html });
 
     if (error) {
       console.error('❌ Erro detalhado do Resend:', error);
