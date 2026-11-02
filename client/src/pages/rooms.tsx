@@ -5,6 +5,7 @@ import { useForm, type UseFormReturn } from "react-hook-form";
 import { z } from "zod";
 import { useAuth } from "@/hooks/use-auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { calendarSyncNote, type CalendarSync } from "@/lib/calendar-sync";
 import { useToast } from "@/hooks/use-toast";
 import { insertRoomSchema, insertRoomBookingSchema } from "@shared/schema";
 import Sidebar from "@/components/sidebar";
@@ -316,11 +317,11 @@ export default function Rooms() {
       });
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (saved: { googleCalendar?: CalendarSync }) => {
       queryClient.invalidateQueries({ queryKey: ['/api/room-bookings'] });
       toast({
         title: "Reserva criada",
-        description: "A reserva foi criada com sucesso.",
+        description: calendarSyncNote(saved?.googleCalendar) ?? "A reserva foi criada com sucesso.",
         variant: "default",
       });
       setIsBookingDialogOpen(false);

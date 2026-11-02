@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { useAuth } from "@/hooks/use-auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { calendarSyncNote, type CalendarSync } from "@/lib/calendar-sync";
 import { useToast } from "@/hooks/use-toast";
 import { insertAppointmentSchema, insertRoomBookingSchema } from "@shared/schema";
 import Sidebar from "@/components/sidebar";
@@ -281,9 +282,9 @@ export default function Appointments() {
       });
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (saved: { googleCalendar?: CalendarSync }) => {
       queryClient.invalidateQueries({ queryKey: ['/api/appointments'] });
-      toast({ title: "Agendamento criado", description: "O agendamento foi criado com sucesso." });
+      toast({ title: "Agendamento criado", description: calendarSyncNote(saved?.googleCalendar) ?? "O agendamento foi criado com sucesso." });
       setIsNewAppointmentDialogOpen(false);
       appointmentForm.reset({
         patientName: "",
@@ -329,9 +330,9 @@ export default function Appointments() {
       });
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (saved: { googleCalendar?: CalendarSync }) => {
       queryClient.invalidateQueries({ queryKey: ['/api/room-bookings'] });
-      toast({ title: "Reserva criada", description: "Sala reservada com sucesso." });
+      toast({ title: "Reserva criada", description: calendarSyncNote(saved?.googleCalendar) ?? "Sala reservada com sucesso." });
       setIsNewBookingDialogOpen(false);
       bookingForm.reset();
     },

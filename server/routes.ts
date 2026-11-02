@@ -541,9 +541,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Into the psychologist's Google Calendar, when she connected it (never fails the request)
-      await syncAppointmentToCalendar(req.companyId!, appointment);
+      const googleCalendar = await syncAppointmentToCalendar(req.companyId!, appointment);
 
-      res.status(201).json(appointment);
+      res.status(201).json({ ...appointment, googleCalendar });
     } catch (error) {
       if (error instanceof ZodError) {
         return res.status(400).json(handleZodError(error));
@@ -665,8 +665,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!updatedAppointment) {
         return res.status(404).json({ message: "Appointment not found" });
       }
-      await syncAppointmentToCalendar(req.companyId!, updatedAppointment);
-      res.json(updatedAppointment);
+      const googleCalendar = await syncAppointmentToCalendar(req.companyId!, updatedAppointment);
+      res.json({ ...updatedAppointment, googleCalendar });
     } catch (error) {
       res.status(500).json({ message: "Error updating appointment" });
     }
@@ -1095,8 +1095,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const data = insertRoomBookingSchema.parse(req.body);
       const booking = await createRoomBookingChecked(req.companyId!, data);
       // Into the psychologist's Google Calendar, when she connected it (never fails the request)
-      await syncRoomBookingToCalendar(req.companyId!, booking);
-      res.status(201).json(booking);
+      const googleCalendar = await syncRoomBookingToCalendar(req.companyId!, booking);
+      res.status(201).json({ ...booking, googleCalendar });
     } catch (error) {
       if (error instanceof ZodError) {
         return res.status(400).json(handleZodError(error));
@@ -1115,8 +1115,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!updatedBooking) {
         return res.status(404).json({ message: "Room booking not found" });
       }
-      await syncRoomBookingToCalendar(req.companyId!, updatedBooking);
-      res.json(updatedBooking);
+      const googleCalendar = await syncRoomBookingToCalendar(req.companyId!, updatedBooking);
+      res.json({ ...updatedBooking, googleCalendar });
     } catch (error) {
       res.status(500).json({ message: "Error updating room booking" });
     }
