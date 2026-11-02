@@ -18,6 +18,7 @@ import { TextField } from '@/components/ui/TextField';
 import { api } from '@/api/client';
 import { usePatients, usePsychologists, useRooms } from '@/api/queries';
 import { useMyPsychologist } from '@/hooks/useMyPsychologist';
+import { savedToast, type CalendarSync } from '@/utils/calendar-sync';
 import { toDateKey } from '@/utils/format';
 import { addMinutes } from '@/utils/time';
 import { toast } from '@/utils/toast';
@@ -87,15 +88,15 @@ export default function NewAppointmentScreen() {
 
   const create = useMutation({
     mutationFn: ({ modality: _m, duration: _d, ...data }: FormData) =>
-      api('/api/appointments', {
+      api<{ googleCalendar?: CalendarSync }>('/api/appointments', {
         method: 'POST',
         // Psychologists: the server enforces their own id
         body: { ...data, psychologistId: isPsychologist ? me?.id ?? data.psychologistId : data.psychologistId },
       }),
-    onSuccess: () => {
+    onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ['/api/appointments'] });
       queryClient.invalidateQueries({ queryKey: ['/api/room-bookings'] });
-      toast.success('Agendamento criado', 'O agendamento foi criado com sucesso.');
+      savedToast('Agendamento criado', 'O agendamento foi criado com sucesso.', saved?.googleCalendar);
       router.back();
     },
     onError: (e: Error) => toast.error('Erro ao agendar', serverErrors[e.message] ?? e.message),

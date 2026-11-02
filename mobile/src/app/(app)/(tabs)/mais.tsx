@@ -22,6 +22,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Card } from '@/components/ui/Card';
 import { Screen } from '@/components/ui/Screen';
 import { CompanyLogo } from '@/components/company/CompanyLogo';
+import { LegalLinks } from '@/components/brand/LegalLinks';
 import { useAuth } from '@/auth/AuthProvider';
 import { confirm } from '@/utils/confirm';
 import { roleLabels } from '@/utils/status';
@@ -153,6 +154,8 @@ export default function MoreScreen() {
           </AppText>
         </Pressable>
       </Card>
+
+      <LegalLinks />
     </Screen>
   );
 }

@@ -13,6 +13,7 @@ import { api } from '@/api/client';
 import { usePsychologists, useRooms } from '@/api/queries';
 import { useAuth } from '@/auth/AuthProvider';
 import { useMyPsychologist } from '@/hooks/useMyPsychologist';
+import { savedToast, type CalendarSync } from '@/utils/calendar-sync';
 import { toDateKey } from '@/utils/format';
 import { addMinutes } from '@/utils/time';
 import { toast } from '@/utils/toast';
@@ -40,13 +41,13 @@ export default function BookRoomScreen() {
 
   const create = useMutation({
     mutationFn: () =>
-      api('/api/room-bookings', {
+      api<{ googleCalendar?: CalendarSync }>('/api/room-bookings', {
         method: 'POST',
         body: { psychologistId, roomId, purpose, date, startTime, endTime },
       }),
-    onSuccess: () => {
+    onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ['/api/room-bookings'] });
-      toast.success('Reserva criada', 'Sala reservada com sucesso.');
+      savedToast('Reserva criada', 'Sala reservada com sucesso.', saved?.googleCalendar);
       router.back();
     },
     onError: (e: Error) => toast.error('Erro ao reservar', e.message),

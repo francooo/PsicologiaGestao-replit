@@ -10,6 +10,7 @@ import { Lock, Mail } from 'lucide-react-native';
 
 import { AuthShell } from '@/components/brand/AuthShell';
 import { GoogleIcon } from '@/components/brand/GoogleIcon';
+import { LegalLinks } from '@/components/brand/LegalLinks';
 import { AppText } from '@/components/ui/AppText';
 import { Button } from '@/components/ui/Button';
 import { TextField } from '@/components/ui/TextField';
@@ -159,6 +160,8 @@ export default function LoginScreen() {
             </Pressable>
           </Link>
         </View>
+
+        <LegalLinks />
       </View>
     </AuthShell>
   );
