@@ -40,6 +40,17 @@ export async function runStartupMigrations() {
     await pool.query(`ALTER TABLE users ALTER COLUMN created_at SET DEFAULT now()`);
     await migrateCompanies();
     await migrateAgent();
+    // Appointment → Google Calendar event (schema's calendarEvents; may predate these migrations)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS calendar_events (
+        id serial PRIMARY KEY,
+        appointment_id integer NOT NULL REFERENCES appointments(id),
+        google_event_id text NOT NULL,
+        user_id integer NOT NULL REFERENCES users(id),
+        last_synced timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS calendar_events_appointment_idx ON calendar_events (appointment_id)`);
   } catch (error) {
     log(`startup migration failed: ${(error as Error).message}`);
     throw error;

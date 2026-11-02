@@ -23,6 +23,7 @@ import companiesRouter from "./routes/companies";
 import platformRouter from "./routes/platform";
 import agentRouter from "./routes/agent";
 import { BookingError, createRoomBookingChecked } from "./lib/room-bookings";
+import { removeAppointmentFromCalendar, syncAppointmentToCalendar } from "./lib/appointment-calendar";
 import { publicClinic } from "./lib/companies";
 import careTemplatesRouter from "./routes/care-templates";
 import careDispatchRouter from "./routes/care-dispatch";
@@ -539,6 +540,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         purpose: `Appointment with ${data.patientName}`
       });
 
+      // Into the psychologist's Google Calendar, when she connected it (never fails the request)
+      await syncAppointmentToCalendar(req.companyId!, appointment);
+
       res.status(201).json(appointment);
     } catch (error) {
       if (error instanceof ZodError) {
@@ -639,6 +643,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         purpose: `Agendamento online com ${appointmentData.patientName}`
       });
 
+      await syncAppointmentToCalendar(companyId, appointment);
+
       res.status(201).json({
         success: true,
         message: "Agendamento enviado com sucesso",
@@ -659,6 +665,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!updatedAppointment) {
         return res.status(404).json({ message: "Appointment not found" });
       }
+      await syncAppointmentToCalendar(req.companyId!, updatedAppointment);
       res.json(updatedAppointment);
     } catch (error) {
       res.status(500).json({ message: "Error updating appointment" });
@@ -668,6 +675,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/appointments/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      if (!(await storage.getAppointment(req.companyId!, id))) {
+        return res.status(404).json({ message: "Appointment not found" });
+      }
+      // Before the delete: the Google event mapping references the appointment
+      await removeAppointmentFromCalendar(id);
       const result = await storage.deleteAppointment(req.companyId!, id);
       if (!result) {
         return res.status(404).json({ message: "Appointment not found" });
