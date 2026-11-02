@@ -3,6 +3,7 @@ import { db } from "../db";
 import { agentActions, agentMessages, agentConversations, commissionItems, type AgentAction } from "@shared/schema";
 import { storage } from "../storage";
 import { BookingError, checkRoomBooking, normalizeTime } from "../lib/room-bookings";
+import { removeRoomBookingFromCalendar, syncRoomBookingToCalendar } from "../lib/calendar-sync";
 import type { AgentContext } from "./context";
 
 /** A proposed action waits this long for the user's click. */
@@ -160,6 +161,7 @@ export async function confirmAction(ctx: AgentContext, id: number) {
       const p = action.payload as BookingPayload;
       const booking = await storage.createRoomBooking(ctx.companyId, await checkBooking(ctx, p));
       await audit(ctx, "agent_room_booking_create", booking.id, p);
+      await syncRoomBookingToCalendar(ctx.companyId, booking);
       const done = await finish("confirmed", { bookingId: booking.id });
       return { action: presentAction(done ?? action), message: await note(action, `Reserva feita: ${p.roomName} para ${p.psychologistName}, ${when(p)}.`) };
     }
@@ -167,6 +169,8 @@ export async function confirmAction(ctx: AgentContext, id: number) {
       const p = action.payload as CancelPayload;
       const inPayout = await db.select({ id: commissionItems.id }).from(commissionItems).where(inArray(commissionItems.bookingId, [p.bookingId]));
       if (inPayout.length) throw new BookingError("Esta reserva já entrou em um repasse e não pode ser cancelada por aqui.", 409);
+      if (!(await storage.getRoomBooking(ctx.companyId, p.bookingId))) throw new BookingError("Essa reserva não existe mais.", 409);
+      await removeRoomBookingFromCalendar(p.bookingId);
       if (!(await storage.deleteRoomBooking(ctx.companyId, p.bookingId))) throw new BookingError("Essa reserva não existe mais.", 409);
       await audit(ctx, "agent_room_booking_cancel", p.bookingId, p);
       const done = await finish("confirmed", { bookingId: p.bookingId });

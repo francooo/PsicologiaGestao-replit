@@ -51,6 +51,15 @@ export async function runStartupMigrations() {
       )
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS calendar_events_appointment_idx ON calendar_events (appointment_id)`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS room_booking_events (
+        id serial PRIMARY KEY,
+        booking_id integer NOT NULL UNIQUE REFERENCES room_bookings(id) ON DELETE CASCADE,
+        google_event_id text NOT NULL,
+        user_id integer NOT NULL REFERENCES users(id),
+        last_synced timestamp NOT NULL DEFAULT now()
+      )
+    `);
   } catch (error) {
     log(`startup migration failed: ${(error as Error).message}`);
     throw error;

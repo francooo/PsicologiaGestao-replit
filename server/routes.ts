@@ -23,7 +23,7 @@ import companiesRouter from "./routes/companies";
 import platformRouter from "./routes/platform";
 import agentRouter from "./routes/agent";
 import { BookingError, createRoomBookingChecked } from "./lib/room-bookings";
-import { removeAppointmentFromCalendar, syncAppointmentToCalendar } from "./lib/appointment-calendar";
+import { removeAppointmentFromCalendar, removeRoomBookingFromCalendar, syncAppointmentToCalendar, syncRoomBookingToCalendar } from "./lib/calendar-sync";
 import { publicClinic } from "./lib/companies";
 import careTemplatesRouter from "./routes/care-templates";
 import careDispatchRouter from "./routes/care-dispatch";
@@ -1094,6 +1094,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const data = insertRoomBookingSchema.parse(req.body);
       const booking = await createRoomBookingChecked(req.companyId!, data);
+      // Into the psychologist's Google Calendar, when she connected it (never fails the request)
+      await syncRoomBookingToCalendar(req.companyId!, booking);
       res.status(201).json(booking);
     } catch (error) {
       if (error instanceof ZodError) {
@@ -1113,6 +1115,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!updatedBooking) {
         return res.status(404).json({ message: "Room booking not found" });
       }
+      await syncRoomBookingToCalendar(req.companyId!, updatedBooking);
       res.json(updatedBooking);
     } catch (error) {
       res.status(500).json({ message: "Error updating room booking" });
@@ -1122,6 +1125,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/room-bookings/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      if (!(await storage.getRoomBooking(req.companyId!, id))) {
+        return res.status(404).json({ message: "Room booking not found" });
+      }
+      await removeRoomBookingFromCalendar(id);
       const result = await storage.deleteRoomBooking(req.companyId!, id);
       if (!result) {
         return res.status(404).json({ message: "Room booking not found" });

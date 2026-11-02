@@ -426,6 +426,15 @@ export const calendarEvents = pgTable("calendar_events", {
   lastSynced: timestamp("last_synced").notNull().defaultNow(),
 });
 
+// Room bookings to Google Calendar mapping (same idea as calendarEvents)
+export const roomBookingEvents = pgTable("room_booking_events", {
+  id: serial("id").primaryKey(),
+  bookingId: integer("booking_id").notNull().unique().references(() => roomBookings.id, { onDelete: "cascade" }),
+  googleEventId: text("google_event_id").notNull(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  lastSynced: timestamp("last_synced").notNull().defaultNow(),
+});
+
 export const insertCalendarEventSchema = createInsertSchema(calendarEvents).pick({
   appointmentId: true,
   googleEventId: true,
