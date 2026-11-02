@@ -6,7 +6,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { AgentPanel } from "./AgentPanel";
 
 // Pages without the logged-in app around them (public links, login, company picker)
-const OUTSIDE_APP = ["/auth", "/auth-page", "/password-recovery", "/reset-password", "/quick-booking", "/responder", "/selecionar-empresa"];
+const OUTSIDE_APP = ["/auth", "/auth-page", "/password-recovery", "/reset-password", "/quick-booking", "/responder", "/selecionar-empresa", "/privacidade", "/termos"];
 
 /** Floating button (bottom right) that opens the assistant, on every page of the app. */
 export function AgentLauncher() {

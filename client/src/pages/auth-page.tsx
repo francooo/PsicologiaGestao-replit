@@ -440,6 +440,15 @@ export default function AuthPage() {
               </>
             )}
           </div>
+          <p className="mt-6 text-center text-sm text-[#5D6670]">
+            <Link href="/privacidade" className="hover:underline">
+              Política de Privacidade
+            </Link>
+            <span className="mx-2" aria-hidden="true">·</span>
+            <Link href="/termos" className="hover:underline">
+              Termos de Uso
+            </Link>
+          </p>
         </section>
 
         {/* Right - reserved for the plant illustration in the background */}

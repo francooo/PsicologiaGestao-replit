@@ -25,6 +25,7 @@ import AdminComissoes from "@/pages/admin/comissoes";
 import AdminEmpresas from "@/pages/admin/empresas";
 import ResponderPage from "@/pages/responder";
 import SelectCompanyPage from "@/pages/select-company";
+import { PrivacyPage, TermsPage } from "@/pages/legal";
 import { ProtectedRoute } from "./lib/protected-route";
 import { AuthProvider } from "./hooks/use-auth";
 import { AgentLauncher } from "@/components/agent/AgentLauncher";
@@ -61,6 +62,8 @@ function Router() {
       <Route path="/reset-password" component={ResetPassword} />
       <Route path="/quick-booking" component={QuickBooking} />
       <Route path="/responder/:token" component={ResponderPage} />
+      <Route path="/privacidade" component={PrivacyPage} />
+      <Route path="/termos" component={TermsPage} />
       <Route component={NotFound} />
     </Switch>
   );
