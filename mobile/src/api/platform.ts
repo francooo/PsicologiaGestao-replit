@@ -23,7 +23,15 @@ export interface PlatformCompanyDetail {
   invites: { id: number; email: string; role: Role; createdAt: string }[];
 }
 
-export type AddAdminResult = { type: 'promoted' | 'invited' } | { type: 'conflict'; message: string };
+export type AddAdminResult = { type: 'promoted' | 'invited'; emailSent?: boolean } | { type: 'conflict'; message: string };
+
+/** Tail of the "admin added" toasts: whether the server could send the invite e-mail. */
+export const inviteEmailNote = (emailSent?: boolean) =>
+  emailSent === undefined
+    ? ''
+    : emailSent
+      ? ' Enviamos um e-mail de convite.'
+      : ' Não foi possível enviar o e-mail de convite: avise a pessoa.';
 
 export const PLATFORM_COMPANIES_KEY = ['/api/platform/companies'];
 export const platformCompanyKey = (id: number) => ['/api/platform/companies', id];
@@ -40,9 +48,11 @@ export const usePlatformCompany = (id: number) =>
 export function adminResultMessage(res: AddAdminResult | null) {
   if (!res) return undefined;
   if (res.type === 'conflict') return res.message;
-  return res.type === 'promoted'
-    ? 'A conta já existia e agora administra a empresa.'
-    : 'E-mail pré-autorizado: no primeiro acesso a pessoa já entra como administradora.';
+  return (
+    (res.type === 'promoted'
+      ? 'A conta já existia e agora administra a empresa.'
+      : 'E-mail pré-autorizado: no primeiro acesso a pessoa já entra como administradora.') + inviteEmailNote(res.emailSent)
+  );
 }
 
 /** Accounts without an active company (Empresas → Sem clínica). */

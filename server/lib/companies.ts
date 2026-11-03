@@ -4,6 +4,7 @@ import { accessInvites, companies, companyMemberships, users, DEFAULT_COMPANY_SL
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { normalizeEmail } from "./access-invites";
+import { sendAdminInviteEmail } from "./admin-invite-email";
 import { storage } from "../storage";
 
 declare module "express-session" {
@@ -102,8 +103,8 @@ const adminColumns = {
 };
 
 export type AddAdminResult =
-  | { type: "promoted"; admin: Record<string, unknown> }
-  | { type: "invited"; invite: { id: number; email: string; role: string; createdAt: Date } }
+  | { type: "promoted"; admin: Record<string, unknown>; emailSent: boolean }
+  | { type: "invited"; invite: { id: number; email: string; role: string; createdAt: Date }; emailSent: boolean }
   | { type: "conflict"; message: string };
 
 /**
@@ -128,7 +129,8 @@ export async function addCompanyAdmin(companyId: number, rawEmail: string, invit
     if (current) return { type: "conflict", message: "Este e-mail já é administrador." };
     await upsertMembership(existing.id, companyId, "admin");
     await db.update(users).set({ status: "active" }).where(eq(users.id, existing.id));
-    return { type: "promoted", admin: { ...existing, status: "active" } };
+    const emailSent = await sendAdminInviteEmail({ companyId, email: existing.email ?? email, hasAccount: true, invitedByUserId });
+    return { type: "promoted", admin: { ...existing, status: "active" }, emailSent };
   }
 
   const sameInvite = and(sql`lower(${accessInvites.email}) = ${email}`, eq(accessInvites.companyId, companyId));
@@ -145,7 +147,8 @@ export async function addCompanyAdmin(companyId: number, rawEmail: string, invit
     .insert(accessInvites)
     .values({ email, role: "admin", companyId, invitedByUserId })
     .returning({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt });
-  return { type: "invited", invite };
+  const emailSent = await sendAdminInviteEmail({ companyId, email, hasAccount: false, invitedByUserId });
+  return { type: "invited", invite, emailSent };
 }
 
 export async function getDefaultCompanyId(): Promise<number | undefined> {

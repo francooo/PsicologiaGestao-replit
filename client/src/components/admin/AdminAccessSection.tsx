@@ -22,6 +22,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { errorMessage } from "@/lib/api-error";
+import { inviteEmailNote } from "@/lib/invite-email";
 import { cn } from "@/lib/utils";
 
 type Admin = { id: number; fullName: string; email: string; username: string; status: string; avatarUrl: string | null };
@@ -43,13 +44,14 @@ export function AdminAccessSection({ className }: { className?: string }) {
 
   const addMutation = useMutation({
     mutationFn: async (value: string) => (await apiRequest("POST", "/api/admin/admins", { email: value })).json(),
-    onSuccess: (res: { type: "promoted" | "invited" }) => {
+    onSuccess: (res: { type: "promoted" | "invited"; emailSent?: boolean }) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEY });
       setEmail("");
+      const note = inviteEmailNote(res.emailSent);
       toast(
         res.type === "promoted"
-          ? { title: "Administrador adicionado", description: "A conta já existia e agora tem acesso de administrador." }
-          : { title: "E-mail pré-autorizado", description: "No primeiro acesso, com Google ou cadastro, essa pessoa já entra como administradora." },
+          ? { title: "Administrador adicionado", description: "A conta já existia e agora tem acesso de administrador." + note }
+          : { title: "E-mail pré-autorizado", description: "No primeiro acesso, com Google ou cadastro, essa pessoa já entra como administradora." + note },
       );
     },
     onError: (error) => toast({ title: "Não foi possível adicionar", description: errorMessage(error), variant: "destructive" }),

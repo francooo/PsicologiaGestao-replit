@@ -29,6 +29,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { errorMessage } from "@/lib/api-error";
+import { inviteEmailNote } from "@/lib/invite-email";
 import { cn } from "@/lib/utils";
 
 type Company = {
@@ -45,7 +46,7 @@ type Company = {
 type Member = { id: number; fullName: string; email: string; role: string; status: string };
 type Invite = { id: number; email: string; role: string; createdAt: string };
 type CompanyDetail = { company: Company; members: Member[]; invites: Invite[] };
-type AdminResult = { type: "promoted" | "invited" };
+type AdminResult = { type: "promoted" | "invited"; emailSent?: boolean };
 
 const LIST_KEY = ["/api/platform/companies"];
 
@@ -61,9 +62,10 @@ const formatCnpj = (v: string | null) =>
 const adminToast = (res: AdminResult | null) =>
   !res
     ? undefined
-    : res.type === "promoted"
-      ? "A conta já existia e agora administra a empresa."
-      : "E-mail pré-autorizado: no primeiro acesso, com Google ou cadastro, a pessoa já entra como administradora.";
+    : (res.type === "promoted"
+        ? "A conta já existia e agora administra a empresa."
+        : "E-mail pré-autorizado: no primeiro acesso, com Google ou cadastro, a pessoa já entra como administradora.") +
+      inviteEmailNote(res.emailSent);
 
 /** Platform admin: every company (clínica) — create, rename, suspend, invite admins, enter for support. */
 export default function AdminEmpresas() {

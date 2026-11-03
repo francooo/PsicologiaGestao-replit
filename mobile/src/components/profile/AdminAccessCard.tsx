@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/Card';
 import { LoadingState } from '@/components/ui/States';
 import { TextField } from '@/components/ui/TextField';
 import { api } from '@/api/client';
+import { inviteEmailNote } from '@/api/platform';
 import { useAuth } from '@/auth/AuthProvider';
 import { confirm } from '@/utils/confirm';
 import { formatDate } from '@/utils/format';
@@ -31,12 +32,14 @@ export function AdminAccessCard() {
   const list = useQuery({ queryKey: KEY, queryFn: () => api<AdminsResponse>('/api/admin/admins') });
 
   const add = useMutation({
-    mutationFn: (value: string) => api<{ type: 'promoted' | 'invited' }>('/api/admin/admins', { method: 'POST', body: { email: value } }),
+    mutationFn: (value: string) =>
+      api<{ type: 'promoted' | 'invited'; emailSent?: boolean }>('/api/admin/admins', { method: 'POST', body: { email: value } }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: KEY });
       setEmail('');
-      if (res.type === 'promoted') toast.success('Administrador adicionado', 'A conta já existia e agora é administradora.');
-      else toast.success('E-mail pré-autorizado', 'No primeiro acesso a pessoa já entra como administradora.');
+      const note = inviteEmailNote(res.emailSent);
+      if (res.type === 'promoted') toast.success('Administrador adicionado', 'A conta já existia e agora é administradora.' + note);
+      else toast.success('E-mail pré-autorizado', 'No primeiro acesso a pessoa já entra como administradora.' + note);
     },
     onError: (e: Error) => toast.error('Não foi possível adicionar', e.message),
   });
