@@ -88,6 +88,7 @@ import { PageHeader, cpButton } from "@/components/cp/PageHeader";
 import { CharCountTextarea, IconField, InfoBanner, ModalHeader } from "@/components/cp/fields";
 import { appointmentStatus, statusOf, toneClasses, type Tone } from "@/components/cp/status";
 import { WhatsAppIcon } from "@/components/cp/WhatsAppIcon";
+import { ReminderDialog } from "@/components/whatsapp/ReminderDialog";
 
 // ─── Schemas ────────────────────────────────────────────────────────────────
 
@@ -159,6 +160,8 @@ export default function Appointments() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [isNewAppointmentDialogOpen, setIsNewAppointmentDialogOpen] = useState(false);
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  // Clicking an appointment opens its WhatsApp reminder
+  const [reminderId, setReminderId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<"month" | "week" | "day">("week");
   const [isPatientSearchOpen, setIsPatientSearchOpen] = useState(false);
   const [filterPatient, setFilterPatient] = useState('');
@@ -444,7 +447,7 @@ export default function Appointments() {
     setLocation('/appointments', { replace: true });
   }, [searchString]);
 
-  const handleAppointmentClick = (_id: number) => {};
+  const handleAppointmentClick = (id: number) => setReminderId(id);
 
   const handleQuickAddAppointmentForDate = (date: Date) => {
     appointmentForm.setValue("date", formatDateForRequest(date));
@@ -686,6 +689,7 @@ export default function Appointments() {
                       today={new Date()}
                       appointmentsByDate={filteredWeeklyByDate}
                       onAddClick={handleQuickAddAppointmentForDate}
+                      onAppointmentClick={handleAppointmentClick}
                     />
                   )}
 
@@ -808,6 +812,8 @@ export default function Appointments() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ReminderDialog appointmentId={reminderId} onClose={() => setReminderId(null)} />
     </div>
   );
 }
@@ -822,11 +828,13 @@ function WeekGrid({
   today,
   appointmentsByDate,
   onAddClick,
+  onAppointmentClick,
 }: {
   weekStart: Date;
   today: Date;
   appointmentsByDate: Record<string, any[]>;
   onAddClick: (date: Date) => void;
+  onAppointmentClick: (id: number) => void;
 }) {
   const todayStr = formatDateForRequest(today);
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
@@ -896,9 +904,9 @@ function WeekGrid({
                   return (
                     <div
                       key={ev.id}
-                      onClick={e => e.stopPropagation()}
-                      title={`${ev.patientName} · ${st.label}`}
-                      className={cn("absolute left-1 right-1 overflow-hidden rounded-lg px-2 py-1.5", t.row)}
+                      onClick={e => { e.stopPropagation(); onAppointmentClick(ev.id); }}
+                      title={`${ev.patientName} · ${st.label} · clique para lembrar pelo WhatsApp`}
+                      className={cn("absolute left-1 right-1 cursor-pointer overflow-hidden rounded-lg px-2 py-1.5 hover:opacity-90", t.row)}
                       style={{ top: `${top + 1}px`, height: `${height - 2}px` }}
                     >
                       <div className="flex items-center gap-1.5 text-[11px] font-medium leading-tight text-cp-muted">

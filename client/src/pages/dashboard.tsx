@@ -22,6 +22,7 @@ import MobileNav from "@/components/mobile-nav";
 import { TopBar } from "@/components/top-bar";
 import { LeafDecor } from "@/components/brand/leaf-decor";
 import { MetricCard } from "@/components/cp/MetricCard";
+import { RemindersCard } from "@/components/whatsapp/RemindersCard";
 import { useAuth } from "@/hooks/use-auth";
 import { overlaps, timeToMinutes, toDateKey } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -387,6 +388,9 @@ export default function Dashboard() {
                 </section>
 
                 <div className="space-y-5">
+                  {/* Tomorrow's appointments with their WhatsApp reminder */}
+                  <RemindersCard showPsychologist={isStaff} />
+
                   {/* Day summary */}
                   <section className="rounded-2xl border border-cp-divider bg-white px-6 py-5 shadow-[0_10px_40px_-18px_rgba(31,51,71,0.18)]">
                     <div className="mb-3 flex items-center gap-3 border-b border-cp-divider pb-4">

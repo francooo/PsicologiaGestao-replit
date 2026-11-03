@@ -9,6 +9,7 @@ import {
   FileCheck2,
   HandCoins,
   LogOut,
+  MessageCircle,
   Receipt,
   Settings,
   ShieldCheck,
@@ -42,7 +43,10 @@ type Item = {
 const sections: { title: string; items: Item[] }[] = [
   {
     title: 'Atendimento',
-    items: [{ label: 'Reuniões', href: '/reunioes', icon: Video }],
+    items: [
+      { label: 'Reuniões', href: '/reunioes', icon: Video },
+      { label: 'Lembretes pelo WhatsApp', href: '/consultas/lembretes', icon: MessageCircle },
+    ],
   },
   {
     title: 'Financeiro',

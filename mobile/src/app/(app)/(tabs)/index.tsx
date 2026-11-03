@@ -1,8 +1,8 @@
 import type { ComponentType } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { startOfMonth, endOfMonth } from 'date-fns';
-import { CalendarDays, CheckCircle2, Clock, DoorOpen, Users } from 'lucide-react-native';
+import { CalendarDays, CheckCircle2, ChevronRight, Clock, DoorOpen, MessageCircle, Users } from 'lucide-react-native';
 
 import { BrandLogo } from '@/components/brand/BrandLogo';
 import { AppText } from '@/components/ui/AppText';
@@ -14,6 +14,7 @@ import { SectionHeader } from '@/components/ui/SectionHeader';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
 import { useAuth } from '@/auth/AuthProvider';
 import { useAppointments, usePatients, useRoomBookings, useRooms } from '@/api/queries';
+import { useReminders } from '@/api/whatsapp';
 import { firstName, formatDateLong, formatTime, toDateKey } from '@/utils/format';
 import { appointmentStatusInfo } from '@/utils/status';
 import { colors, radius } from '@/theme/tokens';
@@ -29,12 +30,14 @@ export default function DashboardScreen() {
   const patients = usePatients();
   const rooms = useRooms();
   const bookings = useRoomBookings({ date: today });
+  // Not in `queries`: the reminders card never blocks the dashboard
+  const reminders = useReminders(null);
 
   const queries = [todayAppts, monthAppts, patients, rooms, bookings];
   const isLoading = queries.some((q) => q.isLoading);
   const failed = queries.find((q) => q.error);
   const refreshing = queries.some((q) => q.isRefetching);
-  const refresh = () => queries.forEach((q) => q.refetch());
+  const refresh = () => [...queries, reminders].forEach((q) => q.refetch());
 
   const todayList = todayAppts.data ?? [];
   const monthList = monthAppts.data ?? [];
@@ -144,6 +147,14 @@ export default function DashboardScreen() {
             </Card>
           </View>
 
+          {reminders.data && (
+            <ReminderSummary
+              total={reminders.data.items.length}
+              sent={reminders.data.items.filter((r) => r.reminderSentAt).length}
+              onPress={() => router.push('/consultas/lembretes')}
+            />
+          )}
+
           <View>
             <SectionHeader
               title="Reservas de salas hoje"
@@ -189,6 +200,33 @@ export default function DashboardScreen() {
   );
 }
 
+/** Lembretes de amanhã: how many WhatsApp reminders are still to send; opens the list. */
+function ReminderSummary({ total, sent, onPress }: { total: number; sent: number; onPress: () => void }) {
+  const pending = total - sent;
+  const sub =
+    total === 0
+      ? 'Nenhuma consulta amanhã'
+      : pending === 0
+        ? `Todos os ${total} lembretes enviados`
+        : `${pending} de ${total} lembrete${total !== 1 ? 's' : ''} para enviar`;
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`Lembretes de amanhã: ${sub}`}>
+      <Card style={styles.reminders}>
+        <View style={[styles.statIcon, { backgroundColor: colors.successSoft, marginBottom: 0 }]}>
+          <MessageCircle size={20} color={colors.success} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <AppText weight="semibold">Lembretes de amanhã</AppText>
+          <AppText variant="caption" tone="muted">
+            {sub}
+          </AppText>
+        </View>
+        <ChevronRight size={18} color={colors.textSubtle} />
+      </Card>
+    </Pressable>
+  );
+}
+
 function StatCard({
   icon: Icon,
   tint,
@@ -225,6 +263,7 @@ const styles = StyleSheet.create({
   capitalize: { textTransform: 'capitalize' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   stat: { flexBasis: '47%', flexGrow: 1, gap: 4 },
+  reminders: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   statIcon: { width: 36, height: 36, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
   statValue: { fontFamily: 'DMSans_700Bold', fontSize: 30, lineHeight: 36, color: colors.ink },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },

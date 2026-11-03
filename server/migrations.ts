@@ -60,6 +60,26 @@ export async function runStartupMigrations() {
         last_synced timestamp NOT NULL DEFAULT now()
       )
     `);
+    // WhatsApp (wa.me) message texts per clinic, and reminders already sent
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS message_templates (
+        id serial PRIMARY KEY,
+        company_id integer NOT NULL REFERENCES companies(id),
+        key text NOT NULL,
+        body text NOT NULL,
+        updated_by integer REFERENCES users(id) ON DELETE SET NULL,
+        updated_at timestamp NOT NULL DEFAULT now(),
+        CONSTRAINT message_templates_company_key UNIQUE (company_id, key)
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS appointment_reminders (
+        appointment_id integer PRIMARY KEY REFERENCES appointments(id) ON DELETE CASCADE,
+        company_id integer NOT NULL REFERENCES companies(id),
+        sent_by integer REFERENCES users(id) ON DELETE SET NULL,
+        sent_at timestamp NOT NULL DEFAULT now()
+      )
+    `);
   } catch (error) {
     log(`startup migration failed: ${(error as Error).message}`);
     throw error;

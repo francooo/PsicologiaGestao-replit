@@ -22,6 +22,7 @@ import adminAccessRouter from "./routes/admin-access";
 import companiesRouter from "./routes/companies";
 import platformRouter from "./routes/platform";
 import agentRouter from "./routes/agent";
+import whatsappRouter from "./routes/whatsapp";
 import { BookingError, createRoomBookingChecked } from "./lib/room-bookings";
 import { removeAppointmentFromCalendar, removeRoomBookingFromCalendar, syncAppointmentToCalendar, syncRoomBookingToCalendar } from "./lib/calendar-sync";
 import { publicClinic } from "./lib/companies";
@@ -1659,6 +1660,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Platform (super) admin: manages the companies themselves
   app.use("/api/platform", platformRouter);
   app.use("/api/agent", agentRouter);
+  // WhatsApp reminders through wa.me links (Lembretes de amanhã) and the clinic message texts
+  app.use("/api/whatsapp", whatsappRouter);
 
   // Care module — public response routes (no auth required) — MUST be mounted FIRST
   // so that /api/care/respond/:token is reachable before the authenticated dispatch

@@ -34,6 +34,7 @@ import { InfoBanner } from "@/components/cp/fields";
 import { StatusBadge } from "@/components/cp/StatusBadge";
 import { roleName } from "@/components/cp/status";
 import { AdminAccessSection } from "@/components/admin/AdminAccessSection";
+import { MessageTemplateSection } from "@/components/whatsapp/MessageTemplateSection";
 import { CompanySection } from "@/components/admin/CompanySection";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
@@ -241,6 +242,7 @@ export default function ProfilePage() {
 
             {user?.role === "admin" && <CompanySection className={cn(card, "p-5 sm:p-6 lg:col-span-5")} />}
             {user?.role === "admin" && <AdminAccessSection className={cn(card, "p-5 sm:p-6 lg:col-span-5")} />}
+            {user?.role === "admin" && <MessageTemplateSection className={cn(card, "p-5 sm:p-6 lg:col-span-5")} />}
           </div>
         </main>
       </div>

@@ -441,6 +441,24 @@ export const insertCalendarEventSchema = createInsertSchema(calendarEvents).pick
   userId: true,
 });
 
+// WhatsApp (wa.me) messages: the clinic's text for each kind of message (key), edited in Configurações
+export const messageTemplates = pgTable("message_templates", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  key: text("key").notNull(), // appointment_reminder
+  body: text("body").notNull(),
+  updatedBy: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [unique("message_templates_company_key").on(t.companyId, t.key)]);
+
+// Last time someone opened WhatsApp to remind the patient of the appointment ("Lembretes de amanhã")
+export const appointmentReminders = pgTable("appointment_reminders", {
+  appointmentId: integer("appointment_id").primaryKey().references(() => appointments.id, { onDelete: "cascade" }),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  sentBy: integer("sent_by").references(() => users.id, { onDelete: "set null" }),
+  sentAt: timestamp("sent_at").notNull().defaultNow(),
+});
+
 export const calendarEventsRelations = relations(calendarEvents, ({ one }) => ({
   appointment: one(appointments, {
     fields: [calendarEvents.appointmentId],

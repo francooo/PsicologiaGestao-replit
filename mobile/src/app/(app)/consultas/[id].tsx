@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarDays, Clock, DoorOpen, UserRound } from 'lucide-react-native';
+import { CalendarDays, Clock, DoorOpen, MessageCircle, UserRound } from 'lucide-react-native';
 
 import { AppText } from '@/components/ui/AppText';
 import { Badge } from '@/components/ui/Badge';
@@ -81,6 +81,14 @@ function AppointmentDetail({ data }: { data: Appointment }) {
           <Info icon={Clock} text={`${formatTime(data.startTime)} – ${formatTime(data.endTime)}`} />
           {psychName && <Info icon={UserRound} text={psychName} />}
           {roomName && <Info icon={DoorOpen} text={roomName} />}
+          {data.status !== 'canceled' && (
+            <Button
+              title="Lembrar pelo WhatsApp"
+              variant="secondary"
+              icon={<MessageCircle size={18} color={colors.primary} />}
+              onPress={() => router.push({ pathname: '/consultas/lembrete', params: { id } })}
+            />
+          )}
         </Card>
 
         <Card style={{ gap: 14 }}>
