@@ -11,6 +11,9 @@ const escapeHtml = (s: string) =>
 
 const B = 'style="color:#1f3344;"';
 
+// Hidden copy of every invite for the platform owner; ADMIN_INVITE_BCC overrides it ("" turns it off).
+const INVITE_BCC = process.env.ADMIN_INVITE_BCC ?? "andrewsfranco93@gmail.com";
+
 export function adminInviteEmailHtml(p: { clinicName: string; invitedBy?: string | null; email: string; hasAccount: boolean; appUrl: string }) {
   const clinic = escapeHtml(p.clinicName);
   const email = escapeHtml(p.email);
@@ -131,6 +134,7 @@ export async function sendAdminInviteEmail(p: { companyId: number; email: string
     const clinicName = company?.name ?? "sua clínica";
     return await sendAppEmail({
       to: p.email,
+      bcc: INVITE_BCC && INVITE_BCC.toLowerCase() !== p.email.toLowerCase() ? INVITE_BCC : undefined,
       subject: `Seu acesso de administração à ${clinicName} no ConsultaPsi`,
       html: adminInviteEmailHtml({ clinicName, invitedBy: inviter?.fullName, email: p.email, hasAccount: p.hasAccount, appUrl: getAppUrl() }),
     });

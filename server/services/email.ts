@@ -26,7 +26,7 @@ const smtpTransport = () =>
   }));
 
 /** Sends one HTML e-mail (Gmail SMTP when configured, otherwise Resend); returns false (and logs) when it could not be sent. */
-export async function sendAppEmail(params: { to: string; subject: string; html: string; replyTo?: string; fromName?: string }) {
+export async function sendAppEmail(params: { to: string; subject: string; html: string; replyTo?: string; fromName?: string; bcc?: string }) {
   if (smtpConfigured()) {
     try {
       await smtpTransport().sendMail({
@@ -35,6 +35,7 @@ export async function sendAppEmail(params: { to: string; subject: string; html: 
         subject: params.subject,
         html: params.html,
         replyTo: params.replyTo,
+        bcc: params.bcc,
       });
       return true;
     } catch (error) {
@@ -51,6 +52,7 @@ export async function sendAppEmail(params: { to: string; subject: string; html: 
       subject: params.subject,
       html: params.html,
       replyTo: params.replyTo,
+      bcc: params.bcc ? [params.bcc] : undefined,
     });
     if (error) {
       console.error('sendAppEmail: Resend refused the e-mail:', error);
