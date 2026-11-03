@@ -78,21 +78,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const handleZodError = (error: unknown) => {
     if (error instanceof ZodError) {
       const validationError = fromZodError(error);
-      return { message: validationError.message };
+      // field: lets the form mark the input that needs fixing
+      return { message: validationError.message, field: error.issues[0]?.path[0] };
     }
     return { message: 'An unexpected error occurred' };
   };
 
+  /** Online appointments have no room: they are saved with roomId 0. */
+  const ONLINE_ROOM_ID = 0;
+
   /**
    * Room/psychologist ids that come from the request body must be rows of the active
-   * company; returns the error message when one is not.
+   * company; returns the error message when one is not. allowOnline: roomId 0 (online
+   * appointment) is accepted.
    */
-  async function foreignReference(companyId: number, refs: { roomId?: unknown; psychologistId?: unknown }) {
-    if (refs.roomId !== undefined && !(await storage.getRoom(companyId, Number(refs.roomId)))) {
+  async function foreignReference(
+    companyId: number,
+    refs: { roomId?: unknown; psychologistId?: unknown },
+    { allowOnline = false } = {},
+  ) {
+    const online = allowOnline && Number(refs.roomId) === ONLINE_ROOM_ID;
+    if (refs.roomId !== undefined && !online && !(await storage.getRoom(companyId, Number(refs.roomId)))) {
       return "Sala não encontrada.";
     }
     if (refs.psychologistId !== undefined && !(await storage.getPsychologist(companyId, Number(refs.psychologistId)))) {
       return "Psicóloga não encontrada.";
+    }
+    return null;
+  }
+
+  type FieldProblem = { message: string; field: string };
+
+  /** What is wrong with a new appointment, pointing at the form field to fix (null when valid). */
+  async function appointmentProblem(
+    companyId: number,
+    data: { patientName: string; psychologistId: number; roomId: number; date: string; startTime: string; endTime: string },
+  ): Promise<FieldProblem | null> {
+    if (!data.patientName.trim()) return { field: "patientName", message: "Informe o nome do paciente." };
+    if (!data.psychologistId) return { field: "psychologistId", message: "Selecione uma psicóloga." };
+    if (!(await storage.getPsychologist(companyId, data.psychologistId))) {
+      return { field: "psychologistId", message: "Psicóloga não encontrada nesta clínica." };
+    }
+    if (data.roomId !== ONLINE_ROOM_ID && !(await storage.getRoom(companyId, data.roomId))) {
+      return { field: "roomId", message: "Sala não encontrada nesta clínica." };
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data.date) || Number.isNaN(new Date(data.date).getTime())) {
+      return { field: "date", message: "Data inválida." };
+    }
+    const time = /^\d{2}:\d{2}(:\d{2})?$/;
+    if (!time.test(data.startTime)) return { field: "startTime", message: "Horário de início inválido." };
+    if (!time.test(data.endTime)) return { field: "endTime", message: "Horário de término inválido." };
+    if (timeToMinutes(data.endTime) <= timeToMinutes(data.startTime)) {
+      return { field: "endTime", message: "O término precisa ser depois do início." };
     }
     return null;
   }
@@ -514,32 +551,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const data = insertAppointmentSchema.parse(body);
-      const foreign = await foreignReference(req.companyId!, data);
-      if (foreign) return res.status(400).json({ message: foreign });
+      const problem = await appointmentProblem(req.companyId!, data);
+      if (problem) return res.status(400).json(problem);
 
-      // Check if room is available for the specified time
-      const isRoomAvailable = await storage.checkRoomAvailability(req.companyId!,
-        data.roomId,
-        new Date(data.date),
-        data.startTime,
-        data.endTime
-      );
-
-      if (!isRoomAvailable) {
-        return res.status(409).json({ message: "Room is not available for the specified time" });
+      // Online appointments take no room: no availability check and no room booking
+      const online = data.roomId === ONLINE_ROOM_ID;
+      if (!online) {
+        const isRoomAvailable = await storage.checkRoomAvailability(req.companyId!,
+          data.roomId,
+          new Date(data.date),
+          data.startTime,
+          data.endTime
+        );
+        if (!isRoomAvailable) {
+          return res.status(409).json({
+            field: "roomId",
+            message: "Esta sala já está ocupada neste horário. Escolha outra sala ou outro horário.",
+          });
+        }
       }
 
       const appointment = await storage.createAppointment(req.companyId!, data);
 
-      // Also create a room booking
-      await storage.createRoomBooking(req.companyId!, {
-        roomId: data.roomId,
-        psychologistId: data.psychologistId,
-        date: data.date,
-        startTime: data.startTime,
-        endTime: data.endTime,
-        purpose: `Appointment with ${data.patientName}`
-      });
+      if (!online) {
+        await storage.createRoomBooking(req.companyId!, {
+          roomId: data.roomId,
+          psychologistId: data.psychologistId,
+          date: data.date,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          purpose: `Appointment with ${data.patientName}`
+        });
+      }
 
       // Into the psychologist's Google Calendar, when she connected it (never fails the request)
       const googleCalendar = await syncAppointmentToCalendar(req.companyId!, appointment);
@@ -549,7 +592,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error instanceof ZodError) {
         return res.status(400).json(handleZodError(error));
       }
-      res.status(500).json({ message: "Error creating appointment" });
+      res.status(500).json({ message: "Não foi possível criar o agendamento. Tente novamente." });
     }
   });
 
@@ -660,7 +703,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/appointments/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const foreign = await foreignReference(req.companyId!, req.body);
+      const foreign = await foreignReference(req.companyId!, req.body, { allowOnline: true });
       if (foreign) return res.status(400).json({ message: foreign });
       const updatedAppointment = await storage.updateAppointment(req.companyId!, id, req.body);
       if (!updatedAppointment) {

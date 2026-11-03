@@ -18,6 +18,9 @@ export function IconField({ icon: Icon, children, className }: { icon: IconType;
         "relative [&>button]:pl-10 [&>input]:pl-10 [&>textarea]:pl-10 [&>button]:rounded-xl [&>input]:rounded-xl [&>button]:border-cp-border [&>input]:border-cp-border [&>button]:h-11 [&>input]:h-11",
         // Teal focus (spec 3.3) instead of the near-black shadcn ring
         "[&>button:focus]:ring-cp-action [&>input:focus-visible]:ring-cp-action [&>textarea:focus-visible]:ring-cp-action",
+        // Invalid (aria-invalid from FormControl): red border and tint
+        "[&>button[aria-invalid=true]]:border-cp-danger [&>input[aria-invalid=true]]:border-cp-danger [&>textarea[aria-invalid=true]]:border-cp-danger",
+        "[&>button[aria-invalid=true]]:bg-cp-danger-soft/40 [&>input[aria-invalid=true]]:bg-cp-danger-soft/40 [&>button[aria-invalid=true]:focus]:ring-cp-danger [&>input[aria-invalid=true]:focus-visible]:ring-cp-danger",
         className,
       )}
     >
@@ -88,7 +91,7 @@ export const CharCountTextarea = forwardRef<HTMLTextAreaElement, TextareaProps &
         value={value}
         maxLength={max}
         onChange={onChange}
-        className={cn("min-h-[96px] resize-none rounded-xl border-cp-border pb-7 focus-visible:ring-cp-action", className)}
+        className={cn("min-h-[96px] resize-none rounded-xl border-cp-border pb-7 focus-visible:ring-cp-action aria-[invalid=true]:border-cp-danger aria-[invalid=true]:focus-visible:ring-cp-danger", className)}
         {...props}
       />
       <span className="pointer-events-none absolute bottom-2 right-3 text-xs text-cp-subtle" aria-live="polite">
@@ -104,6 +107,7 @@ const bannerStyles = {
   warning: { box: "bg-cp-warning-soft border-cp-warning/25 text-cp-ink", icon: CircleAlert, iconCls: "text-cp-warning" },
   privacy: { box: "bg-cp-lavender-soft border-cp-lavender text-cp-ink", icon: Lock, iconCls: "text-cp-lavender-ink" },
   success: { box: "bg-cp-sage-soft border-cp-sage/40 text-cp-ink", icon: CircleCheck, iconCls: "text-cp-success" },
+  danger: { box: "bg-cp-danger-soft border-cp-danger/30 text-cp-ink", icon: CircleAlert, iconCls: "text-cp-danger" },
 };
 
 /** Inline notice (Google not connected, privacy note, availability tip…). */
@@ -121,7 +125,7 @@ export function InfoBanner({
   const s = bannerStyles[variant];
   const Icon = s.icon;
   return (
-    <div className={cn("flex items-start gap-3 rounded-xl border px-4 py-3", s.box, className)} role="note">
+    <div className={cn("flex items-start gap-3 rounded-xl border px-4 py-3", s.box, className)} role={variant === "danger" ? "alert" : "note"}>
       <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", s.iconCls)} />
       <div className="text-[14px] leading-relaxed">
         {title && <p className="font-semibold">{title}</p>}

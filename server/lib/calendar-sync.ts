@@ -94,7 +94,7 @@ export function syncAppointmentToCalendar(companyId: number, appointment: Appoin
     return upsert("appointment", appointment.id, companyId, appointment.psychologistId, {
       summary: `Consulta: ${appointment.patientName}${type}${pending}`,
       description: "Consulta agendada no ConsultaPsi.",
-      location: room?.name,
+      location: room?.name ?? (appointment.roomId === 0 ? "Online" : undefined),
       ...times(appointment),
     });
   });

@@ -29,6 +29,7 @@ import { PrivacyPage, TermsPage } from "@/pages/legal";
 import { ProtectedRoute } from "./lib/protected-route";
 import { AuthProvider } from "./hooks/use-auth";
 import { AgentLauncher } from "@/components/agent/AgentLauncher";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const ADMIN = ["admin"];
 
@@ -71,13 +72,15 @@ function Router() {
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <Router />
-        <AgentLauncher />
-        <Toaster />
-      </AuthProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <Router />
+          <AgentLauncher />
+          <Toaster />
+        </AuthProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 

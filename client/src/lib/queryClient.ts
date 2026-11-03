@@ -1,9 +1,10 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { apiErrorFrom } from "./api-error";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
-    const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    // Plain message (with status and field) instead of "400: {json}"
+    throw apiErrorFrom(res.status, await res.text(), res.statusText);
   }
 }
 

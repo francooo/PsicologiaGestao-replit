@@ -1,11 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
+import { useForm, type FieldErrors, type Resolver } from "react-hook-form";
 import { z } from "zod";
 import { useAuth } from "@/hooks/use-auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { calendarSyncNote, type CalendarSync } from "@/lib/calendar-sync";
+import { ApiError, errorMessage } from "@/lib/api-error";
 import { useToast } from "@/hooks/use-toast";
 import { insertAppointmentSchema, insertRoomBookingSchema } from "@shared/schema";
 import Sidebar from "@/components/sidebar";
@@ -93,12 +94,59 @@ import { ReminderDialog } from "@/components/whatsapp/ReminderDialog";
 // ─── Schemas ────────────────────────────────────────────────────────────────
 
 const appointmentFormSchema = insertAppointmentSchema.extend({
-  date: z.string().min(1, "Data é obrigatória"),
-  startTime: z.string().min(1, "Horário de início é obrigatório"),
-  endTime: z.string().min(1, "Horário de término é obrigatório"),
+  patientName: z.string().trim().min(1, "Informe o nome do paciente"),
+  psychologistId: z.number({ invalid_type_error: "Selecione uma psicóloga" }).int().min(1, "Selecione uma psicóloga"),
+  roomId: z.number().int(),
+  modality: z.enum(["presential", "online"]),
+  sessionType: z.string().nullable().optional(),
+  status: z.string().min(1, "Selecione o status"),
+  date: z.string().min(1, "Informe a data").regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida: confira o dia, o mês e o ano"),
+  startTime: z.string().min(1, "Informe o horário de início"),
+  endTime: z.string().min(1, "Informe o horário de término"),
+  notes: z.string().max(500, "Use no máximo 500 caracteres").nullable().optional(),
   duration: z.enum(["50", "60", "90"]).optional(),
 });
 type AppointmentFormValues = z.infer<typeof appointmentFormSchema>;
+
+/** Order and names of the appointment fields, for the "revise os campos" summary. */
+const APPOINTMENT_FIELDS: [keyof AppointmentFormValues, string][] = [
+  ["patientName", "Paciente"],
+  ["psychologistId", "Psicóloga"],
+  ["sessionType", "Tipo de sessão"],
+  ["roomId", "Sala"],
+  ["status", "Status"],
+  ["date", "Data"],
+  ["startTime", "Início"],
+  ["endTime", "Término"],
+  ["notes", "Observações"],
+];
+
+const zodAppointment = zodResolver(appointmentFormSchema);
+
+/**
+ * Zod for each field, plus the rules that depend on two fields. Kept out of a superRefine, which
+ * Zod skips while any other field is invalid: every problem shows up on the first click.
+ */
+const appointmentResolver: Resolver<AppointmentFormValues> = async (values, context, options) => {
+  const result = await zodAppointment(values, context, options);
+  const errors: FieldErrors<AppointmentFormValues> = { ...result.errors };
+  if (values.modality === "presential" && !values.roomId && !errors.roomId) {
+    errors.roomId = { type: "required", message: "Selecione uma sala ou marque a consulta como Online" };
+  }
+  if (values.startTime && values.endTime && values.endTime <= values.startTime && !errors.endTime) {
+    errors.endTime = { type: "order", message: "O término precisa ser depois do início" };
+  }
+  return Object.keys(errors).length ? { values: {}, errors } : result;
+};
+
+/** Scrolls to and focuses the first field marked invalid inside the given element. */
+function focusFirstInvalid(root: HTMLElement | null) {
+  requestAnimationFrame(() => {
+    const el = root?.querySelector<HTMLElement>('[aria-invalid="true"]');
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    el?.focus({ preventScroll: true });
+  });
+}
 
 const whatsAppShareSchema = z.object({
   psychologistId: z.string().min(1, "Selecione uma psicóloga"),
@@ -274,25 +322,32 @@ export default function Appointments() {
   }, {});
 
   // ── Mutations: appointments ──
+  // Server error with no field to point at, shown inside the appointment modal
+  const [appointmentError, setAppointmentError] = useState<string | null>(null);
+
   const createAppointmentMutation = useMutation({
     mutationFn: async (data: AppointmentFormValues) => {
-      const { duration, ...payload } = data;
+      const { duration, modality, ...payload } = data;
       const res = await apiRequest("POST", "/api/appointments", {
         ...payload,
+        patientName: payload.patientName.trim(),
         sessionType: payload.sessionType || null,
         psychologistId: Number(payload.psychologistId),
-        roomId: Number(payload.roomId),
+        // Online appointments are saved without a room
+        roomId: modality === "online" ? 0 : Number(payload.roomId),
       });
       return res.json();
     },
     onSuccess: (saved: { googleCalendar?: CalendarSync }) => {
       queryClient.invalidateQueries({ queryKey: ['/api/appointments'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/room-bookings'] });
       toast({ title: "Agendamento criado", description: calendarSyncNote(saved?.googleCalendar) ?? "O agendamento foi criado com sucesso." });
       setIsNewAppointmentDialogOpen(false);
       appointmentForm.reset({
         patientName: "",
         psychologistId: loggedPsychologist?.id || 0,
         roomId: 0,
+        modality: "presential",
         date: formatDateForRequest(selectedDate),
         startTime: "09:00",
         endTime: "10:00",
@@ -302,8 +357,24 @@ export default function Appointments() {
         duration: "50",
       });
     },
-    onError: (e: any) => toast({ title: "Erro", description: e.message, variant: "destructive" }),
+    onError: (e) => {
+      // The server names the field at fault (busy room, unknown psychologist…): mark it in red
+      const field = e instanceof ApiError ? APPOINTMENT_FIELDS.find(([name]) => name === e.field)?.[0] : undefined;
+      if (field) {
+        appointmentForm.setError(field, { type: "server", message: e.message }, { shouldFocus: false });
+        setAppointmentError(null);
+      } else {
+        setAppointmentError(errorMessage(e));
+      }
+    },
   });
+
+  const setAppointmentDialogOpen = (open: boolean) => {
+    setIsNewAppointmentDialogOpen(open);
+    // Each opening starts without the previous attempt's errors
+    appointmentForm.clearErrors();
+    setAppointmentError(null);
+  };
 
   const shareWhatsAppMutation = useMutation({
     mutationFn: async (data: WhatsAppShareFormValues) => {
@@ -356,11 +427,14 @@ export default function Appointments() {
 
   // ── Forms ──
   const appointmentForm = useForm<AppointmentFormValues>({
-    resolver: zodResolver(appointmentFormSchema),
+    resolver: appointmentResolver,
+    // The dialog focuses the first invalid field itself (selects have no focusable ref)
+    shouldFocusError: false,
     defaultValues: {
       patientName: "",
       psychologistId: loggedPsychologist?.id || 0,
       roomId: 0,
+      modality: "presential",
       date: formatDateForRequest(selectedDate),
       startTime: "09:00",
       endTime: "10:00",
@@ -534,7 +608,7 @@ export default function Appointments() {
                     />
                   </Dialog>
 
-                  <Dialog open={isNewAppointmentDialogOpen} onOpenChange={setIsNewAppointmentDialogOpen}>
+                  <Dialog open={isNewAppointmentDialogOpen} onOpenChange={setAppointmentDialogOpen}>
                     <DialogTrigger asChild>
                       <button type="button" className={cpButton.primary}>
                         <Plus className="h-4 w-4" />
@@ -549,8 +623,12 @@ export default function Appointments() {
                       isPatientSearchOpen={isPatientSearchOpen}
                       setIsPatientSearchOpen={setIsPatientSearchOpen}
                       isPending={createAppointmentMutation.isPending}
-                      onClose={() => setIsNewAppointmentDialogOpen(false)}
-                      onSubmit={(data: AppointmentFormValues) => createAppointmentMutation.mutate(data)}
+                      serverError={appointmentError}
+                      onClose={() => setAppointmentDialogOpen(false)}
+                      onSubmit={(data: AppointmentFormValues) => {
+                        setAppointmentError(null);
+                        createAppointmentMutation.mutate(data);
+                      }}
                       calculateEndTime={calculateEndTime}
                       loggedPsychologist={loggedPsychologist}
                       user={user}
@@ -1134,20 +1212,39 @@ function AppointmentDialog({
   isPatientSearchOpen,
   setIsPatientSearchOpen,
   isPending,
+  serverError,
   onClose,
   onSubmit,
   calculateEndTime,
-  loggedPsychologist,
   user,
 }: any) {
   const isPsychologist = user?.role === "psychologist";
-  const [modality, setModality] = useState<'presential' | 'online'>('presential');
+  const formRef = useRef<HTMLFormElement>(null);
+  const modality: 'presential' | 'online' = form.watch('modality');
+  const { errors, isSubmitted } = form.formState;
+  const invalid = APPOINTMENT_FIELDS.filter(([name]) => errors[name]);
+
+  // Server-side problems (busy room…) arrive after the click: take the user to the field
+  const serverFields = invalid.filter(([name]) => errors[name]?.type === 'server').map(([name]) => name).join();
+  useEffect(() => {
+    if (serverFields) focusFirstInvalid(formRef.current);
+  }, [serverFields]);
 
   const handleModalityChange = (value: 'presential' | 'online') => {
-    setModality(value);
-    if (value === 'online') {
-      form.setValue('roomId', 0);
-    }
+    form.setValue('modality', value);
+    if (value === 'online') form.setValue('roomId', 0);
+    // After the first attempt, fields changed by code are checked again right away
+    if (isSubmitted) form.trigger('roomId');
+  };
+
+  const updateEndTime = (start: string, duration: string) => {
+    if (start) form.setValue("endTime", calculateEndTime(start, duration), { shouldValidate: isSubmitted });
+  };
+
+  const focusField = (name: string) => {
+    const el = formRef.current?.querySelector<HTMLElement>(`[data-field="${name}"] input, [data-field="${name}"] button[role="combobox"], [data-field="${name}"] textarea`);
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    el?.focus({ preventScroll: true });
   };
 
   const modalityBtn = (active: boolean) =>
@@ -1163,13 +1260,20 @@ function AppointmentDialog({
       </div>
 
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <form
+          ref={formRef}
+          noValidate
+          onSubmit={form.handleSubmit(onSubmit, () => focusFirstInvalid(formRef.current))}
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        >
           <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
               <FormField control={form.control} name="patientName" render={({ field }: any) => (
-                <FormItem>
+                <FormItem data-field="patientName">
                   <FormLabel className={labelCls}>Paciente</FormLabel>
-                  <IconField icon={UserIcon}><Input placeholder="Buscar ou digitar..." {...field} /></IconField>
+                  <IconField icon={UserIcon}>
+                    <FormControl><Input placeholder="Buscar ou digitar..." {...field} /></FormControl>
+                  </IconField>
                   <FormMessage />
                   <div className="mt-2">
                     <button type="button" onClick={() => setIsPatientSearchOpen(true)} className="inline-flex h-9 items-center gap-2 rounded-xl border border-cp-border bg-white px-3 text-[13px] font-medium text-cp-ink hover:bg-cp-hover">
@@ -1183,7 +1287,7 @@ function AppointmentDialog({
                         <CommandGroup heading="Pacientes">
                           {patients?.map((p: any) => (
                             <CommandItem key={p.id} value={p.fullName} onSelect={() => {
-                              form.setValue("patientName", p.fullName);
+                              form.setValue("patientName", p.fullName, { shouldValidate: isSubmitted });
                               setIsPatientSearchOpen(false);
                             }}>
                               <div className="flex flex-col">
@@ -1200,23 +1304,35 @@ function AppointmentDialog({
               )} />
 
               <FormField control={form.control} name="psychologistId" render={({ field }: any) => (
-                <FormItem>
+                <FormItem data-field="psychologistId">
                   <FormLabel className={labelCls}>Psicóloga</FormLabel>
                   {isPsychologist ? (
-                    <div className={readOnlyCls}>{user.fullName}</div>
+                    <>
+                      <div className={readOnlyCls}>{user.fullName}</div>
+                      {errors.psychologistId && (
+                        <p className="text-[13px] font-medium text-cp-danger">
+                          Seu perfil de psicóloga não foi encontrado nesta clínica. Peça ao administrador para criá-lo.
+                        </p>
+                      )}
+                    </>
                   ) : (
-                    <IconField icon={Users}>
-                      <Select onValueChange={v => field.onChange(parseInt(v))} defaultValue={field.value ? field.value.toString() : undefined}>
-                        <FormControl><SelectTrigger><SelectValue placeholder="Selecione uma psicóloga" /></SelectTrigger></FormControl>
-                        <SelectContent>
-                          {psychologists.map((p: any) => (
-                            <SelectItem key={p.id} value={p.id.toString()}>{p.user.fullName}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </IconField>
+                    <>
+                      <IconField icon={Users}>
+                        <Select onValueChange={v => field.onChange(parseInt(v))} value={field.value ? field.value.toString() : ""}>
+                          <FormControl><SelectTrigger><SelectValue placeholder="Selecione uma psicóloga" /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            {psychologists.map((p: any) => (
+                              <SelectItem key={p.id} value={p.id.toString()}>{p.user?.fullName ?? `Psicóloga ${p.id}`}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </IconField>
+                      <FormMessage />
+                      {psychologists.length === 0 && (
+                        <p className="text-[13px] text-cp-muted">Nenhuma psicóloga cadastrada. Cadastre em Psicólogas.</p>
+                      )}
+                    </>
                   )}
-                  <FormMessage />
                 </FormItem>
               )} />
             </div>
@@ -1237,10 +1353,10 @@ function AppointmentDialog({
               </div>
 
               <FormField control={form.control} name="sessionType" render={({ field }: any) => (
-                <FormItem>
-                  <FormLabel className={labelCls}>Tipo de sessão</FormLabel>
+                <FormItem data-field="sessionType">
+                  <FormLabel className={labelCls}>Tipo de sessão <span className="text-xs font-normal text-cp-subtle">(opcional)</span></FormLabel>
                   <IconField icon={FileText}>
-                    <Select onValueChange={field.onChange} value={field.value || undefined}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl><SelectTrigger><SelectValue placeholder="Selecione o tipo" /></SelectTrigger></FormControl>
                       <SelectContent>
                         {SESSION_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
@@ -1254,14 +1370,14 @@ function AppointmentDialog({
 
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
               <FormField control={form.control} name="roomId" render={({ field }: any) => (
-                <FormItem>
+                <FormItem data-field="roomId">
                   <FormLabel className={cn(labelCls, modality === 'online' && 'text-cp-subtle')}>
                     Sala {modality === 'online' && <span className="text-xs font-normal">(não se aplica a online)</span>}
                   </FormLabel>
                   <IconField icon={DoorOpen}>
                     <Select
                       onValueChange={v => field.onChange(parseInt(v))}
-                      defaultValue={field.value ? field.value.toString() : undefined}
+                      value={field.value ? field.value.toString() : ""}
                       disabled={modality === 'online'}
                     >
                       <FormControl>
@@ -1277,14 +1393,17 @@ function AppointmentDialog({
                     </Select>
                   </IconField>
                   <FormMessage />
+                  {modality === 'presential' && rooms.length === 0 && (
+                    <p className="text-[13px] text-cp-muted">Nenhuma sala cadastrada. Cadastre em Salas ou marque a consulta como Online.</p>
+                  )}
                 </FormItem>
               )} />
 
               <FormField control={form.control} name="status" render={({ field }: any) => (
-                <FormItem>
+                <FormItem data-field="status">
                   <FormLabel className={labelCls}>Status</FormLabel>
                   <IconField icon={Clock}>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ""}>
                       <FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl>
                       <SelectContent>
                         {(['scheduled', 'confirmed', 'completed', 'canceled', 'first-session'] as const).map(st => {
@@ -1309,29 +1428,30 @@ function AppointmentDialog({
             <div className="space-y-4 rounded-2xl border border-cp-lavender bg-cp-lavender-soft/60 p-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <FormField control={form.control} name="date" render={({ field }: any) => (
-                  <FormItem>
+                  <FormItem data-field="date">
                     <FormLabel className={labelCls}>Data</FormLabel>
-                    <IconField icon={CalendarIcon}><Input type="date" {...field} /></IconField>
+                    <IconField icon={CalendarIcon}><FormControl><Input type="date" {...field} /></FormControl></IconField>
                     <FormMessage />
                   </FormItem>
                 )} />
                 <FormField control={form.control} name="startTime" render={({ field }: any) => (
-                  <FormItem>
+                  <FormItem data-field="startTime">
                     <FormLabel className={labelCls}>Início</FormLabel>
                     <IconField icon={Clock}>
-                      <Input type="time" {...field} onChange={e => {
-                        field.onChange(e);
-                        const dur = form.getValues("duration") || "50";
-                        form.setValue("endTime", calculateEndTime(e.target.value, dur));
-                      }} />
+                      <FormControl>
+                        <Input type="time" {...field} onChange={e => {
+                          field.onChange(e);
+                          updateEndTime(e.target.value, form.getValues("duration") || "50");
+                        }} />
+                      </FormControl>
                     </IconField>
                     <FormMessage />
                   </FormItem>
                 )} />
                 <FormField control={form.control} name="endTime" render={({ field }: any) => (
-                  <FormItem>
+                  <FormItem data-field="endTime">
                     <FormLabel className={labelCls}>Término</FormLabel>
-                    <IconField icon={Clock}><Input type="time" {...field} /></IconField>
+                    <IconField icon={Clock}><FormControl><Input type="time" {...field} /></FormControl></IconField>
                     <FormMessage />
                   </FormItem>
                 )} />
@@ -1340,7 +1460,7 @@ function AppointmentDialog({
                 <FormItem>
                   <FormLabel className={labelCls}>Duração</FormLabel>
                   <IconField icon={Clock}>
-                    <Select onValueChange={v => { field.onChange(v); const s = form.getValues("startTime"); if (s) form.setValue("endTime", calculateEndTime(s, v)); }} defaultValue={field.value}>
+                    <Select onValueChange={v => { field.onChange(v); updateEndTime(form.getValues("startTime"), v); }} value={field.value}>
                       <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
                       <SelectContent>
                         <SelectItem value="50">50 minutos</SelectItem>
@@ -1355,19 +1475,34 @@ function AppointmentDialog({
             </div>
 
             <FormField control={form.control} name="notes" render={({ field }: any) => (
-              <FormItem>
+              <FormItem data-field="notes">
                 <FormLabel className={labelCls}>Observações</FormLabel>
                 <FormControl><CharCountTextarea max={500} placeholder="Opcional" {...field} value={field.value ?? ""} /></FormControl>
                 <FormMessage />
               </FormItem>
             )} />
 
-            <InfoBanner variant="warning">
-              Verifique se a sala e o horário estão disponíveis antes de confirmar o agendamento.
-            </InfoBanner>
+            {modality === 'presential' && (
+              <InfoBanner variant="info">Ao salvar, o sistema confere se a sala está livre neste horário.</InfoBanner>
+            )}
           </div>
 
-          <div className="border-t border-cp-divider px-6 py-4">
+          <div className="space-y-3 border-t border-cp-divider px-6 py-4">
+            {invalid.length > 0 && (
+              <InfoBanner variant="danger" title={invalid.length === 1 ? "Ajuste o campo marcado em vermelho" : `Ajuste os ${invalid.length} campos marcados em vermelho`}>
+                {invalid.map(([name, label], i) => (
+                  <span key={name}>
+                    {i > 0 && " · "}
+                    <button type="button" onClick={() => focusField(name)} className="font-medium text-cp-danger underline-offset-2 hover:underline">
+                      {label}
+                    </button>
+                  </span>
+                ))}
+              </InfoBanner>
+            )}
+            {serverError && (
+              <InfoBanner variant="danger" title="Não foi possível criar o agendamento">{serverError}</InfoBanner>
+            )}
             <DialogActions onClose={onClose} isPending={isPending} label="Criar Agendamento" pendingLabel="Criando..." icon={<CalendarCheck className="h-4 w-4" />} />
           </div>
         </form>
@@ -1375,6 +1510,7 @@ function AppointmentDialog({
     </DialogContent>
   );
 }
+
 
 // ─── BookingDialog ────────────────────────────────────────────────────────────
 

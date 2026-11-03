@@ -93,7 +93,8 @@ const FormLabel = React.forwardRef<
   return (
     <Label
       ref={ref}
-      className={cn(error && "text-destructive", className)}
+      // Error color last so a custom label color does not hide it
+      className={cn(className, error && "text-cp-danger")}
       htmlFor={formItemId}
       {...props}
     />
@@ -155,7 +156,7 @@ const FormMessage = React.forwardRef<
     <p
       ref={ref}
       id={formMessageId}
-      className={cn("text-sm font-medium text-destructive", className)}
+      className={cn("text-[13px] font-medium text-cp-danger", className)}
       {...props}
     >
       {body}
