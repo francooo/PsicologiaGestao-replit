@@ -200,6 +200,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/psychologists", requireStaff, async (req, res) => {
     try {
       const data = insertPsychologistSchema.parse(req.body);
+      const member = (await storage.getAllUsers(req.companyId!)).some((u) => u.id === data.userId);
+      if (!member) return res.status(400).json({ field: "userId", message: "Este usuário não faz parte desta clínica." });
+      if (await storage.getPsychologistByUserId(req.companyId!, data.userId)) {
+        return res.status(409).json({ field: "userId", message: "Este usuário já tem um perfil de psicóloga nesta clínica." });
+      }
       const psychologist = await storage.createPsychologist(req.companyId!, data);
       res.status(201).json(psychologist);
     } catch (error) {

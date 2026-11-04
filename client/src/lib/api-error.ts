@@ -1,9 +1,10 @@
-/** Error thrown by apiRequest: the server's message, its HTTP status and, when sent, the form field at fault. */
+/** Error thrown by apiRequest: the server's message, its HTTP status, the form field at fault and the whole JSON body. */
 export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
     public field?: string,
+    public body?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "ApiError";
@@ -14,7 +15,7 @@ export class ApiError extends Error {
 export function apiErrorFrom(status: number, text: string, statusText = "") {
   try {
     const body = JSON.parse(text);
-    if (body && typeof body.message === "string") return new ApiError(body.message, status, typeof body.field === "string" ? body.field : undefined);
+    if (body && typeof body.message === "string") return new ApiError(body.message, status, typeof body.field === "string" ? body.field : undefined, body);
   } catch {
     // not JSON
   }

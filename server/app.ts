@@ -46,12 +46,14 @@ export async function createApp(): Promise<{ app: Express; server: Server }> {
   await seedCareTemplates();
   const server = await registerRoutes(app);
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
+    console.error(`${req.method} ${req.path} falhou:`, err);
+    if (res.headersSent) return;
+    // Never rethrow: on Vercel that destroyed the socket and the browser waited forever
+    // (e.g. "Cadastrando..." stuck on a duplicate e-mail). Database errors stay in the log.
+    const message = status >= 500 ? "Erro interno no servidor. Tente novamente em instantes." : err.message || "Erro na requisição";
     res.status(status).json({ message });
-    throw err;
   });
 
   return { app, server };

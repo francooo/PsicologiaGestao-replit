@@ -10,6 +10,7 @@ import { User as SelectUser } from "@shared/schema";
 import { bearerSessionBridge, companyContext, requireCompany } from "./middleware/auth-guards";
 import { applyPendingInvites } from "./lib/access-invites";
 import { ensurePsychologistProfileFor, resolveCompanyContext, upsertMembership, userPayload } from "./lib/companies";
+import { takenLogin } from "./lib/logins";
 
 declare global {
   namespace Express {
@@ -258,11 +259,10 @@ export function setupAuth(app: Express) {
 
   app.post("/api/register", async (req, res, next) => {
     try {
-      // Check if username already exists
-      const existingUser = await storage.getUserByUsername(req.body.username);
-      if (existingUser) {
-        return res.status(400).json({ message: "Username already exists" });
-      }
+      // Username and e-mail are unique: say which one and why, instead of failing in the database
+      const caller = req.isAuthenticated() && req.companyId ? { id: req.user.id, companyId: req.companyId } : undefined;
+      const taken = await takenLogin(String(req.body.username ?? ""), String(req.body.email ?? ""), caller);
+      if (taken) return res.status(400).json(taken);
 
       // Hash password
       const hashedPassword = await hashPassword(req.body.password);
@@ -312,7 +312,9 @@ export function setupAuth(app: Express) {
           next(error);
         }
       });
-    } catch (error) {
+    } catch (error: any) {
+      // Two sign-ups racing for the same login
+      if (error?.code === "23505") return res.status(400).json({ message: "Este e-mail ou usuário já está cadastrado." });
       next(error);
     }
   });
