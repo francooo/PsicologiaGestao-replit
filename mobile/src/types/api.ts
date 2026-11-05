@@ -11,6 +11,11 @@ export interface CompanySummary {
   slug: string;
   logoUrl: string | null;
   role: Role;
+  /** Last day of access (inclusive, "yyyy-MM-dd"); null = no expiry. Set by the platform admin. */
+  accessValidUntil: string | null;
+  aiEnabled: boolean;
+  /** Computed by the server (São Paulo date): every company-scoped call returns 403 ACCESS_EXPIRED. */
+  accessExpired: boolean;
 }
 
 export interface User {

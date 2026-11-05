@@ -8,6 +8,7 @@ import { summarizeDocument, UnsupportedFormatError, AIServiceError, AIQuotaError
 import { db } from '../db';
 import { psychologists, users } from '@shared/schema';
 import { and, eq } from 'drizzle-orm';
+import { requireAi } from '../middleware/auth-guards';
 
 const router = Router();
 
@@ -562,7 +563,7 @@ router.get('/documents/:docId/download', checkDocumentAccess, async (req, res) =
     }
 });
 
-router.post('/documents/:docId/summarize', checkDocumentAccess, async (req, res) => {
+router.post('/documents/:docId/summarize', requireAi, checkDocumentAccess, async (req, res) => {
     try {
         const docId = parseInt(req.params.docId);
         const doc = await storage.getDocument(docId);

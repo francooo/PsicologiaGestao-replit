@@ -11,6 +11,10 @@ export interface PlatformCompany {
   slug: string;
   cnpj: string | null;
   status: 'active' | 'suspended';
+  /** Last day of access (inclusive), null = no expiry */
+  accessValidUntil: string | null;
+  accessExpired: boolean;
+  aiEnabled: boolean;
   createdAt: string;
   membersCount: number;
   adminsCount: number;

@@ -14,6 +14,7 @@ import { UNLINKED_KEY, usePlatformCompanies, useUnlinkedAccounts, type PlatformC
 import { UnlinkedAccounts } from '@/components/company/UnlinkedAccounts';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/auth/AuthProvider';
+import { accessState, endingLabel, formatDay } from '@/utils/company-access';
 import { formatDate } from '@/utils/format';
 import { toast } from '@/utils/toast';
 import { colors, radius } from '@/theme/tokens';
@@ -101,6 +102,7 @@ export default function CompaniesScreen() {
                         <Badge label="Você está aqui" tone="success" />
                       ) : null}
                     </View>
+                    <PlanBadges company={c} />
                     <View style={styles.stats}>
                       <Stat label="Membros" value={c.membersCount} />
                       <Stat label="Admins" value={c.adminsCount} />
@@ -146,6 +148,20 @@ export default function CompaniesScreen() {
   );
 }
 
+/** Access expiry and AI switch, set in Detalhes → Plano. */
+function PlanBadges({ company }: { company: PlatformCompany }) {
+  const state = accessState(company);
+  if (state === 'unlimited' && company.aiEnabled) return null;
+  return (
+    <View style={styles.badges}>
+      {state === 'expired' && <Badge label={`Vencida em ${formatDay(company.accessValidUntil!)}`} tone="danger" />}
+      {state === 'ending' && <Badge label={endingLabel(company.accessValidUntil!)} tone="warning" />}
+      {state === 'active' && <Badge label={`Acesso até ${formatDay(company.accessValidUntil!)}`} tone="neutral" />}
+      {!company.aiEnabled && <Badge label="IA desligada" tone="neutral" />}
+    </View>
+  );
+}
+
 function Stat({ label, value }: { label: string; value: number }) {
   return (
     <View style={styles.stat}>
@@ -167,6 +183,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.sageSoft,
   },
+  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   stats: { flexDirection: 'row', gap: 8 },
   stat: {
     flex: 1,

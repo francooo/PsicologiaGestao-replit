@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, FileText, ImagePlus, Trash2 } from 'lucide-react-native';
+import { Building2, CalendarClock, FileText, ImagePlus, Sparkles, Trash2 } from 'lucide-react-native';
 
 import { AppText } from '@/components/ui/AppText';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { LoadingState } from '@/components/ui/States';
@@ -11,11 +12,22 @@ import { TextField } from '@/components/ui/TextField';
 import { CompanyLogo } from '@/components/company/CompanyLogo';
 import { api } from '@/api/client';
 import { useAuth } from '@/auth/AuthProvider';
+import { accessBadgeTone, accessState, endingLabel, formatDay } from '@/utils/company-access';
 import { appendFile, pickImage } from '@/utils/files';
 import { toast } from '@/utils/toast';
-import { colors } from '@/theme/tokens';
+import { colors, radius } from '@/theme/tokens';
 
-type CurrentCompany = { id: number; name: string; slug: string; cnpj: string | null; logoUrl: string | null };
+type CurrentCompany = {
+  id: number;
+  name: string;
+  slug: string;
+  cnpj: string | null;
+  logoUrl: string | null;
+  // Set by the platform admin; read-only here
+  accessValidUntil: string | null;
+  accessExpired: boolean;
+  aiEnabled: boolean;
+};
 
 const KEY = ['/api/companies/current'];
 
@@ -110,7 +122,67 @@ function CompanyForm({ company }: { company: CurrentCompany }) {
           Esta clínica ainda está com o nome padrão. Troque pelo nome real para ele aparecer no menu.
         </AppText>
       )}
+      <AccessInfo company={company} />
       <Button title="Salvar dados" onPress={() => save.mutate()} loading={save.isPending} disabled={!changed || !name.trim()} />
     </Card>
   );
 }
+
+/** How long the clinic's access lasts and whether AI is in its plan (both set by the platform). */
+function AccessInfo({ company }: { company: CurrentCompany }) {
+  const state = accessState(company);
+  return (
+    <View style={styles.access}>
+      <View style={styles.accessIcon}>
+        <CalendarClock size={18} color={colors.textMuted} />
+      </View>
+      <View style={{ flex: 1, gap: 4 }}>
+        {company.accessValidUntil ? (
+          <View style={styles.accessRow}>
+            <AppText>
+              Acesso válido até <AppText weight="semibold">{formatDay(company.accessValidUntil)}</AppText>
+            </AppText>
+            {state !== 'unlimited' && (
+              <Badge
+                label={state === 'expired' ? 'Vencido' : state === 'ending' ? endingLabel(company.accessValidUntil) : 'Ativo'}
+                tone={accessBadgeTone[state]}
+              />
+            )}
+          </View>
+        ) : (
+          <AppText>Acesso sem data de vencimento</AppText>
+        )}
+        {!company.aiEnabled && (
+          <View style={styles.accessRow}>
+            <Sparkles size={14} color={colors.textMuted} />
+            <AppText variant="caption" tone="muted" style={{ flex: 1 }}>
+              Recursos de inteligência artificial não incluídos no plano
+            </AppText>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  access: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    backgroundColor: colors.surfaceMuted,
+  },
+  accessIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+  },
+  accessRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+});

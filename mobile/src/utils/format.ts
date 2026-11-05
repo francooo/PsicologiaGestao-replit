@@ -33,6 +33,12 @@ export function formatMoney(value: string | number | null | undefined) {
   return currency.format(Number.isFinite(n) ? (n as number) : 0);
 }
 
+/** "1.234,56" | "1234,56" | "200.50" -> number (NaN if invalid): dots are thousand separators only when a comma is present. */
+export const parseAmount = (raw: string) => {
+  const v = raw.trim();
+  return parseFloat(v.includes(',') ? v.replace(/\./g, '').replace(',', '.') : v);
+};
+
 export function firstName(fullName?: string | null) {
   return fullName?.trim().split(/\s+/)[0] ?? '';
 }

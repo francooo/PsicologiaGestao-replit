@@ -1,9 +1,9 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { authApi } from '@/api/auth';
-import { ApiError, setAuthToken, setUnauthorizedHandler } from '@/api/client';
+import { ApiError, setAccessExpiredHandler, setAuthToken, setUnauthorizedHandler } from '@/api/client';
 import type { Role, User } from '@/types/api';
 
 const TOKEN_KEY = 'consultapsi.session';
@@ -89,6 +89,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(me);
     return me;
   }, []);
+
+  // The clinic's access ended while the app was open: several queries fail at once, reload the user only once.
+  // With accessExpired in /api/user the root layout swaps the app for the "acesso vencido" notice.
+  const reloadingUser = useRef(false);
+  useEffect(() => {
+    setAccessExpiredHandler(() => {
+      if (reloadingUser.current) return;
+      reloadingUser.current = true;
+      refreshUser()
+        .catch(() => {})
+        .finally(() => {
+          reloadingUser.current = false;
+        });
+    });
+    return () => setAccessExpiredHandler(null);
+  }, [refreshUser]);
 
   const switchCompany = useCallback(
     async (companyId: number) => {

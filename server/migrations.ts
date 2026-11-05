@@ -143,6 +143,12 @@ async function migrateCompanies() {
       ADD COLUMN IF NOT EXISTS logo_data bytea,
       ADD COLUMN IF NOT EXISTS logo_mime_type text
   `);
+  // Access expiry and AI switch per clinic, set by the platform admin
+  await pool.query(`
+    ALTER TABLE companies
+      ADD COLUMN IF NOT EXISTS access_valid_until date,
+      ADD COLUMN IF NOT EXISTS ai_enabled boolean NOT NULL DEFAULT true
+  `);
   // A fresh database may not have every table yet (they come from db:push).
   const { rows: present } = await pool.query(
     `SELECT tablename FROM pg_tables WHERE schemaname = current_schema() AND tablename = ANY($1)`,

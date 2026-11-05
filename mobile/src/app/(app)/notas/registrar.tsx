@@ -1,18 +1,20 @@
-import { useState } from 'react';
+import { useState, type ComponentProps } from 'react';
 import { Pressable, StyleSheet, Switch, View } from 'react-native';
 import { router, Stack } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Camera, FileText, FolderOpen, Sparkles } from 'lucide-react-native';
+import { AlertTriangle, Camera, FileText, FolderOpen, PenLine, Sparkles } from 'lucide-react-native';
 
 import { AppText } from '@/components/ui/AppText';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { DateTimeField } from '@/components/ui/DateTimeField';
 import { Screen } from '@/components/ui/Screen';
+import { TextField } from '@/components/ui/TextField';
 import { api } from '@/api/client';
 import { useAuth } from '@/auth/AuthProvider';
 import { pickDocument, pickImage, readBase64, type LocalFile } from '@/utils/files';
-import { formatDate, formatMoney } from '@/utils/format';
+import { formatDate, formatMoney, parseAmount } from '@/utils/format';
 import { confidenceBadge } from '@/utils/invoice';
 import { toast } from '@/utils/toast';
 import { colors, radius } from '@/theme/tokens';
@@ -24,14 +26,21 @@ const MAX_BYTES = 3 * 1024 * 1024;
 
 type Step = 1 | 2 | 3;
 
+const isDateKey = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+
 export default function RegisterInvoiceScreen() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>(1);
   const [file, setFile] = useState<LocalFile | null>(null);
   const [base64, setBase64] = useState<string | null>(null);
-  const [ai, setAi] = useState<{ data: AiExtraction; score: number } | null>(null);
+  // Read by the AI or typed in step 2 (same shape: a typed value replaces the AI's)
+  const [extracted, setExtracted] = useState<AiExtraction | null>(null);
+  const [score, setScore] = useState(0);
+  // Filled by hand instead of read by the AI (always the case when the clinic has no AI)
+  const [manual, setManual] = useState(false);
   const [reviewed, setReviewed] = useState(false);
+  const aiOn = user?.activeCompany?.aiEnabled !== false;
 
   const choose = async (source: 'camera' | 'library' | 'document') => {
     const picked =
@@ -48,8 +57,21 @@ export default function RegisterInvoiceScreen() {
     }
     setFile(picked);
     setBase64(b64);
-    setAi(null);
+    setExtracted(null);
+    setManual(false);
   };
+
+  const startManual = () => {
+    setManual(true);
+    setExtracted({});
+    setScore(0);
+    setReviewed(false);
+    setStep(2);
+  };
+
+  /** Confidence no longer applies to a typed value. */
+  const setField = (key: string) => (value: string) =>
+    setExtracted((d) => ({ ...(d ?? {}), [key]: { valor: value, confianca: 1 } }));
 
   const analyze = useMutation({
     mutationFn: () =>
@@ -62,73 +84,78 @@ export default function RegisterInvoiceScreen() {
         },
       }),
     onSuccess: (res) => {
-      setAi({ data: res.data, score: res.ai_confidence_score });
+      setManual(false);
+      setExtracted(res.data ?? {});
+      setScore(res.ai_confidence_score ?? 0);
+      setReviewed(false);
       setStep(2);
     },
     onError: (e: Error) => toast.error('Erro na análise', e.message),
   });
 
-  const v = (key: string) => ai?.data[key]?.valor;
+  const v = (key: string) => extracted?.[key]?.valor;
   const str = (key: string) => {
     const x = v(key);
     return x === null || x === undefined || x === '' ? '' : String(x);
   };
+  /** AI values come as numbers, typed ones as "1.234,56": both become a number (null when empty). */
   const num = (key: string) => {
     const x = v(key);
-    const n = x === null || x === undefined || x === '' ? NaN : Number(x);
+    if (x === null || x === undefined || x === '') return null;
+    const n = typeof x === 'number' ? x : parseAmount(String(x));
     return Number.isFinite(n) ? n : null;
   };
-  const lowConfidence = !!ai && Object.values(ai.data).some((f) => f && f.confianca > 0 && f.confianca < 0.6);
+  const lowConfidence =
+    !manual && !!extracted && Object.values(extracted).some((f) => f && f.confianca > 0 && f.confianca < 0.6);
 
   const save = useMutation({
-    mutationFn: () =>
-      api('/api/invoices', {
-        method: 'POST',
-        body: {
-          image: base64,
-          image_type: file!.type,
-          chave_nfe: str('chave_nfe'),
-          numero_nota: str('numero_nota'),
-          serie: str('serie'),
-          data_emissao: str('data_emissao'),
-          emitente_nome: str('emitente_nome') || user?.fullName,
-          emitente_cnpj_cpf: str('emitente_cnpj_cpf'),
-          emitente_crp: str('emitente_crp'),
-          emitente_endereco: str('emitente_endereco'),
-          emitente_municipio: str('emitente_municipio'),
-          emitente_uf: str('emitente_uf'),
-          emitente_cep: str('emitente_cep'),
-          emitente_telefone: str('emitente_telefone'),
-          emitente_email: str('emitente_email') || user?.email,
-          tomador_nome: str('tomador_nome'),
-          tomador_cpf_cnpj: str('tomador_cpf_cnpj'),
-          tomador_endereco: str('tomador_endereco'),
-          tomador_municipio: str('tomador_municipio'),
-          tomador_uf: str('tomador_uf'),
-          tomador_cep: str('tomador_cep'),
-          tomador_email: str('tomador_email'),
-          descricao_servico: str('descricao_servico'),
-          codigo_servico: str('codigo_servico') || '8.02',
-          codigo_cnae: str('codigo_cnae'),
-          iss_retido: v('iss_retido') === true,
-          aliquota_iss: num('aliquota_iss'),
-          valor_servicos: num('valor_servicos'),
-          valor_deducoes: num('valor_deducoes') ?? 0,
-          base_calculo: num('base_calculo'),
-          valor_iss: num('valor_iss'),
-          valor_pis: num('valor_pis'),
-          valor_cofins: num('valor_cofins'),
-          valor_inss: num('valor_inss'),
-          valor_ir: num('valor_ir'),
-          valor_csll: num('valor_csll'),
-          valor_liquido: num('valor_liquido') ?? num('valor_servicos'),
-          ai_raw_response: ai?.data,
-          ai_confidence_score: ai?.score,
-          ai_extracted_at: new Date().toISOString(),
-          revisado_pela_psicologa: true,
-          status: 'ativa',
-        },
-      }),
+    mutationFn: () => {
+      const body: Record<string, unknown> = {
+        image: base64,
+        image_type: file!.type,
+        chave_nfe: str('chave_nfe'),
+        numero_nota: str('numero_nota'),
+        serie: str('serie'),
+        data_emissao: str('data_emissao'),
+        emitente_nome: str('emitente_nome') || user?.fullName,
+        emitente_cnpj_cpf: str('emitente_cnpj_cpf'),
+        emitente_crp: str('emitente_crp'),
+        emitente_endereco: str('emitente_endereco'),
+        emitente_municipio: str('emitente_municipio'),
+        emitente_uf: str('emitente_uf'),
+        emitente_cep: str('emitente_cep'),
+        emitente_telefone: str('emitente_telefone'),
+        emitente_email: str('emitente_email') || user?.email,
+        tomador_nome: str('tomador_nome'),
+        tomador_cpf_cnpj: str('tomador_cpf_cnpj'),
+        tomador_endereco: str('tomador_endereco'),
+        tomador_municipio: str('tomador_municipio'),
+        tomador_uf: str('tomador_uf'),
+        tomador_cep: str('tomador_cep'),
+        tomador_email: str('tomador_email'),
+        descricao_servico: str('descricao_servico'),
+        codigo_servico: str('codigo_servico') || '8.02',
+        codigo_cnae: str('codigo_cnae'),
+        iss_retido: v('iss_retido') === true,
+        aliquota_iss: num('aliquota_iss'),
+        valor_servicos: num('valor_servicos'),
+        valor_deducoes: num('valor_deducoes') ?? 0,
+        base_calculo: num('base_calculo'),
+        valor_iss: num('valor_iss'),
+        valor_pis: num('valor_pis'),
+        valor_cofins: num('valor_cofins'),
+        valor_inss: num('valor_inss'),
+        valor_ir: num('valor_ir'),
+        valor_csll: num('valor_csll'),
+        valor_liquido: num('valor_liquido') ?? num('valor_servicos'),
+        ...(manual ? {} : { ai_raw_response: extracted, ai_confidence_score: score, ai_extracted_at: new Date().toISOString() }),
+        revisado_pela_psicologa: true,
+        status: 'ativa',
+      };
+      // Fields left blank are sent as empty, not as "" (dates and keys reject an empty string)
+      for (const k of Object.keys(body)) if (body[k] === '') body[k] = null;
+      return api('/api/invoices', { method: 'POST', body });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/invoices'] });
       queryClient.invalidateQueries({ queryKey: ['/api/invoices/summary'] });
@@ -138,22 +165,26 @@ export default function RegisterInvoiceScreen() {
     onError: (e: Error) => toast.error('Erro ao salvar', e.message),
   });
 
-  const renderField = (label: string, k: string, money?: boolean) => {
-    const c = confidenceBadge(ai?.data[k]?.confianca);
-    const raw = str(k);
-    const shown = !raw ? '—' : money ? formatMoney(raw) : k === 'data_emissao' ? formatDate(raw) : raw;
+  /** Label plus the AI's confidence (hidden when filling by hand). */
+  const fieldHead = (label: string, k: string) => {
+    const c = confidenceBadge(extracted?.[k]?.confianca);
     return (
-      <View key={k} style={styles.field}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <AppText variant="caption" tone="muted">
-            {label}
-          </AppText>
-          <Badge label={c.label} tone={c.tone} />
-        </View>
-        <AppText>{shown}</AppText>
+      <View style={styles.fieldHead}>
+        <AppText variant="label" style={{ color: colors.ink, flex: 1 }}>
+          {label}
+        </AppText>
+        {!manual && <Badge label={c.label} tone={c.tone} />}
       </View>
     );
   };
+
+  /** Editable review field: a typed value replaces the AI's. */
+  const renderField = (label: string, k: string, props: Omit<ComponentProps<typeof TextField>, 'value' | 'onChangeText'> = {}) => (
+    <View key={k} style={styles.field}>
+      {fieldHead(label, k)}
+      <TextField value={str(k)} onChangeText={setField(k)} accessibilityLabel={label} {...props} />
+    </View>
+  );
 
   const ReviewCheck = (
     <Pressable style={styles.check} onPress={() => setReviewed((r) => !r)} accessibilityRole="checkbox" accessibilityState={{ checked: reviewed }}>
@@ -162,15 +193,28 @@ export default function RegisterInvoiceScreen() {
     </Pressable>
   );
 
+  const emissao = str('data_emissao');
+
   const footer =
     step === 1 ? (
-      <Button
-        title="Analisar com IA"
-        icon={<Sparkles size={18} color={colors.onPrimary} />}
-        disabled={!file}
-        loading={analyze.isPending}
-        onPress={() => analyze.mutate()}
-      />
+      <View style={{ gap: 10 }}>
+        {aiOn && (
+          <Button
+            title="Analisar com IA"
+            icon={<Sparkles size={18} color={colors.onPrimary} />}
+            disabled={!file || !base64}
+            loading={analyze.isPending}
+            onPress={() => analyze.mutate()}
+          />
+        )}
+        <Button
+          title="Preencher manualmente"
+          variant={aiOn ? 'outline' : 'primary'}
+          icon={<PenLine size={18} color={aiOn ? colors.ink : colors.onPrimary} />}
+          disabled={!file || !base64 || analyze.isPending}
+          onPress={startManual}
+        />
+      </View>
     ) : step === 2 ? (
       <View style={{ flexDirection: 'row', gap: 10 }}>
         <Button title="Voltar" variant="outline" style={{ flex: 1 }} onPress={() => setStep(1)} />
@@ -196,8 +240,9 @@ export default function RegisterInvoiceScreen() {
         {step === 1 && (
           <Card style={{ gap: 14 }}>
             <AppText tone="muted">
-              Fotografe a nota ou selecione um PDF, JPEG, PNG ou WebP. Para PDF, o texto é extraído automaticamente; para
-              imagens, é usada visão computacional.
+              {aiOn
+                ? 'Fotografe a nota ou selecione um PDF, JPEG, PNG ou WebP. A IA lê a nota e preenche os campos; se preferir, preencha você mesma.'
+                : 'Fotografe a nota ou selecione um PDF, JPEG, PNG ou WebP. O arquivo fica guardado junto com os dados que você preencher em seguida.'}
             </AppText>
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <Button title="Câmera" variant="outline" style={{ flex: 1 }} icon={<Camera size={18} color={colors.ink} />} onPress={() => choose('camera')} />
@@ -220,9 +265,9 @@ export default function RegisterInvoiceScreen() {
           </Card>
         )}
 
-        {step === 2 && ai && (
+        {step === 2 && extracted && (
           <>
-            {typeof v('emitente_divergencias') === 'string' && (
+            {!manual && typeof v('emitente_divergencias') === 'string' && (
               <View style={styles.warn}>
                 <AlertTriangle size={18} color={colors.warning} />
                 <View style={{ flex: 1 }}>
@@ -232,39 +277,44 @@ export default function RegisterInvoiceScreen() {
               </View>
             )}
             <Card>
-              {renderField('Chave NF-e', 'chave_nfe')}
+              {renderField('Chave NF-e', 'chave_nfe', { keyboardType: 'number-pad', placeholder: '44 dígitos' })}
               {renderField('Número', 'numero_nota')}
               {renderField('Série', 'serie')}
-              {renderField('Data de emissão', 'data_emissao')}
+              <View style={styles.field}>
+                {fieldHead('Data de emissão', 'data_emissao')}
+                <DateTimeField
+                  mode="date"
+                  // The picker only understands yyyy-MM-dd; anything else read by the AI shows as empty
+                  value={isDateKey(emissao) ? emissao : ''}
+                  onChange={setField('data_emissao')}
+                />
+              </View>
             </Card>
             <Card>
               <AppText variant="overline" tone="subtle">
-                Emitente (pré-preenchido com seu perfil)
+                Emitente (seu perfil quando em branco)
               </AppText>
-              <View style={styles.field}>
-                <AppText variant="caption" tone="muted">
-                  Nome
-                </AppText>
-                <AppText>{str('emitente_nome') || user?.fullName}</AppText>
-              </View>
-              <View style={styles.field}>
-                <AppText variant="caption" tone="muted">
-                  E-mail
-                </AppText>
-                <AppText>{str('emitente_email') || user?.email}</AppText>
-              </View>
+              {renderField('Nome', 'emitente_nome', { placeholder: user?.fullName ?? '' })}
+              {renderField('E-mail', 'emitente_email', {
+                placeholder: user?.email ?? '',
+                keyboardType: 'email-address',
+                autoCapitalize: 'none',
+              })}
             </Card>
             <Card>
               <AppText variant="overline" tone="subtle">
                 Tomador
               </AppText>
               {renderField('Tomador (paciente / responsável)', 'tomador_nome')}
-              {renderField('CPF/CNPJ tomador', 'tomador_cpf_cnpj')}
+              {renderField('CPF/CNPJ tomador', 'tomador_cpf_cnpj', { keyboardType: 'number-pad' })}
             </Card>
             <Card>
-              {renderField('Descrição do serviço', 'descricao_servico')}
-              {renderField('Valor dos serviços', 'valor_servicos', true)}
-              {renderField('Valor líquido', 'valor_liquido', true)}
+              {renderField('Descrição do serviço', 'descricao_servico', { multiline: true })}
+              {renderField('Valor dos serviços', 'valor_servicos', { keyboardType: 'decimal-pad', placeholder: 'Ex: 180,00' })}
+              {renderField('Valor líquido', 'valor_liquido', {
+                keyboardType: 'decimal-pad',
+                placeholder: 'Igual aos serviços quando em branco',
+              })}
             </Card>
             {lowConfidence && (
               <AppText variant="caption" style={{ color: colors.warning }}>
@@ -275,7 +325,7 @@ export default function RegisterInvoiceScreen() {
           </>
         )}
 
-        {step === 3 && ai && (
+        {step === 3 && extracted && (
           <>
             <Card style={{ gap: 8 }}>
               <AppText>
@@ -288,11 +338,13 @@ export default function RegisterInvoiceScreen() {
               </AppText>
               <AppText>
                 <AppText weight="semibold">Data de emissão: </AppText>
-                {str('data_emissao') ? formatDate(str('data_emissao')) : '—'}
+                {!emissao ? '—' : isDateKey(emissao) ? formatDate(emissao) : emissao}
               </AppText>
               <AppText>
                 <AppText weight="semibold">Valor líquido: </AppText>
-                {formatMoney(num('valor_liquido') ?? num('valor_servicos') ?? 0)}
+                {(num('valor_liquido') ?? num('valor_servicos')) === null
+                  ? '—'
+                  : formatMoney(num('valor_liquido') ?? num('valor_servicos'))}
               </AppText>
             </Card>
             {ReviewCheck}
@@ -305,7 +357,8 @@ export default function RegisterInvoiceScreen() {
 
 const styles = StyleSheet.create({
   steps: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
-  field: { paddingVertical: 8, gap: 2, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.divider },
+  field: { paddingVertical: 6, gap: 6 },
+  fieldHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   fileBox: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: radius.md, backgroundColor: colors.primarySoft },
   warn: { flexDirection: 'row', gap: 10, padding: 12, borderRadius: radius.md, backgroundColor: colors.warningSoft },
   check: { flexDirection: 'row', alignItems: 'center', gap: 10 },

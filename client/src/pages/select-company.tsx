@@ -82,7 +82,10 @@ export default function SelectCompanyPage() {
                         )}
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-medium text-cp-ink">{company.name}</span>
-                          <span className="block text-sm text-cp-muted">{roleName(company.role)}</span>
+                          <span className="block text-sm text-cp-muted">
+                            {roleName(company.role)}
+                            {company.accessExpired && <span className="font-medium text-cp-danger"> · Acesso vencido</span>}
+                          </span>
                         </span>
                         {isPending ? (
                           <Loader2 className="h-5 w-5 animate-spin text-cp-muted" />

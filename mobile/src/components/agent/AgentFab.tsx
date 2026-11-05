@@ -14,7 +14,7 @@ const TAB_BAR = Platform.OS === 'ios' ? 49 : 56;
 export function AgentFab() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
-  const status = useAgentStatus(!!user?.activeCompany);
+  const status = useAgentStatus(user?.activeCompany?.id);
   if (!status.data?.enabled) return null;
 
   return (

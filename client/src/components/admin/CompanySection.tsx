@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Building2, FileText, ImagePlus, Loader2, Trash2 } from "lucide-react";
+import { Building2, CalendarClock, FileText, ImagePlus, Loader2, Sparkles, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cpButton } from "@/components/cp/PageHeader";
@@ -8,8 +8,20 @@ import { IconField, InfoBanner } from "@/components/cp/fields";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { errorMessage } from "@/lib/api-error";
+import { accessState, endingLabel, formatDay } from "@/lib/company-access";
+import { cn } from "@/lib/utils";
 
-type CurrentCompany = { id: number; name: string; slug: string; cnpj: string | null; logoUrl: string | null };
+type CurrentCompany = {
+  id: number;
+  name: string;
+  slug: string;
+  cnpj: string | null;
+  logoUrl: string | null;
+  // Set by the platform admin; read-only here
+  accessValidUntil: string | null;
+  accessExpired: boolean;
+  aiEnabled: boolean;
+};
 
 const QUERY_KEY = ["/api/companies/current"];
 
@@ -126,6 +138,7 @@ function CompanyForm({ company }: { company: CurrentCompany }) {
       </div>
 
       <form
+        id="company-form"
         className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
@@ -147,13 +160,55 @@ function CompanyForm({ company }: { company: CurrentCompany }) {
         {company.name === "Empresa 1" && (
           <InfoBanner variant="info">Esta clínica ainda está com o nome padrão. Troque pelo nome real para ele aparecer no menu.</InfoBanner>
         )}
-        <div className="flex justify-end">
-          <button type="submit" className={cpButton.primary} disabled={!changed || !name.trim() || save.isPending}>
-            {save.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            Salvar dados
-          </button>
-        </div>
       </form>
+
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between md:col-span-2">
+        <AccessInfo company={company} />
+        <button type="submit" form="company-form" className={cn(cpButton.primary, "shrink-0 self-end sm:self-auto")} disabled={!changed || !name.trim() || save.isPending}>
+          {save.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+          Salvar dados
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const badgeTone = {
+  active: "bg-cp-sage-soft text-cp-success",
+  ending: "bg-cp-warning-soft text-cp-warning",
+  expired: "bg-cp-danger-soft text-cp-danger",
+};
+
+/** How long the clinic's access lasts and whether AI is in its plan (both set by the platform). */
+function AccessInfo({ company }: { company: CurrentCompany }) {
+  const state = accessState(company);
+  return (
+    <div className="flex min-w-0 flex-1 items-start gap-3 rounded-xl border border-cp-divider bg-cp-hover px-4 py-3">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white">
+        <CalendarClock className="h-5 w-5 text-cp-muted" aria-hidden="true" />
+      </span>
+      <div className="min-w-0 space-y-1">
+        {company.accessValidUntil ? (
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px] text-cp-ink">
+            <span>
+              Acesso válido até <strong className="font-semibold">{formatDay(company.accessValidUntil)}</strong>
+            </span>
+            {state !== "unlimited" && (
+              <span className={cn("rounded-full px-2 py-0.5 text-[12px] font-semibold", badgeTone[state])}>
+                {state === "expired" ? "Vencido" : state === "ending" ? endingLabel(company.accessValidUntil) : "Ativo"}
+              </span>
+            )}
+          </p>
+        ) : (
+          <p className="text-[14px] text-cp-ink">Acesso sem data de vencimento</p>
+        )}
+        {!company.aiEnabled && (
+          <p className="flex items-center gap-1.5 text-[13px] text-cp-muted">
+            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+            Recursos de inteligência artificial não incluídos no plano
+          </p>
+        )}
+      </div>
     </div>
   );
 }

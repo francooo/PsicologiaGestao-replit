@@ -87,6 +87,12 @@ export default function SelectCompanyScreen() {
               </AppText>
               <AppText variant="caption" tone="muted">
                 {roleLabels[company.role] ?? company.role}
+                {company.accessExpired && (
+                  <AppText variant="caption" weight="semibold" tone="danger">
+                    {' '}
+                    · Acesso vencido
+                  </AppText>
+                )}
               </AppText>
             </View>
             {pendingId === company.id ? (

@@ -13,14 +13,11 @@ import { SelectField } from '@/components/ui/SelectField';
 import { TextField } from '@/components/ui/TextField';
 import { api } from '@/api/client';
 import { expenseCategories, incomeCategories } from '@/utils/finance';
-import { toDateKey } from '@/utils/format';
+import { parseAmount, toDateKey } from '@/utils/format';
 import { toast } from '@/utils/toast';
 import { colors } from '@/theme/tokens';
 
 const NEW = '__new__';
-
-// "1.234,56" (pt-BR) or "200.00" — dots are thousand separators only when a comma is present
-const parseAmount = (v: string) => parseFloat(v.includes(',') ? v.replace(/\./g, '').replace(',', '.') : v);
 
 const schema = z.object({
   description: z.string().trim().min(1, 'Descrição é obrigatória'),

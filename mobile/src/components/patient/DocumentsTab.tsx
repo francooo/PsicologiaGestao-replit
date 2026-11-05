@@ -69,6 +69,8 @@ export function DocumentsTab({ patientId }: { patientId: number }) {
   const [summary, setSummary] = useState<{ doc: PatientDocument; text?: string; error?: string; generatedAt?: string | null } | null>(null);
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  // Summaries are an AI feature: hidden when the clinic's plan has no AI
+  const aiOn = user?.activeCompany?.aiEnabled !== false;
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: patientKeys.documents(patientId) });
@@ -205,18 +207,22 @@ export function DocumentsTab({ patientId }: { patientId: number }) {
                 </View>
               </View>
               <View style={styles.actions}>
-                <Button
-                  title={d.aiSummaryAt ? 'Ver resumo IA' : 'Resumir com IA'}
-                  size="sm"
-                  variant="secondary"
-                  fullWidth={false}
-                  icon={<Sparkles size={16} color={colors.primary} />}
-                  loading={summarize.isPending && summarize.variables?.doc.id === d.id}
-                  onPress={() => {
-                    setSummary({ doc: d });
-                    summarize.mutate({ doc: d });
-                  }}
-                />
+                {aiOn ? (
+                  <Button
+                    title={d.aiSummaryAt ? 'Ver resumo IA' : 'Resumir com IA'}
+                    size="sm"
+                    variant="secondary"
+                    fullWidth={false}
+                    icon={<Sparkles size={16} color={colors.primary} />}
+                    loading={summarize.isPending && summarize.variables?.doc.id === d.id}
+                    onPress={() => {
+                      setSummary({ doc: d });
+                      summarize.mutate({ doc: d });
+                    }}
+                  />
+                ) : (
+                  <View />
+                )}
                 <View style={{ flexDirection: 'row' }}>
                   <IconButton icon={Download} label="Baixar documento" onPress={() => onDownload(d)} />
                   <IconButton icon={Trash2} tone="danger" label="Excluir documento" onPress={() => onDelete(d)} />

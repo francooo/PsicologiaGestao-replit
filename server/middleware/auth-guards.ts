@@ -64,6 +64,26 @@ export function requireCompany(req: Request, res: Response, next: NextFunction) 
   if (!req.companyId) {
     return res.status(409).json({ message: "Selecione uma empresa para continuar.", code: "NO_COMPANY" });
   }
+  // Expired clinic: everyone in it is blocked (admins they create included); the platform admin
+  // still gets in to support and renew it
+  if (req.company?.accessExpired && !isPlatformAdmin(req.user.email)) {
+    const [y, m, d] = req.company.accessValidUntil!.split("-");
+    return res.status(403).json({
+      message: `O acesso desta clínica venceu em ${d}/${m}/${y}. Fale com o suporte para renovar.`,
+      code: "ACCESS_EXPIRED",
+    });
+  }
+  next();
+}
+
+/** AI (Groq) is available when the server has the key and the active clinic has it switched on. */
+export const aiAllowed = (req: Request) => !!process.env.GROQ_API_KEY && req.company?.aiEnabled !== false;
+
+/** Blocks AI routes for clinics with AI switched off (a missing key keeps each route's own 503). */
+export function requireAi(req: Request, res: Response, next: NextFunction) {
+  if (req.company?.aiEnabled === false) {
+    return res.status(403).json({ message: "Os recursos de inteligência artificial não estão disponíveis para esta clínica.", code: "AI_DISABLED" });
+  }
   next();
 }
 

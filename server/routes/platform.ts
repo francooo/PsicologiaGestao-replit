@@ -10,6 +10,7 @@ import {
   cnpjSchema,
   companyNameSchema as nameSchema,
   ensurePsychologistProfileFor,
+  isAccessExpired,
   isPlatformAdmin,
   upsertMembership,
 } from "../lib/companies";
@@ -26,8 +27,11 @@ const companyColumns = {
   cnpj: companies.cnpj,
   logoUrl: companies.logoUrl,
   status: companies.status,
+  accessValidUntil: companies.accessValidUntil,
+  aiEnabled: companies.aiEnabled,
   createdAt: companies.createdAt,
 };
+const withExpiry = <T extends { accessValidUntil: string | null }>(c: T) => ({ ...c, accessExpired: isAccessExpired(c.accessValidUntil) });
 
 
 function slugify(name: string) {
@@ -76,7 +80,7 @@ router.get("/companies", async (_req, res) => {
       list.map((c) => {
         const rows = members.filter((m) => m.companyId === c.id);
         return {
-          ...c,
+          ...withExpiry(c),
           membersCount: rows.reduce((acc, m) => acc + Number(m.total), 0),
           adminsCount: Number(rows.find((m) => m.role === "admin")?.total ?? 0),
           pendingInvitesCount: Number(pending.find((p) => p.companyId === c.id)?.total ?? 0),
@@ -119,10 +123,19 @@ const updateSchema = z
     name: nameSchema.optional(),
     cnpj: cnpjSchema.optional(),
     status: z.enum(["active", "suspended"]).optional(),
+    // Last day of access (inclusive); null removes the expiry
+    accessValidUntil: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Data de validade inválida.")
+      .refine((v) => !isNaN(Date.parse(`${v}T00:00:00Z`)), "Data de validade inválida.")
+      .nullable()
+      .optional(),
+    aiEnabled: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, "Nada para alterar.");
 
-// PATCH /api/platform/companies/:id { name?, cnpj?, status? } — rename or suspend/reactivate
+// PATCH /api/platform/companies/:id { name?, cnpj?, status?, accessValidUntil?, aiEnabled? } —
+// rename, suspend/reactivate, set the access expiry or switch AI off
 router.patch("/companies/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ message: "Empresa inválida." });
@@ -132,7 +145,7 @@ router.patch("/companies/:id", async (req, res) => {
   try {
     const [updated] = await db.update(companies).set(parsed.data).where(eq(companies.id, id)).returning(companyColumns);
     if (!updated) return res.status(404).json({ message: "Empresa não encontrada." });
-    res.json(updated);
+    res.json(withExpiry(updated));
   } catch (error) {
     console.error("PATCH /api/platform/companies/:id:", error);
     res.status(500).json({ message: "Erro ao atualizar empresa." });
@@ -165,7 +178,7 @@ router.get("/companies/:id", async (req, res) => {
       .from(accessInvites)
       .where(and(eq(accessInvites.companyId, id), isNull(accessInvites.acceptedAt)))
       .orderBy(asc(accessInvites.createdAt));
-    res.json({ company, members, invites });
+    res.json({ company: withExpiry(company), members, invites });
   } catch (error) {
     console.error("GET /api/platform/companies/:id:", error);
     res.status(500).json({ message: "Erro ao carregar empresa." });

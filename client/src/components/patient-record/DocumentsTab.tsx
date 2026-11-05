@@ -104,6 +104,8 @@ export default function DocumentsTab({ patientId }: DocumentsTabProps) {
     const [aiDoc, setAiDoc] = useState<PatientDocument | null>(null);
     const { user } = useAuth();
     const isAdmin = user?.role === "admin";
+    // Clinics without AI in their plan don't get the summary feature
+    const aiOn = user?.activeCompany?.aiEnabled !== false;
 
     // First call generates and saves the summary; later calls return the saved one (no AI tokens).
     // Only admins can force a new summary (refresh).
@@ -299,7 +301,7 @@ export default function DocumentsTab({ patientId }: DocumentsTabProps) {
                                     <span className="text-xs text-muted-foreground">
                                         {format(new Date(doc.createdAt), "dd/MM/yyyy", { locale: ptBR })}
                                     </span>
-                                    {doc.aiSummaryAt && (
+                                    {aiOn && doc.aiSummaryAt && (
                                         <span className="inline-flex items-center gap-1 text-xs text-purple-600" title="Resumo IA salvo">
                                             <Sparkles className="h-3 w-3" /> Resumo salvo
                                         </span>
@@ -307,7 +309,7 @@ export default function DocumentsTab({ patientId }: DocumentsTabProps) {
                                 </div>
                             </div>
                             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button
+                                {aiOn && <button
                                     className="p-1.5 rounded-lg hover:bg-purple-100 text-purple-500 hover:text-purple-700 transition-colors disabled:opacity-50"
                                     title={doc.aiSummaryAt ? "Ver resumo IA (salvo)" : "Resumir com IA"}
                                     onClick={() => handleAISummarize(doc)}
@@ -319,7 +321,7 @@ export default function DocumentsTab({ patientId }: DocumentsTabProps) {
                                     ) : (
                                         <Sparkles className="h-3.5 w-3.5" />
                                     )}
-                                </button>
+                                </button>}
                                 <a
                                     href={`/api/patients/documents/${doc.id}/download`}
                                     className="p-1.5 rounded-lg hover:bg-primary/10 text-primary transition-colors"

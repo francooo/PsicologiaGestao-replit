@@ -29,16 +29,23 @@ function RootNavigator() {
 
   if (isLoading) return null;
 
+  // The active clinic's access ended: its members only see the notice (the platform admin still gets in to support it)
+  const accessExpired = !!user?.activeCompany?.accessExpired && !user.isPlatformAdmin;
+
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }}>
       <Stack.Protected guard={!user}>
         <Stack.Screen name="(auth)" />
       </Stack.Protected>
+      {/* Listed before selecionar-empresa: the first available screen is where blocked routes redirect to */}
+      <Stack.Protected guard={accessExpired}>
+        <Stack.Screen name="acesso-vencido" />
+      </Stack.Protected>
       {/* Choose the company: required while there is no active one, and "Trocar" later */}
       <Stack.Protected guard={!!user}>
         <Stack.Screen name="selecionar-empresa" />
       </Stack.Protected>
-      <Stack.Protected guard={!!user?.activeCompany}>
+      <Stack.Protected guard={!!user?.activeCompany && !accessExpired}>
         <Stack.Screen name="(app)" />
       </Stack.Protected>
       {/* Platform (super) admin: the companies themselves, with or without an active one */}

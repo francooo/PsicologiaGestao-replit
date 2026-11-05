@@ -29,6 +29,7 @@ import { PrivacyPage, TermsPage } from "@/pages/legal";
 import { ProtectedRoute } from "./lib/protected-route";
 import { AuthProvider } from "./hooks/use-auth";
 import { AgentLauncher } from "@/components/agent/AgentLauncher";
+import { ExpiryReminder } from "@/components/ExpiryReminder";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const ADMIN = ["admin"];
@@ -77,6 +78,7 @@ function App() {
         <AuthProvider>
           <Router />
           <AgentLauncher />
+          <ExpiryReminder />
           <Toaster />
         </AuthProvider>
       </QueryClientProvider>

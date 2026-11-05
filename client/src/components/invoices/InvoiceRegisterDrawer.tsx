@@ -8,12 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Camera, FileText, Sparkles, ClipboardCheck, ShieldCheck, ArrowLeft, Save } from "lucide-react";
+import { Loader2, Camera, FileText, Sparkles, ClipboardCheck, ShieldCheck, ArrowLeft, Save, PenLine } from "lucide-react";
 import { cpButton } from "@/components/cp/PageHeader";
 import { CheckTile, InfoBanner } from "@/components/cp/fields";
 import { StatusBadge } from "@/components/cp/StatusBadge";
 import type { Tone } from "@/components/cp/status";
 import { cn } from "@/lib/utils";
+import { parseAmount } from "@/lib/money";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const ACCEPT_TYPES = "image/jpeg,image/png,image/webp,application/pdf";
@@ -41,9 +42,19 @@ function getConfidenceBadge(conf: number): { label: string; tone: Tone } {
 
 const STEPS = ["Upload", "Revisão", "Confirmar"];
 
+const formatBRL = (v: number | null) => (v != null ? v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "—");
+
 function val<T>(f: ExtractedField | undefined): T | "" {
   if (!f || f.valor == null || f.valor === "") return "" as T;
   return String(f.valor) as T;
+}
+
+/** AI values come as numbers, typed ones as "1.234,56": both become a number (null when empty). */
+function num(f: ExtractedField | undefined): number | null {
+  if (!f || f.valor == null || f.valor === "") return null;
+  if (typeof f.valor === "number") return f.valor;
+  const n = parseAmount(String(f.valor));
+  return isNaN(n) ? null : n;
 }
 
 interface InvoiceRegisterDrawerProps {
@@ -64,6 +75,21 @@ export function InvoiceRegisterDrawer({ open, onOpenChange }: InvoiceRegisterDra
   const [emitenteDivergencias, setEmitenteDivergencias] = useState<string | null>(null);
   const [confirmedReview, setConfirmedReview] = useState(false);
   const [confirmedSave, setConfirmedSave] = useState(false);
+  // Filled by hand instead of read by the AI (always the case when the clinic has no AI)
+  const [manual, setManual] = useState(false);
+  const aiOn = user?.activeCompany?.aiEnabled !== false;
+
+  /** The review fields are editable: a typed value replaces the AI's (confidence no longer applies). */
+  const setField = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setExtracted((d) => ({ ...(d ?? {}), [key]: { valor: e.target.value, confianca: 1 } }));
+
+  const startManual = () => {
+    setManual(true);
+    setExtracted({});
+    setAiConfidenceScore(0);
+    setEmitenteDivergencias(null);
+    setStep(2);
+  };
 
   const analyzeMutation = useMutation({
     mutationFn: async (payload: { image: string; image_type: string; psychologist_profile: { nome?: string; email?: string } }) => {
@@ -84,6 +110,7 @@ export function InvoiceRegisterDrawer({ open, onOpenChange }: InvoiceRegisterDra
     },
     onSuccess: (data) => {
       setAnalysisMessage("Preenchendo os campos!");
+      setManual(false);
       setExtracted(data.data);
       setAiConfidenceScore(data.ai_confidence_score ?? 0);
       const div = data.data?.emitente_divergencias;
@@ -129,6 +156,7 @@ export function InvoiceRegisterDrawer({ open, onOpenChange }: InvoiceRegisterDra
     setConfirmedReview(false);
     setConfirmedSave(false);
     setEmitenteDivergencias(null);
+    setManual(false);
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -195,23 +223,25 @@ export function InvoiceRegisterDrawer({ open, onOpenChange }: InvoiceRegisterDra
       codigo_servico: val(d.codigo_servico) || "8.02",
       codigo_cnae: val(d.codigo_cnae),
       iss_retido: d.iss_retido?.valor === true,
-      aliquota_iss: d.aliquota_iss?.valor != null ? Number(d.aliquota_iss.valor) : null,
-      valor_servicos: d.valor_servicos?.valor != null ? Number(d.valor_servicos.valor) : null,
-      valor_deducoes: d.valor_deducoes?.valor != null ? Number(d.valor_deducoes.valor) : 0,
-      base_calculo: d.base_calculo?.valor != null ? Number(d.base_calculo.valor) : null,
-      valor_iss: d.valor_iss?.valor != null ? Number(d.valor_iss.valor) : null,
-      valor_liquido: d.valor_liquido?.valor != null ? Number(d.valor_liquido.valor) : d.valor_servicos?.valor != null ? Number(d.valor_servicos.valor) : null,
-      valor_pis: d.valor_pis?.valor != null ? Number(d.valor_pis.valor) : null,
-      valor_cofins: d.valor_cofins?.valor != null ? Number(d.valor_cofins.valor) : null,
-      valor_inss: d.valor_inss?.valor != null ? Number(d.valor_inss.valor) : null,
-      valor_ir: d.valor_ir?.valor != null ? Number(d.valor_ir.valor) : null,
-      valor_csll: d.valor_csll?.valor != null ? Number(d.valor_csll.valor) : null,
-      ai_raw_response: extracted,
-      ai_confidence_score: aiConfidenceScore,
-      ai_extracted_at: new Date().toISOString(),
+      aliquota_iss: num(d.aliquota_iss),
+      valor_servicos: num(d.valor_servicos),
+      valor_deducoes: num(d.valor_deducoes) ?? 0,
+      base_calculo: num(d.base_calculo),
+      valor_iss: num(d.valor_iss),
+      valor_liquido: num(d.valor_liquido) ?? num(d.valor_servicos),
+      valor_pis: num(d.valor_pis),
+      valor_cofins: num(d.valor_cofins),
+      valor_inss: num(d.valor_inss),
+      valor_ir: num(d.valor_ir),
+      valor_csll: num(d.valor_csll),
+      ...(manual
+        ? {}
+        : { ai_raw_response: extracted, ai_confidence_score: aiConfidenceScore, ai_extracted_at: new Date().toISOString() }),
       revisado_pela_psicologa: true,
       status: "ativa",
     };
+    // Fields left blank are sent as empty, not as "" (dates and keys reject an empty string)
+    for (const k of Object.keys(payload)) if (payload[k] === "") payload[k] = null;
     saveMutation.mutate(payload);
   };
 
@@ -245,7 +275,11 @@ export function InvoiceRegisterDrawer({ open, onOpenChange }: InvoiceRegisterDra
       <div className="space-y-6 py-6 [&_input]:rounded-xl [&_input]:border-cp-border [&_input]:bg-white [&_textarea]:rounded-xl [&_textarea]:border-cp-border [&_label]:text-cp-ink">
         {step === 1 && (
           <>
-            <p className="text-sm text-cp-muted">Selecione a nota fiscal em PDF, JPEG, PNG ou WebP — máx. 5MB. Para PDF, o texto será extraído automaticamente. Para imagens, será usada visão computacional.</p>
+            <p className="text-sm text-cp-muted">
+              {aiOn
+                ? "Selecione a nota fiscal em PDF, JPEG, PNG ou WebP — máx. 5MB. A IA lê a nota e preenche os campos; se preferir, preencha você mesma."
+                : "Selecione a nota fiscal em PDF, JPEG, PNG ou WebP — máx. 5MB. O arquivo fica guardado junto com os dados que você preencher em seguida."}
+            </p>
             <label className="flex h-44 w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-cp-border bg-white px-4 text-center transition-colors hover:border-cp-sage hover:bg-cp-sage-soft/40">
               <input type="file" className="hidden" accept={ACCEPT_TYPES} onChange={handleFileChange} />
               {imageFile?.type === PDF_MIME
@@ -255,19 +289,30 @@ export function InvoiceRegisterDrawer({ open, onOpenChange }: InvoiceRegisterDra
               <span className="text-sm text-cp-ink">{imageFile ? imageFile.name : "Clique ou arraste o arquivo (PDF, JPEG, PNG, WebP)"}</span>
             </label>
             {imageFile && (
-              <div className="flex gap-2">
-                <button type="button" className={cn(cpButton.primary, "flex-1")} onClick={handleAnalyze} disabled={analyzeMutation.isPending}>
-                  {analyzeMutation.isPending ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      {analysisMessage}
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="h-4 w-4" />
-                      Analisar com IA
-                    </>
-                  )}
+              <div className="flex flex-col gap-2 sm:flex-row">
+                {aiOn && (
+                  <button type="button" className={cn(cpButton.primary, "flex-1")} onClick={handleAnalyze} disabled={analyzeMutation.isPending || !imageBase64}>
+                    {analyzeMutation.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        {analysisMessage}
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-4 w-4" />
+                        Analisar com IA
+                      </>
+                    )}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={cn(aiOn ? cpButton.secondary : cpButton.primary, "flex-1")}
+                  onClick={startManual}
+                  disabled={analyzeMutation.isPending || !imageBase64}
+                >
+                  <PenLine className="h-4 w-4" />
+                  Preencher manualmente
                 </button>
               </div>
             )}
@@ -285,55 +330,55 @@ export function InvoiceRegisterDrawer({ open, onOpenChange }: InvoiceRegisterDra
               <div>
                 <Label>Chave NF-e</Label>
                 <div className="flex items-center gap-2 mt-1">
-                  <Input value={val(extracted.chave_nfe)} readOnly className="font-mono text-xs" />
-                  <StatusBadge className="shrink-0" {...getConfidenceBadge(extracted.chave_nfe?.confianca ?? 0)} />
+                  <Input value={val(extracted.chave_nfe)} onChange={setField("chave_nfe")} inputMode="numeric" placeholder="44 dígitos" className="font-mono text-xs" />
+                  {!manual && <StatusBadge className="shrink-0" {...getConfidenceBadge(extracted.chave_nfe?.confianca ?? 0)} />}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <Label>Número</Label>
-                  <Input value={val(extracted.numero_nota)} readOnly />
+                  <Input value={val(extracted.numero_nota)} onChange={setField("numero_nota")} />
                 </div>
                 <div>
                   <Label>Série</Label>
-                  <Input value={val(extracted.serie)} readOnly />
+                  <Input value={val(extracted.serie)} onChange={setField("serie")} />
                 </div>
               </div>
               <div>
                 <Label>Data Emissão</Label>
-                <Input type="date" value={val(extracted.data_emissao)} readOnly />
+                <Input type="date" value={val(extracted.data_emissao)} onChange={setField("data_emissao")} />
               </div>
-              <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-cp-muted">Emitente (pré-preenchido com seu perfil)</p>
+              <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-cp-muted">Emitente (seu perfil quando em branco)</p>
               <div className="grid grid-cols-1 gap-2">
                 <div>
                   <Label>Nome</Label>
-                  <Input value={val(extracted.emitente_nome) || user?.fullName || ""} readOnly />
+                  <Input value={val(extracted.emitente_nome)} onChange={setField("emitente_nome")} placeholder={user?.fullName ?? ""} />
                 </div>
                 <div>
                   <Label>E-mail</Label>
-                  <Input type="email" value={val(extracted.emitente_email) || user?.email || ""} readOnly />
+                  <Input type="email" value={val(extracted.emitente_email)} onChange={setField("emitente_email")} placeholder={user?.email ?? ""} />
                 </div>
               </div>
               <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-cp-muted">Tomador</p>
               <div>
                 <Label>Tomador (paciente / responsável)</Label>
-                <Input value={val(extracted.tomador_nome)} readOnly />
+                <Input value={val(extracted.tomador_nome)} onChange={setField("tomador_nome")} />
               </div>
               <div>
                 <Label>CPF/CNPJ Tomador</Label>
-                <Input value={val(extracted.tomador_cpf_cnpj)} readOnly />
+                <Input value={val(extracted.tomador_cpf_cnpj)} onChange={setField("tomador_cpf_cnpj")} inputMode="numeric" />
               </div>
               <div>
                 <Label>Descrição do serviço</Label>
-                <Textarea value={val(extracted.descricao_servico)} readOnly rows={2} />
+                <Textarea value={val(extracted.descricao_servico)} onChange={setField("descricao_servico")} rows={2} />
               </div>
               <div>
                 <Label>Valor dos serviços</Label>
-                <Input value={extracted.valor_servicos?.valor != null ? String(extracted.valor_servicos.valor) : ""} readOnly />
+                <Input value={val(extracted.valor_servicos)} onChange={setField("valor_servicos")} inputMode="decimal" placeholder="Ex: 180,00" />
               </div>
               <div>
                 <Label>Valor líquido</Label>
-                <Input value={extracted.valor_liquido?.valor != null ? String(extracted.valor_liquido.valor) : ""} readOnly className="font-semibold" />
+                <Input value={val(extracted.valor_liquido)} onChange={setField("valor_liquido")} inputMode="decimal" placeholder="Igual aos serviços quando em branco" className="font-semibold" />
               </div>
             </div>
             <CheckTile icon={ClipboardCheck} label="Revisei os dados acima e confirmo que estão corretos." checked={confirmedReview} onCheckedChange={setConfirmedReview} />
@@ -358,7 +403,7 @@ export function InvoiceRegisterDrawer({ open, onOpenChange }: InvoiceRegisterDra
               <p><strong>Chave NF-e:</strong> {val(extracted.chave_nfe) || "—"}</p>
               <p><strong>Tomador:</strong> {val(extracted.tomador_nome) || "—"}</p>
               <p><strong>Data emissão:</strong> {val(extracted.data_emissao) || "—"}</p>
-              <p><strong>Valor líquido:</strong> R$ {extracted.valor_liquido?.valor != null ? Number(extracted.valor_liquido.valor).toFixed(2) : "—"}</p>
+              <p><strong>Valor líquido:</strong> {formatBRL(num(extracted.valor_liquido) ?? num(extracted.valor_servicos))}</p>
             </div>
             <CheckTile icon={ShieldCheck} label="Revisei os dados acima e confirmo que estão corretos." checked={confirmedSave} onCheckedChange={setConfirmedSave} />
             <div className="flex justify-between gap-2">

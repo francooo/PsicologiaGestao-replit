@@ -1,7 +1,7 @@
 import express, { type Express, type Request } from "express";
 import { createServer, type Server } from "http";
 import { setupAuth, hashPassword } from "./auth";
-import { requireAuth, requireAdmin, requireRole, requireCompanyExcept } from "./middleware/auth-guards";
+import { requireAuth, requireAdmin, requireRole, requireCompanyExcept, requireAi } from "./middleware/auth-guards";
 import { storage } from "./storage";
 import { insertAppointmentSchema, insertRoomSchema, insertPsychologistSchema, insertTransactionSchema, insertRoomBookingSchema, insertPermissionSchema, insertRolePermissionSchema, insertInvoiceSchema } from "@shared/schema";
 import { ZodError } from "zod";
@@ -1729,7 +1729,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ========== INVOICE ROUTES (NFS-e com IA) ==========
 
   // POST /api/invoices/analyze-image - Análise de imagem ou PDF da nota fiscal com Groq
-  app.post("/api/invoices/analyze-image", async (req, res) => {
+  app.post("/api/invoices/analyze-image", requireAi, async (req, res) => {
     try {
       if (!req.isAuthenticated()) {
         return res.status(401).json({ message: "Não autenticado" });

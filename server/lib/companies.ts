@@ -18,6 +18,8 @@ declare global {
     interface Request {
       /** Active company of the logged-in user (set by companyContext). */
       companyId?: number;
+      /** The active company itself: expiry and AI switch (set by companyContext). */
+      company?: CompanySummary;
     }
   }
 }
@@ -35,14 +37,31 @@ export function isPlatformAdmin(email: string | null | undefined): boolean {
   return allowed.includes(normalizeEmail(email));
 }
 
+/** Today in São Paulo as YYYY-MM-DD: the clinics' calendar, not the server's UTC. */
+export const todaySaoPaulo = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+
+/** The access date is inclusive: a clinic valid until 2026-12-04 is blocked from 2026-12-05. */
+export const isAccessExpired = (validUntil: string | null | undefined) => !!validUntil && validUntil < todaySaoPaulo();
+
+const summaryColumns = {
+  id: companies.id,
+  name: companies.name,
+  slug: companies.slug,
+  logoUrl: companies.logoUrl,
+  accessValidUntil: companies.accessValidUntil,
+  aiEnabled: companies.aiEnabled,
+};
+const withExpiry = <T extends { accessValidUntil: string | null }>(c: T) => ({ ...c, accessExpired: isAccessExpired(c.accessValidUntil) });
+
 /** Active companies where the user has an active membership. */
 export async function listUserCompanies(userId: number): Promise<CompanySummary[]> {
-  return db
-    .select({ id: companies.id, name: companies.name, slug: companies.slug, logoUrl: companies.logoUrl, role: companyMemberships.role })
+  const rows = await db
+    .select({ ...summaryColumns, role: companyMemberships.role })
     .from(companyMemberships)
     .innerJoin(companies, eq(companyMemberships.companyId, companies.id))
     .where(and(eq(companyMemberships.userId, userId), eq(companyMemberships.status, "active"), eq(companies.status, "active")))
     .orderBy(companies.name);
+  return rows.map(withExpiry);
 }
 
 /**
@@ -54,10 +73,10 @@ export async function findCompanyAccess(user: User, companyId: number): Promise<
   if (own) return own;
   if (!isPlatformAdmin(user.email)) return undefined;
   const [company] = await db
-    .select({ id: companies.id, name: companies.name, slug: companies.slug, logoUrl: companies.logoUrl })
+    .select(summaryColumns)
     .from(companies)
     .where(and(eq(companies.id, companyId), eq(companies.status, "active")));
-  return company ? { ...company, role: "admin" } : undefined;
+  return company ? { ...withExpiry(company), role: "admin" } : undefined;
 }
 
 /** Creates the membership, or updates its role and reactivates it. */
@@ -178,6 +197,7 @@ export async function resolveCompanyContext(req: Request): Promise<CompanySummar
   }
 
   req.companyId = active?.id;
+  req.company = active;
   req.user.role = active?.role ?? NO_COMPANY_ROLE;
   return active;
 }

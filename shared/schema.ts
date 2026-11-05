@@ -46,6 +46,10 @@ export const companies = pgTable("companies", {
   logoData: bytea("logo_data"),
   logoMimeType: text("logo_mime_type"),
   status: text("status").notNull().default("active"), // active, suspended
+  // Set by the platform admin: the clinic is blocked after this day (null = no expiry)
+  accessValidUntil: date("access_valid_until"),
+  // Groq features (assistant, invoice reading, document summaries) for this clinic
+  aiEnabled: boolean("ai_enabled").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -55,7 +59,11 @@ export type Company = typeof companies.$inferSelect;
 export const DEFAULT_COMPANY_SLUG = "empresa-1";
 
 /** A company as the logged-in user sees it, with their role there. */
-export type CompanySummary = Pick<Company, "id" | "name" | "slug" | "logoUrl"> & { role: string };
+export type CompanySummary = Pick<Company, "id" | "name" | "slug" | "logoUrl" | "accessValidUntil" | "aiEnabled"> & {
+  role: string;
+  /** accessValidUntil already passed (São Paulo date): the clinic is blocked */
+  accessExpired: boolean;
+};
 
 /** What /api/user, login and /api/companies/switch return; `role` is the role in the active company. */
 export type AuthUser = Omit<User, "password"> & {

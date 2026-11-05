@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { Pressable, Switch, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Clock, Mail, Pause, Play, Trash2, UserPlus } from 'lucide-react-native';
+import { AlertTriangle, Clock, Mail, Pause, Play, Sparkles, Trash2, UserPlus } from 'lucide-react-native';
 
 import { AppText } from '@/components/ui/AppText';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { DateTimeField } from '@/components/ui/DateTimeField';
 import { Screen } from '@/components/ui/Screen';
 import { ErrorState, LoadingState } from '@/components/ui/States';
 import { TextField } from '@/components/ui/TextField';
@@ -20,16 +21,19 @@ import {
   type AddAdminResult,
   type PlatformCompany,
 } from '@/api/platform';
+import { accessState } from '@/utils/company-access';
+import { useAuth } from '@/auth/AuthProvider';
 import { confirm } from '@/utils/confirm';
 import { formatDate } from '@/utils/format';
 import { roleLabels } from '@/utils/status';
 import { toast } from '@/utils/toast';
-import { colors } from '@/theme/tokens';
+import { colors, radius } from '@/theme/tokens';
 
 /** Platform admin: one company — data, suspend/reactivate, admins, members and pending invites. */
 export default function CompanyDetailScreen() {
   const id = Number(useLocalSearchParams<{ id: string }>().id);
   const queryClient = useQueryClient();
+  const { user, refreshUser } = useAuth();
   const detail = usePlatformCompany(id);
   const [adminEmail, setAdminEmail] = useState('');
   const company = detail.data?.company;
@@ -37,10 +41,12 @@ export default function CompanyDetailScreen() {
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: PLATFORM_COMPANIES_KEY });
     queryClient.invalidateQueries({ queryKey: platformCompanyKey(id) });
+    // Editing the clinic you are in: its name and plan (AI on/off) also live in /api/user
+    if (id === user?.activeCompany?.id) refreshUser().catch(() => {});
   };
 
   const save = useMutation({
-    mutationFn: (body: Record<string, string>) => api(`/api/platform/companies/${id}`, { method: 'PATCH', body }),
+    mutationFn: (body: Record<string, unknown>) => api(`/api/platform/companies/${id}`, { method: 'PATCH', body }),
     onSuccess: () => {
       refresh();
       toast.success('Empresa atualizada');
@@ -98,6 +104,14 @@ export default function CompanyDetailScreen() {
             disabled={save.isPending}
           />
         </CompanyDataCard>
+
+        <PlanCard
+          // Re-created after a save, so the fields start from the saved values
+          key={`${company.accessValidUntil}|${company.aiEnabled}`}
+          company={company}
+          saving={save.isPending}
+          onSave={(body) => save.mutate(body)}
+        />
 
         <Card style={{ gap: 12 }}>
           <AppText variant="subtitle">Novo administrador</AppText>
@@ -197,6 +211,84 @@ function CompanyDataCard({
       <TextField label="CNPJ" value={cnpj} onChangeText={setCnpj} keyboardType="number-pad" />
       <Button title="Salvar dados" onPress={() => onSave(name.trim(), cnpj)} disabled={!changed || !name.trim()} loading={saving} />
       {children}
+    </Card>
+  );
+}
+
+/** Plano: until when the clinic may use the system and whether its AI features are on. */
+function PlanCard({
+  company,
+  saving,
+  onSave,
+}: {
+  company: PlatformCompany;
+  saving: boolean;
+  onSave: (body: { accessValidUntil: string | null; aiEnabled: boolean }) => void;
+}) {
+  const [validUntil, setValidUntil] = useState(company.accessValidUntil ?? '');
+  const [aiEnabled, setAiEnabled] = useState(company.aiEnabled);
+  const changed = validUntil !== (company.accessValidUntil ?? '') || aiEnabled !== company.aiEnabled;
+
+  return (
+    <Card style={{ gap: 12 }}>
+      <AppText variant="subtitle">Plano</AppText>
+      <View style={{ gap: 6 }}>
+        <DateTimeField label="Acesso válido até" mode="date" value={validUntil} onChange={setValidUntil} placeholder="Sem vencimento" />
+        {validUntil ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+            <AppText variant="caption" tone="muted">
+              Bloqueia a clínica a partir do dia seguinte.
+            </AppText>
+            <Pressable accessibilityRole="button" hitSlop={8} onPress={() => setValidUntil('')}>
+              <AppText variant="caption" weight="semibold" tone="primary">
+                Sem vencimento
+              </AppText>
+            </Pressable>
+          </View>
+        ) : (
+          <AppText variant="caption" tone="muted">
+            Sem vencimento: a clínica usa o sistema sem data limite.
+          </AppText>
+        )}
+      </View>
+      <Pressable
+        onPress={() => setAiEnabled((on) => !on)}
+        accessibilityRole="switch"
+        accessibilityState={{ checked: aiEnabled }}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          padding: 12,
+          borderRadius: radius.md,
+          borderWidth: 1,
+          borderColor: colors.border,
+          backgroundColor: colors.surfaceMuted,
+        }}>
+        <Sparkles size={18} color={colors.textMuted} />
+        <View style={{ flex: 1 }}>
+          <AppText weight="medium">Recursos de IA</AppText>
+          <AppText variant="caption" tone="muted">
+            Assistente, leitura de notas fiscais e resumo de documentos
+          </AppText>
+        </View>
+        <Switch value={aiEnabled} onValueChange={setAiEnabled} trackColor={{ true: colors.primary, false: colors.border }} />
+      </Pressable>
+      {accessState(company) === 'expired' && (
+        <View
+          style={{ flexDirection: 'row', gap: 10, padding: 12, borderRadius: radius.md, backgroundColor: colors.dangerSoft }}>
+          <AlertTriangle size={18} color={colors.danger} />
+          <AppText variant="caption" style={{ flex: 1, color: colors.danger }}>
+            Acesso vencido: todos da clínica veem o aviso de bloqueio até a data ser renovada.
+          </AppText>
+        </View>
+      )}
+      <Button
+        title="Salvar plano"
+        onPress={() => onSave({ accessValidUntil: validUntil || null, aiEnabled })}
+        disabled={!changed}
+        loading={saving}
+      />
     </Card>
   );
 }

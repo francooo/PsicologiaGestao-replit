@@ -9,6 +9,7 @@ import {
   cnpjSchema,
   companyNameSchema,
   findCompanyAccess,
+  isAccessExpired,
   listUserCompanies,
   resolveCompanyContext,
   userPayload,
@@ -72,13 +73,23 @@ router.post("/switch", requireAuth, async (req, res) => {
 
 // ─── The active company's own data (Configurações → Dados da empresa) ─────────
 
-const currentColumns = { id: companies.id, name: companies.name, slug: companies.slug, cnpj: companies.cnpj, logoUrl: companies.logoUrl };
+// Access expiry and AI switch are read-only here: only the platform admin changes them
+const currentColumns = {
+  id: companies.id,
+  name: companies.name,
+  slug: companies.slug,
+  cnpj: companies.cnpj,
+  logoUrl: companies.logoUrl,
+  accessValidUntil: companies.accessValidUntil,
+  aiEnabled: companies.aiEnabled,
+};
+const withExpiry = <T extends { accessValidUntil: string | null }>(c: T) => ({ ...c, accessExpired: isAccessExpired(c.accessValidUntil) });
 
 // GET /api/companies/current
 router.get("/current", requireCompany, async (req, res) => {
   try {
     const [company] = await db.select(currentColumns).from(companies).where(eq(companies.id, req.companyId!));
-    res.json(company);
+    res.json(withExpiry(company));
   } catch (error) {
     console.error("GET /api/companies/current:", error);
     res.status(500).json({ message: "Erro ao carregar a empresa." });
@@ -95,7 +106,7 @@ router.patch("/current", requireCompany, requireAdmin, async (req, res) => {
 
   try {
     const [company] = await db.update(companies).set(parsed.data).where(eq(companies.id, req.companyId!)).returning(currentColumns);
-    res.json(company);
+    res.json(withExpiry(company));
   } catch (error) {
     console.error("PATCH /api/companies/current:", error);
     res.status(500).json({ message: "Erro ao salvar a empresa." });
@@ -137,7 +148,7 @@ router.post(
         .set({ logoUrl, logoData: req.file.buffer, logoMimeType: req.file.mimetype })
         .where(eq(companies.id, id))
         .returning(currentColumns);
-      res.json(company);
+      res.json(withExpiry(company));
     } catch (error) {
       console.error("POST /api/companies/current/logo:", error);
       res.status(500).json({ message: "Erro ao salvar o logo." });
@@ -153,7 +164,7 @@ router.delete("/current/logo", requireCompany, requireAdmin, async (req, res) =>
       .set({ logoUrl: null, logoData: null, logoMimeType: null })
       .where(eq(companies.id, req.companyId!))
       .returning(currentColumns);
-    res.json(company);
+    res.json(withExpiry(company));
   } catch (error) {
     console.error("DELETE /api/companies/current/logo:", error);
     res.status(500).json({ message: "Erro ao remover o logo." });

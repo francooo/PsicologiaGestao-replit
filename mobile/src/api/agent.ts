@@ -32,11 +32,12 @@ export interface AgentConversation {
 
 export const AGENT_CONVERSATION_KEY = ['/api/agent/conversation'];
 
-export const useAgentStatus = (enabled: boolean) =>
+/** Off when the server has no AI key or the clinic's plan has no AI; keyed by clinic so a switch never reuses the answer. */
+export const useAgentStatus = (companyId: number | undefined) =>
   useQuery({
-    queryKey: ['/api/agent/status'],
+    queryKey: ['/api/agent/status', companyId],
     queryFn: () => api<{ enabled: boolean }>('/api/agent/status'),
-    enabled,
+    enabled: companyId !== undefined,
     staleTime: 5 * 60_000,
   });
 

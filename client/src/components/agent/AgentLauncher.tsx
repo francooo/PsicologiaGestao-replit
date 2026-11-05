@@ -15,7 +15,7 @@ export function AgentLauncher() {
   const [open, setOpen] = useState(false);
   const inApp = !!user?.activeCompany && !OUTSIDE_APP.some((p) => location === p || location.startsWith(`${p}/`));
 
-  const { data: status } = useQuery<{ enabled: boolean }>({ queryKey: ["/api/agent/status"], enabled: inApp, staleTime: 5 * 60_000 });
+  const { data: status } = useQuery<{ enabled: boolean }>({ queryKey: ["/api/agent/status", user?.activeCompany?.id], enabled: inApp, staleTime: 5 * 60_000 });
   if (!inApp || !status?.enabled) return null;
 
   if (open) return <AgentPanel onClose={() => setOpen(false)} />;

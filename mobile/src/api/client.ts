@@ -2,6 +2,7 @@ import { API_URL } from '@/config';
 
 let authToken: string | null = null;
 let onUnauthorized: (() => void) | null = null;
+let onAccessExpired: (() => void) | null = null;
 
 export function setAuthToken(token: string | null) {
   authToken = token;
@@ -14,6 +15,11 @@ export function getAuthToken() {
 /** Called when an authenticated request gets 401 (expired/revoked session). */
 export function setUnauthorizedHandler(handler: (() => void) | null) {
   onUnauthorized = handler;
+}
+
+/** Called when the active clinic's access ended (403 ACCESS_EXPIRED): reload the user to show the notice. */
+export function setAccessExpiredHandler(handler: (() => void) | null) {
+  onAccessExpired = handler;
 }
 
 export class ApiError extends Error {
@@ -84,6 +90,7 @@ export async function api<T = unknown>(path: string, options: RequestOptions = {
     // A 401 about the Google connection (meetings, care e-mails) is not our session expiring
     const googleError = /google/i.test(error.message) || (error.body as any)?.error === 'GOOGLE_TOKEN_EXPIRED';
     if (res.status === 401 && authToken && onUnauthorized && !googleError) onUnauthorized();
+    if (res.status === 403 && (error.body as any)?.code === 'ACCESS_EXPIRED') onAccessExpired?.();
     throw error;
   }
   if (res.status === 204) return undefined as T;

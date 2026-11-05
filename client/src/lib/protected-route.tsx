@@ -1,6 +1,7 @@
 import { useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
 import { Redirect, Route } from "wouter";
+import { AccessExpired } from "@/components/AccessExpired";
 
 export function ProtectedRoute({
   path,
@@ -48,6 +49,15 @@ export function ProtectedRoute({
     return (
       <Route path={path}>
         <Redirect to="/selecionar-empresa" />
+      </Route>
+    );
+  }
+
+  // Blocked clinic: everyone in it sees the notice (the platform admin still gets in to support it)
+  if (user.activeCompany.accessExpired && !user.isPlatformAdmin) {
+    return (
+      <Route path={path}>
+        <AccessExpired />
       </Route>
     );
   }

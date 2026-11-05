@@ -4,7 +4,10 @@ import { apiErrorFrom } from "./api-error";
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     // Plain message (with status and field) instead of "400: {json}"
-    throw apiErrorFrom(res.status, await res.text(), res.statusText);
+    const error = apiErrorFrom(res.status, await res.text(), res.statusText);
+    // The clinic's access ended while the page was open: reload the user to show the notice
+    if (error.body?.code === "ACCESS_EXPIRED") queryClient.invalidateQueries({ queryKey: ["/api/user"] });
+    throw error;
   }
 }
 

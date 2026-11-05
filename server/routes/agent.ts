@@ -9,6 +9,7 @@ import { groq, logGroqError, AIQuotaError, AIServiceError } from "../services/ai
 import { agentContext } from "../agent/context";
 import { ActionError, cancelAction, confirmAction, presentAction } from "../agent/actions";
 import { currentConversation, messagesLastHour, newConversation, runAgent, visibleMessages } from "../agent/runner";
+import { aiAllowed, requireAi } from "../middleware/auth-guards";
 
 // Mounted at /api/agent — the assistant (chat with tools). Behind the company gate like every
 // private route, so req.companyId and the membership role are always set.
@@ -35,8 +36,6 @@ const upload = multer({
   fileFilter: (_req, file, cb) => cb(null, AUDIO_TYPES.includes(file.mimetype.split(";")[0])),
 });
 
-const enabled = () => !!process.env.GROQ_API_KEY;
-
 /** Chat messages with the confirmation card of the action they carry, if any. */
 async function present(messages: AgentMessage[]) {
   const ids = Array.from(new Set(messages.map((m) => m.actionId).filter((id): id is number => !!id)));
@@ -59,10 +58,14 @@ function aiError(res: Response, error: unknown, context: string) {
   return res.status(500).json({ message: "Erro no assistente. Tente de novo." });
 }
 
-// GET /api/agent/status — the floating button only shows when the AI is configured
-router.get("/status", (_req, res) => {
-  res.json({ enabled: enabled() });
+// GET /api/agent/status — the floating button only shows when the AI is configured and the
+// clinic has it switched on
+router.get("/status", (req, res) => {
+  res.json({ enabled: aiAllowed(req) });
 });
+
+// Everything below is the assistant itself: not for clinics with AI switched off
+router.use(requireAi);
 
 // GET /api/agent/conversation — the current conversation (empty before the first message)
 router.get("/conversation", async (req, res) => {
@@ -92,7 +95,7 @@ const messageSchema = z.object({
 
 // POST /api/agent/messages { text, viaAudio? } — one turn of the conversation
 router.post("/messages", async (req, res) => {
-  if (!enabled()) return res.status(503).json({ message: "O assistente não está configurado." });
+  if (!process.env.GROQ_API_KEY) return res.status(503).json({ message: "O assistente não está configurado." });
   const parsed = messageSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0].message });
 
@@ -112,7 +115,7 @@ router.post("/messages", async (req, res) => {
 
 // POST /api/agent/transcribe (multipart "audio") — speech to text for voice messages
 router.post("/transcribe", (req, res) => {
-  if (!enabled()) return res.status(503).json({ message: "O assistente não está configurado." });
+  if (!process.env.GROQ_API_KEY) return res.status(503).json({ message: "O assistente não está configurado." });
   upload.single("audio")(req, res, async (err) => {
     if (err) {
       const tooBig = err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE";

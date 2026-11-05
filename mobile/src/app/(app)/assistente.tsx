@@ -1,13 +1,13 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { router, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Mic, RotateCcw, SendHorizontal, Sparkles, Square, Volume2, VolumeX, X } from 'lucide-react-native';
 
 import { AppText } from '@/components/ui/AppText';
 import { IconButton } from '@/components/ui/IconButton';
-import { ErrorState, LoadingState } from '@/components/ui/States';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/States';
 import { ActionCard } from '@/components/agent/ActionCard';
 import { useSpeech, useVoiceRecorder } from '@/components/agent/voice';
 import {
@@ -17,6 +17,7 @@ import {
   sendAgentMessage,
   transcribeAudio,
   useAgentConversation,
+  useAgentStatus,
   type AgentConversation,
   type AgentMessage,
 } from '@/api/agent';
@@ -26,8 +27,37 @@ import { colors, fonts, radius } from '@/theme/tokens';
 
 const SUGGESTIONS = ['Quantas pessoas têm reserva de sala este mês?', 'Minha agenda de hoje', 'Quais salas estão livres amanhã à tarde?'];
 
-/** The assistant's chat (opened by the floating button): text or voice in, text and voice out. */
+/** The assistant, only while it is on for the active clinic (the floating button already hides otherwise). */
 export default function AssistantScreen() {
+  const { user } = useAuth();
+  const status = useAgentStatus(user?.activeCompany?.id);
+  const notInPlan = user?.activeCompany?.aiEnabled === false;
+  const aiOff = notInPlan || status.data?.enabled === false;
+
+  if (aiOff) {
+    return (
+      <>
+        <Stack.Screen options={{ title: 'Assistente' }} />
+        <EmptyState
+          icon={Sparkles}
+          title="Assistente indisponível"
+          description={
+            notInPlan
+              ? 'Os recursos de inteligência artificial não estão incluídos no plano desta clínica.'
+              : 'O assistente não está disponível no momento.'
+          }
+          actionLabel="Voltar"
+          onAction={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+        />
+      </>
+    );
+  }
+  if (status.isLoading) return <LoadingState />;
+  return <AssistantChat />;
+}
+
+/** The assistant's chat (opened by the floating button): text or voice in, text and voice out. */
+function AssistantChat() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();

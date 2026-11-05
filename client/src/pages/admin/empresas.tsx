@@ -3,11 +3,12 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Building2, Clock, FileText, Loader2, LogIn, Mail, Pause, Pencil, Play, Plus, Trash2, UserPlus, UserRoundX } from "lucide-react";
+import { Building2, CalendarClock, Clock, FileText, Loader2, LogIn, Mail, Pause, Pencil, Play, Plus, Sparkles, Trash2, UserPlus, UserRoundX } from "lucide-react";
 import Sidebar from "@/components/sidebar";
 import MobileNav from "@/components/mobile-nav";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -30,6 +31,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { errorMessage } from "@/lib/api-error";
 import { inviteEmailNote } from "@/lib/invite-email";
+import { accessState, endingLabel, formatDay } from "@/lib/company-access";
 import { cn } from "@/lib/utils";
 
 type Company = {
@@ -38,6 +40,10 @@ type Company = {
   slug: string;
   cnpj: string | null;
   status: "active" | "suspended";
+  /** Last day of access (inclusive), null = no expiry */
+  accessValidUntil: string | null;
+  accessExpired: boolean;
+  aiEnabled: boolean;
   createdAt: string;
   membersCount: number;
   adminsCount: number;
@@ -153,6 +159,7 @@ export default function AdminEmpresas() {
                             <StatusBadge label="Você está aqui" tone="success" />
                           ) : null}
                         </div>
+                        <PlanBadges company={c} />
 
                         <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
                           <Stat label="Membros" value={c.membersCount} />
@@ -301,7 +308,7 @@ function CompanyDetailDialog({ id, onClose }: { id: number; onClose: () => void 
   const onError = (title: string) => (error: unknown) => toast({ title, description: errorMessage(error), variant: "destructive" });
 
   const save = useMutation({
-    mutationFn: (body: Record<string, string>) => apiRequest("PATCH", `/api/platform/companies/${id}`, body),
+    mutationFn: (body: Record<string, unknown>) => apiRequest("PATCH", `/api/platform/companies/${id}`, body),
     onSuccess: () => {
       refresh();
       setConfirmStatus(false);
@@ -376,6 +383,8 @@ function CompanyDetailDialog({ id, onClose }: { id: number; onClose: () => void 
                 <InfoBanner variant="warning">Suspensa: ninguém consegue entrar nesta empresa. Os dados continuam guardados.</InfoBanner>
               )}
             </section>
+
+            <PlanSection key={`${company.accessValidUntil}|${company.aiEnabled}`} company={company} saving={save.isPending} onSave={(body) => save.mutate(body)} />
 
             <section className="space-y-3">
               <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cp-muted">Novo administrador</h3>
@@ -478,5 +487,75 @@ function CompanyDetailDialog({ id, onClose }: { id: number; onClose: () => void 
         </AlertDialog>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Access expiry and AI switch shown on each company card. */
+function PlanBadges({ company }: { company: Company }) {
+  const state = accessState(company);
+  if (state === "unlimited" && company.aiEnabled) return null;
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {state === "expired" && <StatusBadge label={`Vencida em ${formatDay(company.accessValidUntil!)}`} tone="danger" />}
+      {state === "ending" && <StatusBadge label={endingLabel(company.accessValidUntil!)} tone="warning" />}
+      {state === "active" && <StatusBadge label={`Acesso até ${formatDay(company.accessValidUntil!)}`} tone="neutral" />}
+      {!company.aiEnabled && <StatusBadge label="IA desligada" tone="neutral" />}
+    </div>
+  );
+}
+
+/** Plano: until when the clinic may use the system and whether its AI features are on. */
+function PlanSection({ company, saving, onSave }: { company: Company; saving: boolean; onSave: (body: Record<string, unknown>) => void }) {
+  const [validUntil, setValidUntil] = useState(company.accessValidUntil ?? "");
+  const [aiEnabled, setAiEnabled] = useState(company.aiEnabled);
+  const changed = validUntil !== (company.accessValidUntil ?? "") || aiEnabled !== company.aiEnabled;
+  const state = accessState(company);
+
+  return (
+    <section className="space-y-3">
+      <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-cp-muted">Plano</h3>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="detail-valid-until">Acesso válido até</Label>
+          <IconField icon={CalendarClock}>
+            <Input id="detail-valid-until" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
+          </IconField>
+          <p className="text-xs text-cp-muted">
+            {validUntil ? (
+              <>
+                Bloqueia a clínica a partir do dia seguinte.{" "}
+                <button type="button" className="font-medium text-cp-action hover:underline" onClick={() => setValidUntil("")}>
+                  Sem vencimento
+                </button>
+              </>
+            ) : (
+              "Sem vencimento: a clínica usa o sistema sem data limite."
+            )}
+          </p>
+        </div>
+        <label htmlFor="detail-ai" className="flex cursor-pointer items-start gap-3 rounded-xl border border-cp-border bg-cp-hover px-4 py-3 sm:mt-6">
+          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-cp-muted" aria-hidden="true" />
+          <span className="flex-1">
+            <span className="block text-[14px] font-medium text-cp-ink">Recursos de IA</span>
+            <span className="block text-xs text-cp-muted">Assistente, leitura de notas fiscais e resumo de documentos</span>
+          </span>
+          <Switch id="detail-ai" checked={aiEnabled} onCheckedChange={setAiEnabled} />
+        </label>
+      </div>
+      {state === "expired" && (
+        <InfoBanner variant="danger">Acesso vencido: todos da clínica veem o aviso de bloqueio até a data ser renovada.</InfoBanner>
+      )}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          className={cpButton.primary}
+          disabled={!changed || saving}
+          onClick={() => onSave({ accessValidUntil: validUntil || null, aiEnabled })}
+        >
+          {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+          Salvar plano
+        </button>
+      </div>
+    </section>
   );
 }
