@@ -5,9 +5,11 @@ import { seedSpecializationAreas } from "./seed-specializations";
 import { seedCareTemplates } from "./seed-care";
 import { runStartupMigrations } from "./migrations";
 import { log } from "./log";
+import { painelCors } from "./middleware/painel-cors";
 
 export async function createApp(): Promise<{ app: Express; server: Server }> {
   const app = express();
+  app.use(painelCors());
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: false, limit: "10mb" }));
 

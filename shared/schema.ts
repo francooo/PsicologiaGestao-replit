@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, date, time, decimal, timestamp, primaryKey, jsonb, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, date, time, decimal, timestamp, primaryKey, jsonb, unique, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
@@ -50,10 +50,57 @@ export const companies = pgTable("companies", {
   accessValidUntil: date("access_valid_until"),
   // Groq features (assistant, invoice reading, document summaries) for this clinic
   aiEnabled: boolean("ai_enabled").notNull().default(true),
+  // Subscription (owner panel): plan, agreed monthly price and when it started
+  plan: text("plan"), // solo, intermediario, expert (null = not set)
+  monthlyPrice: decimal("monthly_price", { precision: 10, scale: 2 }),
+  subscriptionStartedAt: date("subscription_started_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 export type Company = typeof companies.$inferSelect;
+
+export const SUBSCRIPTION_PLANS = ["solo", "intermediario", "expert"] as const;
+export const SUBSCRIPTION_PAYMENT_METHODS = ["pix", "cartao", "boleto", "transferencia", "dinheiro", "outro"] as const;
+
+// Payments of a clinic's subscription, recorded by the platform admin
+export const subscriptionPayments = pgTable(
+  "subscription_payments",
+  {
+    id: serial("id").primaryKey(),
+    companyId: integer("company_id").notNull().references(() => companies.id),
+    amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+    paidAt: date("paid_at").notNull(),
+    referenceMonth: text("reference_month").notNull(), // YYYY-MM
+    monthsCovered: integer("months_covered").notNull().default(1),
+    method: text("method").notNull(), // SUBSCRIPTION_PAYMENT_METHODS
+    notes: text("notes"),
+    // companies.access_valid_until right after this payment
+    validUntilAfter: date("valid_until_after"),
+    createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("subscription_payments_company_idx").on(t.companyId), index("subscription_payments_paid_at_idx").on(t.paidAt)]
+);
+
+export type SubscriptionPayment = typeof subscriptionPayments.$inferSelect;
+
+// History of a clinic's subscription: plan/price/validity changes, payments, suspensions...
+export const subscriptionEvents = pgTable(
+  "subscription_events",
+  {
+    id: serial("id").primaryKey(),
+    companyId: integer("company_id").notNull().references(() => companies.id),
+    // created, plan_changed, price_changed, start_changed, validity_changed, payment_added,
+    // payment_removed, ai_toggled, suspended, reactivated, renamed
+    type: text("type").notNull(),
+    details: jsonb("details"),
+    userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("subscription_events_company_created_idx").on(t.companyId, t.createdAt)]
+);
+
+export type SubscriptionEvent = typeof subscriptionEvents.$inferSelect;
 
 /** Slug of the company that received all data from before multi-company. */
 export const DEFAULT_COMPANY_SLUG = "empresa-1";

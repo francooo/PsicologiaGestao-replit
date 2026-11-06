@@ -149,6 +149,41 @@ async function migrateCompanies() {
       ADD COLUMN IF NOT EXISTS access_valid_until date,
       ADD COLUMN IF NOT EXISTS ai_enabled boolean NOT NULL DEFAULT true
   `);
+  // Subscriptions (owner panel): plan/price per clinic, payments and change history
+  await pool.query(`
+    ALTER TABLE companies
+      ADD COLUMN IF NOT EXISTS plan text,
+      ADD COLUMN IF NOT EXISTS monthly_price numeric(10,2),
+      ADD COLUMN IF NOT EXISTS subscription_started_at date
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS subscription_payments (
+      id serial PRIMARY KEY,
+      company_id integer NOT NULL REFERENCES companies(id),
+      amount numeric(10,2) NOT NULL,
+      paid_at date NOT NULL,
+      reference_month text NOT NULL,
+      months_covered integer NOT NULL DEFAULT 1,
+      method text NOT NULL,
+      notes text,
+      valid_until_after date,
+      created_by integer REFERENCES users(id) ON DELETE SET NULL,
+      created_at timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS subscription_payments_company_idx ON subscription_payments (company_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS subscription_payments_paid_at_idx ON subscription_payments (paid_at)`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS subscription_events (
+      id serial PRIMARY KEY,
+      company_id integer NOT NULL REFERENCES companies(id),
+      type text NOT NULL,
+      details jsonb,
+      user_id integer REFERENCES users(id) ON DELETE SET NULL,
+      created_at timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS subscription_events_company_created_idx ON subscription_events (company_id, created_at)`);
   // A fresh database may not have every table yet (they come from db:push).
   const { rows: present } = await pool.query(
     `SELECT tablename FROM pg_tables WHERE schemaname = current_schema() AND tablename = ANY($1)`,

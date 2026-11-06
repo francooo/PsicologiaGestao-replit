@@ -11,6 +11,7 @@ import { bearerSessionBridge, companyContext, requireCompany } from "./middlewar
 import { applyPendingInvites } from "./lib/access-invites";
 import { ensurePsychologistProfileFor, resolveCompanyContext, upsertMembership, userPayload } from "./lib/companies";
 import { takenLogin } from "./lib/logins";
+import { painelOrigins } from "./middleware/painel-cors";
 
 declare global {
   namespace Express {
@@ -41,8 +42,11 @@ const MOBILE_SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1000;
 // Deep-link prefixes the Google callback may redirect back to (Expo Go / app scheme)
 const MOBILE_REDIRECT_PREFIXES = ["exp://", "exps://", "consultapsi://"];
 
+// The owner panel (PAINEL_ORIGIN) gets the same ?token= back on its own pages
 function isAllowedMobileRedirect(url: unknown): url is string {
-  return typeof url === "string" && MOBILE_REDIRECT_PREFIXES.some((p) => url.startsWith(p));
+  if (typeof url !== "string") return false;
+  const prefixes = [...MOBILE_REDIRECT_PREFIXES, ...painelOrigins().map((o) => `${o}/`)];
+  return prefixes.some((p) => url.startsWith(p));
 }
 
 declare module "express-session" {
