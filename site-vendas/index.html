@@ -336,7 +336,11 @@ main > section.closing-cta.closing-cta:not(.hero) { min-height: 0; padding: clam
 /* Footer */
 .site-footer { background: #2d3a2e; color: #e8f0e9; padding: 64px 0 32px; }
 .site-footer a { color: inherit; text-decoration: none; }
-.site-footer a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.site-footer__legal a:hover { text-decoration: underline; text-underline-offset: 3px; }
+/* The kit's footer hover paints links in --ink (dark green), invisible on this dark ground:
+   go white and keep its drawn underline */
+html:not([data-motion="off"]) .site-footer.footer ul a:is(:hover, :focus-visible) { color: #ffffff; }
+.site-footer.footer ul a:focus-visible { outline: 2px solid #9ab8a0; outline-offset: 3px; border-radius: 2px; }
 .site-footer__top { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 2fr); gap: 48px; }
 .site-footer__brand { display: flex; flex-direction: column; gap: 16px; align-items: flex-start; }
 .site-footer__brand .brand-word { color: #faf7f2; }
