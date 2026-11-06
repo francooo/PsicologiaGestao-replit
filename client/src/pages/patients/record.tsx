@@ -43,6 +43,7 @@ import EvolutionsTab from "@/components/patient-record/EvolutionsTab";
 import DocumentsTab from "@/components/patient-record/DocumentsTab";
 import AssessmentsTab from "@/components/patient-record/AssessmentsTab";
 import CuidadosTab from "@/components/patient-record/CuidadosTab";
+import { NewEvolutionDialog } from "@/components/patient-record/NewEvolutionDialog";
 
 const TAB_KEY = "prontuario_active_tab";
 
@@ -84,8 +85,9 @@ export default function PatientRecord() {
 
     const [editOpen, setEditOpen] = useState(false);
 
-    // New Evolution / Document / Assessment triggers
-    const [triggerNewEvolution, setTriggerNewEvolution] = useState(0);
+    const [newEvolutionOpen, setNewEvolutionOpen] = useState(false);
+
+    // New Document / Assessment triggers
     const [triggerNewDocument, setTriggerNewDocument] = useState(0);
     const [triggerNewAssessment, setTriggerNewAssessment] = useState(0);
 
@@ -202,7 +204,7 @@ export default function PatientRecord() {
 
     function handleNewEvolution() {
         handleTabChange("sessions");
-        setTimeout(() => setTriggerNewEvolution((n) => n + 1), 300);
+        setNewEvolutionOpen(true);
     }
     function handleNewDocument() {
         handleTabChange("documents");
@@ -312,7 +314,7 @@ export default function PatientRecord() {
                             <TabsContent value="sessions" className="mt-0">
                                 <EvolutionsTab
                                     patientId={id}
-                                    onNewEvolution={() => { }}
+                                    onNewEvolution={() => setNewEvolutionOpen(true)}
                                 />
                             </TabsContent>
 
@@ -334,6 +336,13 @@ export default function PatientRecord() {
                     </Tabs>
                 </main>
             </div>
+
+            <NewEvolutionDialog
+                open={newEvolutionOpen}
+                onOpenChange={setNewEvolutionOpen}
+                patientId={id}
+                patientPsychologistId={patient.psychologistId ?? null}
+            />
 
             {/* Edit Patient Dialog */}
             <Dialog open={editOpen} onOpenChange={setEditOpen}>

@@ -386,6 +386,13 @@ router.post('/:id/sessions', checkPatientAccess, async (req, res) => {
         // Ensure patientId matches URL
         const data = insertClinicalSessionSchema.parse({ ...req.body, patientId });
 
+        // The session's psychologist must be of this clinic; a psychologist only records her own
+        const psychologist = await storage.getPsychologist(req.companyId!, data.psychologistId);
+        if (!psychologist) return res.status(400).json({ field: "psychologistId", message: "Psicóloga não encontrada nesta clínica." });
+        if ((req.user as any).role === 'psychologist' && psychologist.userId !== userId) {
+            return res.status(403).json({ message: "Você só pode registrar evoluções em seu próprio nome." });
+        }
+
         const session = await storage.createSession(data);
 
         // Audit log
@@ -401,11 +408,13 @@ router.post('/:id/sessions', checkPatientAccess, async (req, res) => {
         });
 
         res.status(201).json(session);
-    } catch (error) {
-        console.error(error);
-        if (error instanceof z.ZodError) {
-            return res.status(400).json({ message: error.errors });
+    } catch (error: any) {
+        // drizzle-zod may bring its own zod copy, so instanceof is not enough
+        if (error instanceof z.ZodError || error?.name === "ZodError") {
+            const issue = error.issues?.[0];
+            return res.status(400).json({ field: issue?.path?.[0], message: issue?.message ?? "Dados inválidos" });
         }
+        console.error(error);
         res.status(500).json({ message: "Erro ao criar sessão" });
     }
 });
