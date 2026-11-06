@@ -305,6 +305,62 @@ html[data-ground="sage"] { --ground-bg: #edf3ee; --ground-surface: #eef3ee; --gr
   .fin-names > div { grid-column: auto / span 6; }
 }
 </style>
+
+<style>
+/* Sections grow with their content: on short or very wide screens a fixed one-screen height made
+   the content spill into the next section */
+main > :is(section, .section):not(.hero, .section--hero) {
+  height: auto !important;
+  min-height: calc(var(--h, 1) * 100svh);
+  display: flex; flex-direction: column;
+}
+main > :is(section, .section):not(.hero, .section--hero) > :is(.wrap, .container) {
+  flex: 1 0 auto; height: auto; min-height: 0;
+}
+main > :is(.hero, .section--hero) { height: auto !important; min-height: 100svh; }
+@media (max-width: 639px) {
+  main > :is(section, .section):not(.hero, .section--hero) { min-height: 0; }
+}
+
+/* Closing call to action: a short band, not a full screen */
+main > section.closing-cta.closing-cta:not(.hero) { min-height: 0; padding: clamp(56px, 8vw, 104px) 0; }
+.closing-cta__box {
+  display: flex; align-items: center; justify-content: space-between; gap: 32px; flex-wrap: wrap;
+  padding: clamp(28px, 4vw, 48px); border-radius: 24px;
+  background: #e8f0e9; border: 1px solid rgba(78, 122, 84, .18);
+}
+.closing-cta__box h2 { margin: 0 0 8px; max-width: 22ch; }
+.closing-cta__box .t-lead { margin: 0; }
+@media (max-width: 639px) { .closing-cta__box .btn { width: 100%; justify-content: center; } }
+
+/* Footer */
+.site-footer { background: #2d3a2e; color: #e8f0e9; padding: 64px 0 32px; }
+.site-footer a { color: inherit; text-decoration: none; }
+.site-footer a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.site-footer__top { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 2fr); gap: 48px; }
+.site-footer__brand { display: flex; flex-direction: column; gap: 16px; align-items: flex-start; }
+.site-footer__brand .brand-word { color: #faf7f2; }
+.site-footer__brand .brand-word em { color: #9ab8a0; }
+.site-footer__brand p { margin: 0; max-width: 34ch; color: #c9d6cb; line-height: 1.6; }
+.site-footer__wa { display: inline-flex; align-items: center; gap: 10px; padding: 10px 18px; border-radius: 999px;
+  border: 1px solid rgba(232, 240, 233, .35); font-weight: 500; }
+.site-footer__wa:hover { background: rgba(232, 240, 233, .08); text-decoration: none !important; }
+.site-footer__cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; }
+.site-footer__cols h4 { margin: 0 0 14px; font: 500 13px/1.2 var(--font-body, "DM Sans", sans-serif);
+  letter-spacing: .12em; text-transform: uppercase; color: #9ab8a0; }
+.site-footer__cols ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.site-footer__cols a { color: #e8f0e9; }
+.site-footer__legal { margin-top: 48px; padding-top: 24px; border-top: 1px solid rgba(232, 240, 233, .15);
+  display: flex; flex-wrap: wrap; gap: 12px 32px; justify-content: space-between; font-size: 14px; color: #a9b8ab; }
+.site-footer__links { display: inline-flex; gap: 24px; flex-wrap: wrap; }
+.site-footer__marks { flex-basis: 100%; font-size: 13px; }
+@media (max-width: 899px) {
+  .site-footer__top { grid-template-columns: 1fr; gap: 40px; }
+}
+@media (max-width: 539px) {
+  .site-footer__cols { grid-template-columns: 1fr 1fr; }
+}
+</style>
 </head>
 <body>
 <!-- type: software (ConsultaPsi, sistema de gestão para clínicas e consultórios de psicologia)
@@ -815,39 +871,44 @@ html[data-ground="sage"] { --ground-bg: #edf3ee; --ground-surface: #eef3ee; --gr
       </div>
     </div>
   </section>
-</main>
-
-<footer class="footer closing footer--statement g2m" id="contact" aria-labelledby="close-h">
+<section class="closing-cta" id="contact" aria-labelledby="close-h">
   <div class="wrap">
-    <div class="closing__cta close--word">
-      <div class="section-head--split">
-        <div><h2 id="close-h">Conheça o ConsultaPsi pelo WhatsApp</h2><p class="t-lead">Você escolhe o plano e recebe o convite de acesso por e-mail.</p></div>
-        <a class="btn btn--primary" href="https://wa.me/5551981220279?text=Ol%C3%A1!%20Quero%20conhecer%20o%20ConsultaPsi." target="_blank" rel="noopener">Falar no WhatsApp<svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
+    <div class="closing-cta__box">
+      <div>
+        <h2 id="close-h">Conheça o ConsultaPsi pelo WhatsApp</h2>
+        <p class="t-lead">Você escolhe o plano e recebe o convite de acesso por e-mail.</p>
       </div>
-      <p class="close__word" aria-hidden="true">ConsultaPsi</p>
+      <a class="btn btn--primary" href="https://wa.me/5551981220279?text=Ol%C3%A1!%20Quero%20conhecer%20o%20ConsultaPsi." target="_blank" rel="noopener">Falar no WhatsApp<svg class="m-arrow" viewBox="0 0 12 12" aria-hidden="true"><path class="m-arrow__stem" d="M1 6h8"/><path class="m-arrow__head" d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
     </div>
-    <div class="closing__links">
-      <div class="grid">
-        <div class="span-4 stack-4">
-          <a class="nav__logo" href="#top" aria-label="ConsultaPsi, início">
-            <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M23 33 C 16 22, 24 6, 44 1 C 48 18, 40 32, 23 33 Z" fill="#9FAE96"/><path d="M11 47 C 1 36, 5 19, 22 13 C 30 29, 25 43, 11 47 Z" fill="#A99BBB"/><path d="M22 13 C 26 21, 27 28, 25 33 C 21 30, 20 22, 22 13 Z" fill="#E9E6EE" opacity="0.9"/></svg>
-            <span class="brand-word">Consulta<em>Psi</em></span>
-          </a>
-          <p class="footer__lede">Gestão para clínicas e consultórios de psicologia.</p>
-        </div>
-        <div class="span-2 footer__col"><h4>Recursos</h4><ul><li><a href="#agenda">Agenda e salas</a></li><li><a href="#prontuario">Prontuário</a></li><li><a href="#lembretes">Lembretes</a></li></ul></div>
-        <div class="span-2 footer__col"><h4>Financeiro</h4><ul><li><a href="#financeiro">Fluxo de caixa</a></li><li><a href="#ia">Inteligência artificial</a></li></ul></div>
-        <div class="span-2 footer__col"><h4>Planos</h4><ul><li><a href="#pricing">Preços</a></li><li><a href="#equipe">Equipe</a></li></ul></div>
-        <div class="span-2 footer__col"><h4>Dúvidas</h4><ul><li><a href="#faq">Perguntas</a></li><li><a href="https://gestaoparaclinicas.vercel.app/auth">Entrar</a></li></ul></div>
+  </div>
+</section>
+</main>
+<footer class="footer site-footer">
+  <div class="wrap">
+    <div class="site-footer__top">
+      <div class="site-footer__brand">
+        <a class="nav__logo" href="#top" aria-label="ConsultaPsi, início">
+          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M23 33 C 16 22, 24 6, 44 1 C 48 18, 40 32, 23 33 Z" fill="#9FAE96"/><path d="M11 47 C 1 36, 5 19, 22 13 C 30 29, 25 43, 11 47 Z" fill="#A99BBB"/><path d="M22 13 C 26 21, 27 28, 25 33 C 21 30, 20 22, 22 13 Z" fill="#E9E6EE" opacity="0.9"/></svg>
+          <span class="brand-word">Consulta<em>Psi</em></span>
+        </a>
+        <p>Gestão para clínicas e consultórios de psicologia, direto no navegador.</p>
+        <a class="site-footer__wa" href="https://wa.me/5551981220279?text=Ol%C3%A1!%20Quero%20conhecer%20o%20ConsultaPsi." target="_blank" rel="noopener"><img src="assets/icons/whatsapp.svg" alt="" width="18" height="18">Falar no WhatsApp</a>
       </div>
-      <div class="footer__legal">
-        <span>&copy; 2026 ConsultaPsi &nbsp; <a href="https://gestaoparaclinicas.vercel.app/privacidade">Política de Privacidade</a> &nbsp; <a href="https://gestaoparaclinicas.vercel.app/termos">Termos de Uso</a></span>
-        <div class="socials"></div>
-        <span class="credits">Google, Google Agenda, Google Meet e WhatsApp são marcas de seus donos.</span>
-      </div>
+      <nav class="site-footer__cols" aria-label="Rodapé">
+        <div><h4>Recursos</h4><ul><li><a href="#agenda">Agenda e salas</a></li><li><a href="#prontuario">Prontuário</a></li><li><a href="#lembretes">Lembretes</a></li><li><a href="#ia">Inteligência artificial</a></li></ul></div>
+        <div><h4>Gestão</h4><ul><li><a href="#financeiro">Financeiro</a></li><li><a href="#equipe">Equipe e clínicas</a></li><li><a href="#privacidade">Privacidade</a></li></ul></div>
+        <div><h4>ConsultaPsi</h4><ul><li><a href="#pricing">Planos e preços</a></li><li><a href="#faq">Dúvidas frequentes</a></li><li><a href="https://gestaoparaclinicas.vercel.app/auth">Entrar no sistema</a></li></ul></div>
+      </nav>
+    </div>
+    <div class="site-footer__legal">
+      <span>&copy; 2026 ConsultaPsi. Todos os direitos reservados.</span>
+      <span class="site-footer__links"><a href="https://gestaoparaclinicas.vercel.app/privacidade">Política de Privacidade</a><a href="https://gestaoparaclinicas.vercel.app/termos">Termos de Uso</a></span>
+      <span class="site-footer__marks">Google, Google Agenda, Google Meet e WhatsApp são marcas de seus donos.</span>
     </div>
   </div>
 </footer>
+
+
 
 <script type="module" src="assets/system.js"></script>
 <script type="module" src="assets/motion/motion.js"></script>
