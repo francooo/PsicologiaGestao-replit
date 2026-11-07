@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Inbox, Loader2, X } from "lucide-react";
-import { planLabel, validity, type Validity } from "../lib/format";
+import { activity, planLabel, validity, type Validity } from "../lib/format";
 import type { CompanyStatus, Plan } from "../lib/types";
 
 export function Badge({ tone, children, plain }: { tone: Validity["tone"] | "plan"; children: ReactNode; plain?: boolean }) {
@@ -10,6 +10,11 @@ export function Badge({ tone, children, plain }: { tone: Validity["tone"] | "pla
 export function ValidityBadge(props: { status?: CompanyStatus; accessValidUntil: string | null; accessExpired?: boolean }) {
   const v = validity(props);
   return <Badge tone={v.tone}>{v.label}</Badge>;
+}
+
+export function ActivityBadge({ lastSeenAt }: { lastSeenAt: string | null | undefined }) {
+  const a = activity(lastSeenAt);
+  return <Badge tone={a.tone}>{a.label}</Badge>;
 }
 
 export function PlanBadge({ plan }: { plan: Plan | null }) {

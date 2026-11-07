@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "wouter";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Download, Loader2, Mail, Plus, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, Clock, Download, Loader2, Mail, Plus, Sparkles, Trash2 } from "lucide-react";
 import { PageHead } from "../components/Layout";
-import { Badge, ConfirmDialog, Dialog, Empty, ErrorBox, Kpi, Loading, PlanBadge, ValidityBadge, useToast } from "../components/ui";
+import { ActivityBadge, Badge, ConfirmDialog, Dialog, Empty, ErrorBox, Kpi, Loading, PlanBadge, ValidityBadge, useToast } from "../components/ui";
 import { api, ApiError } from "../lib/api";
 import { useSubscription } from "../lib/queries";
 import {
+  accessAgo,
+  accessTime,
+  accessWhen,
   currentMonthISO,
   date,
   dateTime,
@@ -18,6 +21,7 @@ import {
   monthLong,
   monthsAgoLabel,
   PLAN_LABEL,
+  roleLabel,
   PLAN_PRICE,
   plural,
   toISODate,
@@ -455,6 +459,84 @@ function PaymentsCard({ detail, onAdd }: { detail: SubscriptionDetail; onAdd: ()
   );
 }
 
+/* ---------- Último acesso ---------- */
+function AccessCard({ detail }: { detail: SubscriptionDetail }) {
+  const c = detail.company;
+  const members = detail.members ?? [];
+  const noRecord = detail.accessTrackingSince
+    ? `Sem registro ainda (o registro começou em ${date(detail.accessTrackingSince)})`
+    : "Sem registro ainda";
+  return (
+    <section className="card card--flush">
+      <div className="card__head">
+        <div>
+          <h2 className="card__title">Último acesso ao sistema</h2>
+          <div className="card__sub">{plural(members.length, "usuário ativo", "usuários ativos")} nesta clínica</div>
+        </div>
+      </div>
+      <div className="access-hero">
+        <Clock aria-hidden="true" />
+        <div className="access-hero__text">
+          {c.lastAccessAt ? (
+            <>
+              <div className="access-hero__title">
+                {c.lastAccessBy ? <b>{c.lastAccessBy.fullName}</b> : "Alguém da clínica"} acessou por último {accessWhen(c.lastAccessAt)}
+              </div>
+              <div className="small muted">{accessAgo(c.lastAccessAt)}</div>
+            </>
+          ) : (
+            <div className="access-hero__title">Ninguém desta clínica acessou desde que o registro começou.</div>
+          )}
+        </div>
+        <ActivityBadge lastSeenAt={c.lastAccessAt} />
+      </div>
+      {members.length ? (
+        <div className="table-wrap">
+          <table className="table table--cards">
+            <thead>
+              <tr>
+                <th>Usuário</th>
+                <th>Papel</th>
+                <th>Último login</th>
+                <th>Último uso</th>
+                <th>Situação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {members.map((m) => (
+                <tr key={m.id}>
+                  <td className="cell-main">
+                    <div className="row-title">{m.fullName}</div>
+                    <a className="cell-sub" href={`mailto:${m.email}`} style={{ display: "inline-flex", gap: 6, alignItems: "center", wordBreak: "break-all" }}>
+                      <Mail size={13} aria-hidden="true" style={{ flex: "none" }} />
+                      {m.email}
+                    </a>
+                  </td>
+                  <td data-label="Papel" className="nowrap">{roleLabel(m.role)}</td>
+                  <td data-label="Último login" className="nowrap">{m.lastLoginAt ? accessTime(m.lastLoginAt) : <span className="muted">—</span>}</td>
+                  <td data-label="Último uso">
+                    {m.lastSeenAt ? (
+                      <div>
+                        <div className="nowrap">{accessTime(m.lastSeenAt)}</div>
+                        <div className="cell-sub nowrap">{accessAgo(m.lastSeenAt)}</div>
+                      </div>
+                    ) : (
+                      <span className="muted">{noRecord}</span>
+                    )}
+                  </td>
+                  <td data-label="Situação"><ActivityBadge lastSeenAt={m.lastSeenAt} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <Empty>Nenhum usuário ativo nesta clínica.</Empty>
+      )}
+    </section>
+  );
+}
+
 /* ---------- Página ---------- */
 export function ClinicPage({ id }: { id: number }) {
   const q = useSubscription(id);
@@ -539,36 +621,15 @@ export function ClinicPage({ id }: { id: number }) {
         />
       </div>
 
+      <div className="section-gap">
+        <AccessCard detail={d} />
+      </div>
+
       <div className="grid grid--ficha section-gap">
         <div className="stack">
           <SubscriptionCard company={c} />
         </div>
         <div className="stack">
-          <section className="card">
-            <div className="card__head">
-              <h2 className="card__title">Administradores</h2>
-              <span className="card__sub">{d.admins.length}</span>
-            </div>
-            {d.admins.length ? (
-              <div className="list">
-                {d.admins.map((a) => (
-                  <div className="list__item" key={a.id}>
-                    <div>
-                      <div className="list__title">{a.fullName}</div>
-                      <a className="small" href={`mailto:${a.email}`} style={{ display: "inline-flex", gap: 6, alignItems: "center", wordBreak: "break-all" }}>
-                        <Mail size={14} aria-hidden="true" style={{ flex: "none" }} />
-                        {a.email}
-                      </a>
-                    </div>
-                    <span className="small muted nowrap">desde {date(a.since)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <Empty>Nenhum administrador nesta clínica.</Empty>
-            )}
-          </section>
-
           <section className="card">
             <div className="card__head">
               <h2 className="card__title">Histórico</h2>

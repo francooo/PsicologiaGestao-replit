@@ -2,13 +2,13 @@ import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-react";
 import { PageHead } from "../components/Layout";
-import { Empty, ErrorBox, Loading, PlanBadge, ValidityBadge } from "../components/ui";
+import { ActivityBadge, Empty, ErrorBox, Loading, PlanBadge, ValidityBadge } from "../components/ui";
 import { useSubscribers } from "../lib/queries";
-import { date, money, monthsAgoLabel, validity } from "../lib/format";
+import { accessAgo, accessTime, activity, date, money, monthsAgoLabel, validity, type ActivityKey } from "../lib/format";
 import type { Plan, Subscriber } from "../lib/types";
 
 type StatusFilter = "all" | "active" | "expiring" | "expired" | "suspended";
-type SortKey = "name" | "validity" | "total";
+type SortKey = "name" | "validity" | "total" | "access";
 
 const STATUS: { key: StatusFilter; label: string }[] = [
   { key: "all", label: "Todas" },
@@ -35,6 +35,7 @@ export function SubscribersPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [plan, setPlan] = useState<"all" | Plan | "none">("all");
+  const [usage, setUsage] = useState<"all" | ActivityKey>("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "name", dir: 1 });
 
   const rows = useMemo(() => {
@@ -42,18 +43,25 @@ export function SubscribersPage() {
     const list = (q.data ?? []).filter((s) => {
       if (!matchesStatus(s, status)) return false;
       if (plan !== "all" && (plan === "none" ? s.plan !== null : s.plan !== plan)) return false;
+      if (usage !== "all" && activity(s.lastAccessAt).key !== usage) return false;
       if (!term) return true;
       const hay = norm([s.name, s.cnpj ?? "", s.slug, ...s.admins.flatMap((a) => [a.fullName, a.email])].join(" "));
       return hay.includes(term) || (!!s.cnpj && s.cnpj.replace(/\D/g, "").includes(term.replace(/\D/g, "") || "§"));
     });
     const val = (s: Subscriber) =>
-      sort.key === "name" ? norm(s.name) : sort.key === "total" ? s.totalPaid : s.accessValidUntil ?? "9999-99-99";
+      sort.key === "name"
+        ? norm(s.name)
+        : sort.key === "total"
+          ? s.totalPaid
+          : sort.key === "access"
+            ? s.lastAccessAt ?? "" // never seen sorts as the oldest
+            : s.accessValidUntil ?? "9999-99-99";
     return [...list].sort((a, b) => {
       const va = val(a);
       const vb = val(b);
       return (va < vb ? -1 : va > vb ? 1 : 0) * sort.dir;
     });
-  }, [q.data, search, status, plan, sort]);
+  }, [q.data, search, status, plan, usage, sort]);
 
   const counts = useMemo(() => {
     const c: Record<StatusFilter, number> = { all: 0, active: 0, expiring: 0, expired: 0, suspended: 0 };
@@ -66,7 +74,7 @@ export function SubscribersPage() {
     const Icon = !active ? ArrowUpDown : sort.dir === 1 ? ArrowUp : ArrowDown;
     return (
       <th className={[num ? "num" : "", className ?? ""].join(" ").trim() || undefined} aria-sort={active ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
-        <button className="th-sort" onClick={() => setSort({ key: k, dir: active ? ((-sort.dir) as 1 | -1) : k === "total" ? -1 : 1 })}>
+        <button className="th-sort" onClick={() => setSort({ key: k, dir: active ? ((-sort.dir) as 1 | -1) : k === "total" || k === "access" ? -1 : 1 })}>
           {label}
           <Icon aria-hidden="true" />
         </button>
@@ -96,6 +104,13 @@ export function SubscribersPage() {
           <option value="expert">Expert</option>
           <option value="none">Sem plano</option>
         </select>
+        <select className="select" style={{ width: 210 }} aria-label="Atividade" value={usage} onChange={(e) => setUsage(e.target.value as typeof usage)}>
+          <option value="all">Toda atividade</option>
+          <option value="active">Ativas (até 7 dias)</option>
+          <option value="low">Pouco uso (8 a 30 dias)</option>
+          <option value="inactive">Inativas (mais de 30 dias)</option>
+          <option value="none">Sem registro</option>
+        </select>
       </div>
 
       {q.isError ? <ErrorBox error={q.error} onRetry={() => q.refetch()} /> : null}
@@ -115,7 +130,7 @@ export function SubscribersPage() {
                     <th>Assinante desde</th>
                     <SortHead k="validity" label="Validade" />
                     <SortHead k="total" label="Total pago" num />
-                    <th>Último pagamento</th>
+                    <SortHead k="access" label="Último acesso" />
                   </tr>
                 </thead>
                 <tbody>
@@ -142,7 +157,7 @@ export function SubscribersPage() {
                       <td data-label="Assinante desde">
                         <div>
                           <div className="nowrap">{date(s.subscriptionStartedAt)}</div>
-                          {s.subscriptionStartedAt ? <div className="cell-sub nowrap">{monthsAgoLabel(s.subscriptionStartedAt)}</div> : null}
+                          {s.subscriptionStartedAt ? <div className="cell-sub">{monthsAgoLabel(s.subscriptionStartedAt)}</div> : null}
                         </div>
                       </td>
                       <td data-label="Validade">
@@ -155,9 +170,20 @@ export function SubscribersPage() {
                         <div>
                           <div>{money(s.totalPaid)}</div>
                           <div className="cell-sub">{s.paymentsCount} {s.paymentsCount === 1 ? "pagamento" : "pagamentos"}</div>
+                          {s.lastPaymentAt ? <div className="cell-sub">último em {date(s.lastPaymentAt)}</div> : null}
                         </div>
                       </td>
-                      <td data-label="Último pagamento" className="nowrap">{date(s.lastPaymentAt)}</td>
+                      <td data-label="Último acesso">
+                        <div>
+                          <ActivityBadge lastSeenAt={s.lastAccessAt} />
+                          {s.lastAccessAt ? (
+                            <>
+                              <div className="cell-sub nowrap" title={accessTime(s.lastAccessAt)}>{accessAgo(s.lastAccessAt)}</div>
+                              {s.lastAccessBy ? <div className="cell-sub">{s.lastAccessBy.fullName}</div> : null}
+                            </>
+                          ) : null}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

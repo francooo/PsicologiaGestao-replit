@@ -45,7 +45,24 @@ const people = [
   [17, "Patrícia Moraes", "patricia@integradasul.example", "2026-01-05"],
   [18, "Sérgio Araújo", "sergio@centroipe.example", "2025-11-25"],
 ].map(([id, fullName, email, createdAt]) => ({ id, fullName, email, createdAt: ts(createdAt, 9) }));
+// Último acesso: minutos atrás (null = nunca acessou desde o início do registro)
+const ago = (min) => (min == null ? null : new Date(Date.now() - min * 60000).toISOString());
+const DAY = 1440;
+const access = { 10: [DAY * 2, 25], 11: [DAY * 3, DAY * 3], 12: [DAY * 14, DAY * 12], 13: [DAY * 50, DAY * 45], 14: [300, 120], 15: [DAY * 95, DAY * 90], 16: [null, null], 17: [DAY + 200, DAY + 30], 18: [DAY * 21, DAY * 20] };
+for (const p of people) [p.lastLoginAt, p.lastSeenAt] = (access[p.id] ?? [null, null]).map(ago);
 const person = (id) => people.find((p) => p.id === id);
+// Outros usuários (não admins) de algumas clínicas
+const staff = [
+  { companyId: 1, id: 40, fullName: "Marta Lopes", email: "marta@bemestar.example", role: "psychologist", since: "2025-08-20", lastLoginAt: ago(DAY), lastSeenAt: ago(8) },
+  { companyId: 1, id: 41, fullName: "Ana Recepção", email: "recepcao@bemestar.example", role: "receptionist", since: "2025-10-02", lastLoginAt: null, lastSeenAt: null },
+  { companyId: 2, id: 42, fullName: "Bruno Teixeira", email: "bruno@acolher.example", role: "psychologist", since: "2026-03-11", lastLoginAt: ago(DAY * 9), lastSeenAt: ago(DAY * 9) },
+  { companyId: 6, id: 43, fullName: "Clara Mendes", email: "clara@novajornada.example", role: "psychologist", since: "2026-10-29", lastLoginAt: null, lastSeenAt: null },
+];
+function membersOf(c) {
+  const admins = c.admins.map(([id, since]) => { const p = person(id); return { id: p.id, fullName: p.fullName, email: p.email, role: "admin", since, lastLoginAt: p.lastLoginAt, lastSeenAt: p.lastSeenAt }; });
+  const rest = staff.filter((s) => s.companyId === c.id).map(({ companyId, ...s }) => s);
+  return [...admins, ...rest].sort((a, b) => (b.lastSeenAt ?? "").localeCompare(a.lastSeenAt ?? ""));
+}
 
 /* ---------- clínicas ---------- */
 let companies = [
@@ -131,7 +148,9 @@ function serialize(c) {
     subscriptionStartedAt: c.subscriptionStartedAt, monthsSubscribed: monthsSubscribed(c), accessValidUntil: c.accessValidUntil,
     accessExpired: isExpired(c), aiEnabled: c.aiEnabled, totalPaid: Math.round(ps.reduce((s, p) => s + p.amount, 0) * 100) / 100,
     paymentsCount: ps.length, lastPaymentAt: last, membersCount: c.membersCount,
-    admins: c.admins.map(([id]) => { const p = person(id); return { id: p.id, fullName: p.fullName, email: p.email }; }),
+    lastAccessAt: membersOf(c)[0]?.lastSeenAt ?? null,
+    lastAccessBy: membersOf(c)[0]?.lastSeenAt ? { id: membersOf(c)[0].id, fullName: membersOf(c)[0].fullName } : null,
+    admins: c.admins.map(([id]) => { const p = person(id); return { id: p.id, fullName: p.fullName, email: p.email, lastLoginAt: p.lastLoginAt, lastSeenAt: p.lastSeenAt }; }),
   };
 }
 function serializePayment(p) {
@@ -273,7 +292,9 @@ const server = http.createServer(async (req, res) => {
       if (sub === "/subscription" && req.method === "GET") {
         return reply(200, {
           company: { ...serialize(c), createdAt: c.createdAt },
-          admins: c.admins.map(([id, since]) => { const p = person(id); return { id: p.id, fullName: p.fullName, email: p.email, since }; }),
+          admins: c.admins.map(([id, since]) => { const p = person(id); return { id: p.id, fullName: p.fullName, email: p.email, since, lastLoginAt: p.lastLoginAt, lastSeenAt: p.lastSeenAt }; }),
+          members: membersOf(c),
+          accessTrackingSince: ago(DAY * 100),
           payments: payments.filter((p) => p.companyId === c.id).sort((a, b) => (a.paidAt < b.paidAt ? 1 : -1)).map(serializePayment),
           events: events.filter((e) => e.companyId === c.id).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).map(({ companyId, ...e }) => e),
         });

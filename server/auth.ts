@@ -11,6 +11,7 @@ import { bearerSessionBridge, companyContext, requireCompany } from "./middlewar
 import { applyPendingInvites } from "./lib/access-invites";
 import { ensurePsychologistProfileFor, resolveCompanyContext, upsertMembership, userPayload } from "./lib/companies";
 import { takenLogin } from "./lib/logins";
+import { recordLogin, touchLastSeen } from "./lib/last-access";
 import { painelOrigins } from "./middleware/painel-cors";
 
 declare global {
@@ -85,6 +86,7 @@ export function setupAuth(app: Express) {
   app.use(session(sessionSettings));
   app.use(passport.initialize());
   app.use(passport.session());
+  app.use(touchLastSeen());
   app.use(companyContext);
 
   // Local Strategy
@@ -217,6 +219,7 @@ export function setupAuth(app: Express) {
         } catch (error) {
           return next(error);
         }
+        if (req.user) await recordLogin(req.user.id);
         const mobileRedirect = res.locals.mobileRedirect;
         if (!isAllowedMobileRedirect(mobileRedirect)) return res.redirect('/');
 
@@ -308,6 +311,7 @@ export function setupAuth(app: Express) {
 
       req.login(user, async (err) => {
         if (err) return next(err);
+        await recordLogin(user.id);
         try {
           await resolveCompanyContext(req);
           await ensurePsychologistProfile(req);
@@ -332,6 +336,7 @@ export function setupAuth(app: Express) {
 
       req.login(user, async (loginErr: any) => {
         if (loginErr) return next(loginErr);
+        await recordLogin(user.id);
 
         let userResponse;
         try {

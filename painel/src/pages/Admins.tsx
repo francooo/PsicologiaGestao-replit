@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
-import { Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Search } from "lucide-react";
 import { PageHead } from "../components/Layout";
-import { Empty, ErrorBox, Loading, ValidityBadge } from "../components/ui";
+import { ActivityBadge, Empty, ErrorBox, Loading, ValidityBadge } from "../components/ui";
 import { useAdmins } from "../lib/queries";
-import { date } from "../lib/format";
+import { accessAgo, accessTime, date } from "../lib/format";
 
 function norm(s: string) {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -13,12 +13,22 @@ function norm(s: string) {
 export function AdminsPage() {
   const q = useAdmins();
   const [search, setSearch] = useState("");
+  // Name A-Z by default; the "Último acesso" header switches to most recent first
+  const [byAccess, setByAccess] = useState<0 | 1 | -1>(0);
   const rows = useMemo(() => {
     const term = norm(search.trim());
     const list = q.data ?? [];
     const filtered = term ? list.filter((a) => norm([a.fullName, a.email, ...a.clinics.map((c) => c.name)].join(" ")).includes(term)) : list;
-    return [...filtered].sort((a, b) => a.fullName.localeCompare(b.fullName, "pt-BR"));
-  }, [q.data, search]);
+    return [...filtered].sort((a, b) => {
+      if (byAccess) {
+        const va = a.lastSeenAt ?? "";
+        const vb = b.lastSeenAt ?? "";
+        if (va !== vb) return (va < vb ? 1 : -1) * byAccess;
+      }
+      return a.fullName.localeCompare(b.fullName, "pt-BR");
+    });
+  }, [q.data, search, byAccess]);
+  const SortIcon = byAccess === 0 ? ArrowUpDown : byAccess === 1 ? ArrowDown : ArrowUp;
 
   return (
     <>
@@ -43,6 +53,12 @@ export function AdminsPage() {
                     <th>E-mail</th>
                     <th>Clínicas</th>
                     <th>Desde</th>
+                    <th aria-sort={byAccess === 0 ? "none" : byAccess === 1 ? "descending" : "ascending"}>
+                      <button className="th-sort" onClick={() => setByAccess((v) => (v === 1 ? -1 : 1))}>
+                        Último acesso
+                        <SortIcon aria-hidden="true" />
+                      </button>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -69,6 +85,12 @@ export function AdminsPage() {
                         </div>
                       </td>
                       <td data-label="Desde" className="nowrap">{date(a.createdAt)}</td>
+                      <td data-label="Último acesso">
+                        <div>
+                          <ActivityBadge lastSeenAt={a.lastSeenAt} />
+                          {a.lastSeenAt ? <div className="cell-sub nowrap" title={accessTime(a.lastSeenAt)}>{accessAgo(a.lastSeenAt)}</div> : null}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

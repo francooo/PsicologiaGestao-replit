@@ -464,6 +464,8 @@ async function loadSubscribers(onlyId?: number) {
       id: users.id,
       fullName: users.fullName,
       email: users.email,
+      lastLoginAt: users.lastLoginAt,
+      lastSeenAt: users.lastSeenAt,
     })
     .from(companyMemberships)
     .innerJoin(users, eq(companyMemberships.userId, users.id))
@@ -474,6 +476,13 @@ async function loadSubscribers(onlyId?: number) {
     const paid = totals.find((t) => t.companyId === c.id);
     const own = members.filter((m) => m.companyId === c.id);
     const admins = own.filter((m) => m.role === "admin");
+    // The clinic's last access: the most recent use among its active members.
+    // Platform admins are left out, so a support visit doesn't count as the clinic's use
+    const lastSeen = own.reduce<(typeof own)[number] | null>(
+      (best, m) =>
+        m.lastSeenAt && !isPlatformAdmin(m.email) && (!best?.lastSeenAt || m.lastSeenAt > best.lastSeenAt) ? m : best,
+      null,
+    );
     const subscriptionStartedAt = c.subscriptionStartedAt ?? saoPauloDate(c.createdAt);
     const { logoUrl, createdAt, ...rest } = withSubscription(c);
     return {
@@ -485,10 +494,16 @@ async function loadSubscribers(onlyId?: number) {
         paymentsCount: Number(paid?.count ?? 0),
         lastPaymentAt: paid?.last ?? null,
         membersCount: own.length,
-        admins: admins.map(({ id, fullName, email }) => ({ id, fullName, email })),
+        lastAccessAt: lastSeen?.lastSeenAt ?? null,
+        lastAccessBy: lastSeen ? { id: lastSeen.id, fullName: lastSeen.fullName } : null,
+        admins: admins.map(({ id, fullName, email, lastLoginAt, lastSeenAt }) => ({ id, fullName, email, lastLoginAt, lastSeenAt })),
       },
       createdAt,
-      admins: admins.map(({ id, fullName, email, since }) => ({ id, fullName, email, since })),
+      admins: admins.map(({ id, fullName, email, since, lastLoginAt, lastSeenAt }) => ({ id, fullName, email, since, lastLoginAt, lastSeenAt })),
+      // Every active member, most recent use first (never-seen last)
+      members: [...own]
+        .sort((a, b) => (b.lastSeenAt?.getTime() ?? -1) - (a.lastSeenAt?.getTime() ?? -1))
+        .map(({ id, fullName, email, role, since, lastLoginAt, lastSeenAt }) => ({ id, fullName, email, role, since, lastLoginAt, lastSeenAt })),
     };
   });
 }
@@ -606,9 +621,16 @@ router.get("/companies/:id/subscription", async (req, res) => {
       .where(eq(subscriptionEvents.companyId, id))
       .orderBy(desc(subscriptionEvents.createdAt), desc(subscriptionEvents.id));
 
+    const [tracking] = await db
+      .select({ since: sql<Date | null>`min(${users.lastSeenAt})` })
+      .from(users);
+
     res.json({
       company: { ...subscriber.row, createdAt: subscriber.createdAt },
       admins: subscriber.admins,
+      members: subscriber.members,
+      // When access tracking started (the earliest recorded use), for "Sem registro ainda"
+      accessTrackingSince: tracking?.since ?? null,
       payments: payments.map(serializePayment),
       events: events.map(({ userId, userName, ...e }) => ({ ...e, user: userId ? { id: userId, fullName: userName ?? "" } : null })),
     });
@@ -770,6 +792,8 @@ router.get("/admins", async (_req, res) => {
         clinicStatus: companies.status,
         since: companyMemberships.createdAt,
         accessValidUntil: companies.accessValidUntil,
+        lastLoginAt: users.lastLoginAt,
+        lastSeenAt: users.lastSeenAt,
       })
       .from(companyMemberships)
       .innerJoin(users, eq(companyMemberships.userId, users.id))
@@ -777,11 +801,14 @@ router.get("/admins", async (_req, res) => {
       .where(and(eq(companyMemberships.role, "admin"), eq(companyMemberships.status, "active")))
       .orderBy(asc(users.fullName), asc(users.id), asc(companies.name));
 
-    const admins = new Map<number, { id: number; fullName: string; email: string | null; createdAt: Date | null; clinics: object[] }>();
+    const admins = new Map<
+      number,
+      { id: number; fullName: string; email: string | null; createdAt: Date | null; lastLoginAt: Date | null; lastSeenAt: Date | null; clinics: object[] }
+    >();
     for (const r of rows) {
       let admin = admins.get(r.id);
       if (!admin) {
-        admin = { id: r.id, fullName: r.fullName, email: r.email, createdAt: r.createdAt, clinics: [] };
+        admin = { id: r.id, fullName: r.fullName, email: r.email, createdAt: r.createdAt, lastLoginAt: r.lastLoginAt, lastSeenAt: r.lastSeenAt, clinics: [] };
         admins.set(r.id, admin);
       }
       admin.clinics.push({

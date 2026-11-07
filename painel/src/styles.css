@@ -248,7 +248,7 @@ a.card-link:hover { text-decoration: none; }
 }
 .table th:first-child, .table td:first-child { padding-left: 20px; }
 .table th:last-child, .table td:last-child { padding-right: 20px; }
-.col-clinic { min-width: 210px; }
+.col-clinic { min-width: 180px; }
 .show-sm { display: none; }
 .clinic-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .table td { padding: 14px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -439,4 +439,15 @@ a.list__item:hover .list__title { text-decoration: underline; text-underline-off
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
+
+/* Ficha: último acesso ao sistema */
+.access-hero { display: flex; align-items: center; gap: var(--s-3); margin: 0 var(--s-5) var(--s-4); padding: 14px 16px; border-radius: var(--r-md); background: var(--sage-pale); border: 1px solid var(--line); }
+.access-hero > svg { flex: none; width: 22px; height: 22px; color: var(--success-ink); }
+.access-hero__text { flex: 1; min-width: 0; }
+.access-hero__title { font-size: 15px; line-height: 1.45; }
+@media (max-width: 639px) {
+  .access-hero { flex-wrap: wrap; align-items: flex-start; margin: 0 var(--s-4) var(--s-4); }
+  .access-hero__text { flex-basis: calc(100% - 40px); }
+  .access-hero > .badge { margin-left: 34px; }
 }

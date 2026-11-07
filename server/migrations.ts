@@ -149,6 +149,12 @@ async function migrateCompanies() {
       ADD COLUMN IF NOT EXISTS access_valid_until date,
       ADD COLUMN IF NOT EXISTS ai_enabled boolean NOT NULL DEFAULT true
   `);
+  // Last login / last use per user, shown in the owner panel
+  await pool.query(`
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS last_login_at timestamptz,
+      ADD COLUMN IF NOT EXISTS last_seen_at timestamptz
+  `);
   // Subscriptions (owner panel): plan/price per clinic, payments and change history
   await pool.query(`
     ALTER TABLE companies

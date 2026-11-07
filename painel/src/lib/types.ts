@@ -23,6 +23,12 @@ export interface AdminRef {
   fullName: string;
   email: string;
   since?: string;
+  lastLoginAt?: string | null;
+  lastSeenAt?: string | null;
+}
+
+export interface Member extends AdminRef {
+  role: string;
 }
 
 export interface Subscriber {
@@ -42,6 +48,8 @@ export interface Subscriber {
   paymentsCount: number;
   lastPaymentAt: string | null;
   membersCount: number;
+  lastAccessAt: string | null;
+  lastAccessBy: { id: number; fullName: string } | null;
   admins: AdminRef[];
   createdAt?: string;
 }
@@ -74,6 +82,8 @@ export interface SubscriptionEvent {
 export interface SubscriptionDetail {
   company: Subscriber;
   admins: AdminRef[];
+  members: Member[];
+  accessTrackingSince: string | null;
   payments: Payment[];
   events: SubscriptionEvent[];
 }
@@ -83,6 +93,8 @@ export interface PlatformAdmin {
   fullName: string;
   email: string;
   createdAt: string;
+  lastLoginAt: string | null;
+  lastSeenAt: string | null;
   clinics: {
     id: number;
     name: string;

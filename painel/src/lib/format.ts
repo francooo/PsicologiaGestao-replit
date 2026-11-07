@@ -191,3 +191,64 @@ export function eventText(type: string, details: Record<string, any> | null | un
   }
 }
 
+
+/** "Hoje, 14:32", "Ontem, 09:10" or "05/11/2026 14:32"; "—" when never. */
+export function accessTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const d = daysBetween(value, todayISO());
+  const time = new Intl.DateTimeFormat("pt-BR", { timeZone: TZ, hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  if (d === 0) return `Hoje, ${time}`;
+  if (d === 1) return `Ontem, ${time}`;
+  return dateTime(value);
+}
+
+/** For a sentence: "hoje às 14:32", "ontem às 09:10" or "em 05/11/2026 às 14:32". */
+export function accessWhen(value: string): string {
+  const d = daysBetween(value, todayISO());
+  const time = new Intl.DateTimeFormat("pt-BR", { timeZone: TZ, hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  if (d === 0) return `hoje às ${time}`;
+  if (d === 1) return `ontem às ${time}`;
+  return `em ${date(value)} às ${time}`;
+}
+
+/** "há 5 minutos", "há 3 horas", then the same day/month wording as monthsAgoLabel. */
+export function accessAgo(value: string | null | undefined): string {
+  if (!value) return "";
+  const minutes = Math.floor((Date.now() - new Date(value).getTime()) / 60000);
+  if (minutes < 1) return "agora mesmo";
+  if (minutes < 60) return minutes === 1 ? "há 1 minuto" : `há ${minutes} minutos`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24 && daysBetween(value, todayISO()) === 0) return hours === 1 ? "há 1 hora" : `há ${hours} horas`;
+  return monthsAgoLabel(value);
+}
+
+export type ActivityKey = "active" | "low" | "inactive" | "none";
+export interface Activity {
+  key: ActivityKey;
+  label: string;
+  tone: ValidityTone;
+}
+export const ACTIVITY_LABEL: Record<ActivityKey, string> = {
+  active: "Ativo",
+  low: "Pouco uso",
+  inactive: "Inativo",
+  none: "Sem registro",
+};
+
+/** Up to 7 days: active; 8 to 30: low use; more: inactive; never: no record. */
+export function activity(lastSeen: string | null | undefined): Activity {
+  if (!lastSeen) return { key: "none", label: ACTIVITY_LABEL.none, tone: "neutral" };
+  const days = daysBetween(lastSeen, todayISO());
+  if (days <= 7) return { key: "active", label: ACTIVITY_LABEL.active, tone: "success" };
+  if (days <= 30) return { key: "low", label: ACTIVITY_LABEL.low, tone: "warning" };
+  return { key: "inactive", label: ACTIVITY_LABEL.inactive, tone: "danger" };
+}
+
+export const ROLE_LABEL: Record<string, string> = {
+  admin: "Admin",
+  psychologist: "Psicóloga(o)",
+  receptionist: "Recepção",
+};
+export function roleLabel(r: string | null | undefined): string {
+  return (r && ROLE_LABEL[r]) || r || "—";
+}

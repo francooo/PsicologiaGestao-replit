@@ -1,6 +1,8 @@
 import { jsPDF } from "jspdf";
 import autoTable, { type CellDef, type RowInput, type UserOptions } from "jspdf-autotable";
 import {
+  accessTime,
+  activity,
   date,
   dateTime,
   daysBetween,
@@ -10,6 +12,7 @@ import {
   monthLong,
   monthsAgoLabel,
   planLabel,
+  roleLabel,
   todayISO,
   validity,
 } from "../lib/format";
@@ -186,6 +189,7 @@ export function summaryReport(o: Overview, subscribers: Subscriber[], from: stri
       ["Receita no período", { content: money(o.revenue.period), styles: R }],
       ["Receita total", { content: money(o.revenue.total), styles: R }],
       ["Receita mensal recorrente (MRR)", { content: money(o.revenue.mrr), styles: R }],
+      ["Clínicas sem acesso há mais de 30 dias", { content: String(subscribers.filter((s) => s.status === "active" && activity(s.lastAccessAt).key === "inactive").length), styles: R }],
     ],
     columnStyles: { 0: { cellWidth: 110 } },
   });
@@ -248,6 +252,7 @@ export function clinicReport(d: SubscriptionDetail): PdfReport {
       ["Situação", statusText(c)],
       ["Assistente com IA", c.aiEnabled ? "Liberado" : "Desligado"],
       ["Usuários na clínica", String(c.membersCount)],
+      ["Último acesso ao sistema", c.lastAccessAt ? `${accessTime(c.lastAccessAt)}${c.lastAccessBy ? ` (${c.lastAccessBy.fullName})` : ""}` : "Sem registro"],
       ["Total pago", money(c.totalPaid)],
       ["Pagamentos registrados", String(c.paymentsCount)],
       ["Último pagamento", date(c.lastPaymentAt)],
@@ -256,10 +261,14 @@ export function clinicReport(d: SubscriptionDetail): PdfReport {
     columnStyles: { 0: { cellWidth: 60, textColor: MUTED }, 1: { fontStyle: "bold" } },
   });
 
-  y = sectionTitle(doc, "Administradores", y);
+  y = sectionTitle(doc, "Usuários e último acesso", y);
+  const members = d.members ?? [];
   y = table(doc, y, {
-    head: [["Nome", "E-mail", "Desde"]],
-    body: d.admins.length ? d.admins.map((a) => [a.fullName, a.email, date(a.since)]) : [[{ content: "Nenhum administrador", colSpan: 3, styles: { textColor: MUTED } }]],
+    head: [["Nome", "E-mail", "Papel", "Último login", "Último uso", "Situação"]],
+    body: members.length
+      ? members.map((m) => [m.fullName, m.email, roleLabel(m.role), accessTime(m.lastLoginAt), accessTime(m.lastSeenAt), activity(m.lastSeenAt).label])
+      : [[{ content: "Nenhum usuário ativo", colSpan: 6, styles: { textColor: MUTED } }]],
+    columnStyles: { 1: { cellWidth: 46 } },
   });
 
   y = sectionTitle(doc, "Pagamentos", y);

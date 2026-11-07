@@ -22,6 +22,9 @@ export const users = pgTable("users", {
   birthDate: date("birth_date"),
   // Null for accounts created before the column existed
   createdAt: timestamp("created_at").defaultNow(),
+  // Last access (owner panel); null until the first access after the columns existed
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({
