@@ -6666,6 +6666,15 @@ function findPhone(appt, byName) {
   if (phones.length > 1) return { patientId, phone: null, issue: "ambiguous" };
   return { patientId, phone: null, issue: found.some((p) => p.phone?.trim()) ? "invalid" : "no_phone" };
 }
+function toWhatsAppNumber(digits) {
+  const m = digits.match(/^55(\d{2})(\d{8,9})$/);
+  if (!m) return digits;
+  const ddd = Number(m[1]);
+  let local = m[2];
+  if (local.length === 8 && /^[6-9]/.test(local)) local = `9${local}`;
+  if (local.length !== 9 || !local.startsWith("9")) return digits;
+  return ddd >= 31 ? `55${m[1]}${local.slice(1)}` : `55${m[1]}${local}`;
+}
 var PHONE_ISSUE_TEXT = {
   not_found: "Paciente n\xE3o encontrado no cadastro de pacientes",
   no_phone: "Cadastro do paciente sem telefone",
@@ -6746,8 +6755,12 @@ async function runAutoReminders(now = /* @__PURE__ */ new Date()) {
       patientName: appointments.patientName,
       psychologistId: appointments.psychologistId,
       date: appointments.date,
-      startTime: appointments.startTime
-    }).from(appointments).leftJoin(
+      startTime: appointments.startTime,
+      endTime: appointments.endTime,
+      roomId: appointments.roomId,
+      psychologistName: users.fullName,
+      roomName: rooms.name
+    }).from(appointments).leftJoin(psychologists, eq19(psychologists.id, appointments.psychologistId)).leftJoin(users, eq19(users.id, psychologists.userId)).leftJoin(rooms, and13(eq19(rooms.id, appointments.roomId), eq19(rooms.companyId, clinic.id))).leftJoin(
       whatsappMessages,
       and13(eq19(whatsappMessages.appointmentId, appointments.id), eq19(whatsappMessages.kind, REMINDER_KIND))
     ).where(
@@ -6769,7 +6782,9 @@ async function runAutoReminders(now = /* @__PURE__ */ new Date()) {
     const freeText = custom?.body ?? DEFAULT_MESSAGES.appointment_reminder;
     for (const a of due) {
       if (budget <= 0) break;
-      const { phone, issue } = findPhone(a, byName);
+      const found = findPhone(a, byName);
+      const issue = found.issue;
+      const phone = found.phone ? toWhatsAppNumber(found.phone) : null;
       const [claimed] = await db.insert(whatsappMessages).values({ companyId: clinic.id, appointmentId: a.id, kind: REMINDER_KIND, toPhone: phone, status: "sending" }).onConflictDoUpdate({
         target: [whatsappMessages.appointmentId, whatsappMessages.kind],
         set: { status: "sending", toPhone: phone, error: null, updatedAt: /* @__PURE__ */ new Date() },
@@ -6797,12 +6812,12 @@ async function runAutoReminders(now = /* @__PURE__ */ new Date()) {
         body: contentSid ? void 0 : fillMessage(freeText, {
           paciente: firstName,
           paciente_nome_completo: a.patientName.trim(),
-          psicologa: "",
+          psicologa: a.psychologistName ?? "",
           data: noon.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "UTC" }),
           dia_semana: noon.toLocaleDateString("pt-BR", { weekday: "long", timeZone: "UTC" }),
           horario: time3,
-          horario_fim: "",
-          sala: "",
+          horario_fim: String(a.endTime).slice(0, 5),
+          sala: a.roomId === 0 ? "Online" : a.roomName ?? "",
           clinica: clinic.name,
           quem_envia: clinic.name
         }),

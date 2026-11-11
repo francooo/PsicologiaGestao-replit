@@ -21,6 +21,7 @@ import {
     FormControl,
     FormField,
     FormItem,
+    FormDescription,
     FormLabel,
     FormMessage,
 } from "@/components/ui/form";
@@ -497,8 +498,9 @@ export default function PatientRecord() {
                                                 <FormItem>
                                                     <FormLabel>Telefone *</FormLabel>
                                                     <FormControl>
-                                                        <Input data-testid="input-phone" placeholder="(00) 00000-0000" {...field} />
+                                                        <Input data-testid="input-phone" placeholder="(00) 90000-0000" {...field} />
                                                     </FormControl>
+                                                    <FormDescription>Celular com DDD e o 9, ex.: (51) 99876-5432. Usado nos lembretes por WhatsApp.</FormDescription>
                                                     <FormMessage />
                                                 </FormItem>
                                             )}

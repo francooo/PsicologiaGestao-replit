@@ -1,8 +1,8 @@
 import { and, eq, gte, isNull, lte, notInArray, or, sql } from "drizzle-orm";
 import { db } from "../db";
-import { appointments, companies, messageTemplates, whatsappMessages } from "@shared/schema";
+import { appointments, companies, messageTemplates, psychologists, rooms, users, whatsappMessages } from "@shared/schema";
 import { DEFAULT_MESSAGES, fillMessage } from "@shared/whatsapp-message";
-import { PHONE_ISSUE_TEXT, findPhone, patientIndex } from "./patient-phone";
+import { PHONE_ISSUE_TEXT, findPhone, patientIndex, toWhatsAppNumber } from "./patient-phone";
 import { isTwilioConfigured, sendWhatsApp } from "../services/twilio";
 import { getAppUrl } from "../services/email";
 
@@ -53,8 +53,15 @@ export async function runAutoReminders(now = new Date()): Promise<ReminderRunSum
         psychologistId: appointments.psychologistId,
         date: appointments.date,
         startTime: appointments.startTime,
+        endTime: appointments.endTime,
+        roomId: appointments.roomId,
+        psychologistName: users.fullName,
+        roomName: rooms.name,
       })
       .from(appointments)
+      .leftJoin(psychologists, eq(psychologists.id, appointments.psychologistId))
+      .leftJoin(users, eq(users.id, psychologists.userId))
+      .leftJoin(rooms, and(eq(rooms.id, appointments.roomId), eq(rooms.companyId, clinic.id)))
       .leftJoin(
         whatsappMessages,
         and(eq(whatsappMessages.appointmentId, appointments.id), eq(whatsappMessages.kind, REMINDER_KIND)),
@@ -85,7 +92,10 @@ export async function runAutoReminders(now = new Date()): Promise<ReminderRunSum
 
     for (const a of due) {
       if (budget <= 0) break;
-      const { phone, issue } = findPhone(a, byName);
+      const found = findPhone(a, byName);
+      const issue = found.issue;
+      // Sent to the number WhatsApp knows (Brazil's 9th digit depends on the DDD)
+      const phone = found.phone ? toWhatsAppNumber(found.phone) : null;
 
       // Claim the appointment first: a parallel run (or a retry) can't send it twice
       const [claimed] = await db
@@ -127,12 +137,12 @@ export async function runAutoReminders(now = new Date()): Promise<ReminderRunSum
           : fillMessage(freeText, {
               paciente: firstName,
               paciente_nome_completo: a.patientName.trim(),
-              psicologa: "",
+              psicologa: a.psychologistName ?? "",
               data: noon.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "UTC" }),
               dia_semana: noon.toLocaleDateString("pt-BR", { weekday: "long", timeZone: "UTC" }),
               horario: time,
-              horario_fim: "",
-              sala: "",
+              horario_fim: String(a.endTime).slice(0, 5),
+              sala: a.roomId === 0 ? "Online" : a.roomName ?? "",
               clinica: clinic.name,
               quem_envia: clinic.name,
             }),

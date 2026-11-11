@@ -42,6 +42,22 @@ export function findPhone(appt: { patientName: string; psychologistId: number },
   return { patientId, phone: null, issue: (found.some((p) => p.phone?.trim()) ? "invalid" : "no_phone") as PhoneIssue };
 }
 
+/**
+ * The number WhatsApp knows for a Brazilian mobile, from the patient's phone (digits with 55).
+ * Clinics type mobiles with the 9 ("nono dígito"), but WhatsApp registered them differently by
+ * DDD: 11–28 (SP, RJ, ES) keep the 9; 31 and up are known without it. Mobiles typed without
+ * the 9 get it back for DDD 11–28. Landlines and other countries pass through unchanged.
+ */
+export function toWhatsAppNumber(digits: string) {
+  const m = digits.match(/^55(\d{2})(\d{8,9})$/);
+  if (!m) return digits;
+  const ddd = Number(m[1]);
+  let local = m[2];
+  if (local.length === 8 && /^[6-9]/.test(local)) local = `9${local}`; // mobile typed without the 9
+  if (local.length !== 9 || !local.startsWith("9")) return digits; // landline
+  return ddd >= 31 ? `55${m[1]}${local.slice(1)}` : `55${m[1]}${local}`;
+}
+
 export const PHONE_ISSUE_TEXT: Record<Exclude<PhoneIssue, null>, string> = {
   not_found: "Paciente não encontrado no cadastro de pacientes",
   no_phone: "Cadastro do paciente sem telefone",
