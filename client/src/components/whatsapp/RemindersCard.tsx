@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { addDays, format } from "date-fns";
-import { CheckCircle2, ChevronLeft, ChevronRight, Loader2, PhoneOff } from "lucide-react";
+import { BellRing, CheckCircle2, ChevronLeft, ChevronRight, Loader2, PhoneOff } from "lucide-react";
 import { WhatsAppIcon } from "@/components/cp/WhatsAppIcon";
 import { ReminderDialog } from "@/components/whatsapp/ReminderDialog";
-import { REMINDERS_KEY, reminderDay, sentLabel, type RemindersResponse } from "@/lib/whatsapp";
+import { AUTO_STATUS_TEXT, REMINDERS_KEY, autoSent, reminderDay, sentLabel, type RemindersResponse } from "@/lib/whatsapp";
 import { cn } from "@/lib/utils";
 
 async function getJson<T>(url: string): Promise<T> {
@@ -27,7 +27,7 @@ export function RemindersCard({ showPsychologist, className }: { showPsychologis
   });
 
   const items = data?.items ?? [];
-  const sentCount = items.filter((i) => i.reminderSentAt).length;
+  const sentCount = items.filter((i) => i.reminderSentAt || autoSent(i)).length;
   const title = !data || data.date === data.tomorrow ? "Lembretes de amanhã" : `Lembretes de ${format(new Date(`${data.date}T12:00:00`), "dd/MM")}`;
 
   return (
@@ -88,12 +88,25 @@ export function RemindersCard({ showPsychologist, className }: { showPsychologis
                     {!item.phone && <PhoneOff className="h-3.5 w-3.5 shrink-0 text-cp-warning" aria-label="Sem telefone no cadastro" />}
                     {[showPsychologist ? item.psychologistName : null, item.phoneDisplay ?? "Sem telefone"].filter(Boolean).join(" · ")}
                   </p>
+                  {item.autoStatus && (
+                    <p
+                      className={cn(
+                        "flex items-center gap-1.5 truncate text-[12px]",
+                        autoSent(item) ? "text-cp-sage-ink" : "text-cp-warning",
+                      )}
+                      title={item.autoError ?? undefined}
+                    >
+                      <BellRing className="h-3.5 w-3.5 shrink-0" />
+                      {AUTO_STATUS_TEXT[item.autoStatus] ?? item.autoStatus}
+                      {item.autoError && !autoSent(item) ? ` · ${item.autoError}` : ""}
+                    </p>
+                  )}
                 </div>
-                {sent ? (
+                {sent || autoSent(item) ? (
                   <button
                     type="button"
                     onClick={() => setOpenId(item.appointmentId)}
-                    title={sent}
+                    title={sent ?? (item.autoStatus ? AUTO_STATUS_TEXT[item.autoStatus] : undefined)}
                     className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-cp-sage-soft px-3 py-1.5 text-xs font-medium text-cp-sage-ink hover:opacity-90"
                   >
                     <CheckCircle2 className="h-4 w-4" />

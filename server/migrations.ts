@@ -80,6 +80,28 @@ export async function runStartupMigrations() {
         sent_at timestamp NOT NULL DEFAULT now()
       )
     `);
+    // Automatic WhatsApp reminders through Twilio: per-clinic switch/lead time and the send log
+    await pool.query(`
+      ALTER TABLE companies
+        ADD COLUMN IF NOT EXISTS whatsapp_auto_reminders boolean NOT NULL DEFAULT false,
+        ADD COLUMN IF NOT EXISTS reminder_lead_hours integer NOT NULL DEFAULT 24
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS whatsapp_messages (
+        id serial PRIMARY KEY,
+        company_id integer NOT NULL REFERENCES companies(id),
+        appointment_id integer REFERENCES appointments(id) ON DELETE CASCADE,
+        kind text NOT NULL,
+        to_phone text,
+        status text NOT NULL,
+        twilio_sid text,
+        error text,
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now(),
+        CONSTRAINT whatsapp_messages_appointment_kind UNIQUE (appointment_id, kind)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS whatsapp_messages_twilio_sid_idx ON whatsapp_messages (twilio_sid)`);
   } catch (error) {
     log(`startup migration failed: ${(error as Error).message}`);
     throw error;

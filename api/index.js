@@ -25,10 +25,13 @@ import { promisify } from "util";
 var schema_exports = {};
 __export(schema_exports, {
   DEFAULT_COMPANY_SLUG: () => DEFAULT_COMPANY_SLUG,
+  SUBSCRIPTION_PAYMENT_METHODS: () => SUBSCRIPTION_PAYMENT_METHODS,
+  SUBSCRIPTION_PLANS: () => SUBSCRIPTION_PLANS,
   accessInvites: () => accessInvites,
   agentActions: () => agentActions,
   agentConversations: () => agentConversations,
   agentMessages: () => agentMessages,
+  appointmentReminders: () => appointmentReminders,
   appointments: () => appointments,
   appointmentsRelations: () => appointmentsRelations,
   auditLogs: () => auditLogs,
@@ -85,6 +88,7 @@ __export(schema_exports, {
   medicalRecordsRelations: () => medicalRecordsRelations,
   meetings: () => meetings,
   meetingsRelations: () => meetingsRelations,
+  messageTemplates: () => messageTemplates,
   passwordResetTokens: () => passwordResetTokens,
   passwordResetTokensRelations: () => passwordResetTokensRelations,
   patientDocuments: () => patientDocuments,
@@ -102,6 +106,7 @@ __export(schema_exports, {
   psychologistsRelations: () => psychologistsRelations,
   rolePermissions: () => rolePermissions,
   rolePermissionsRelations: () => rolePermissionsRelations,
+  roomBookingEvents: () => roomBookingEvents,
   roomBookings: () => roomBookings,
   roomBookingsRelations: () => roomBookingsRelations,
   rooms: () => rooms,
@@ -109,12 +114,15 @@ __export(schema_exports, {
   sessionHistory: () => sessionHistory,
   sessionHistoryRelations: () => sessionHistoryRelations,
   specializationAreas: () => specializationAreas,
+  subscriptionEvents: () => subscriptionEvents,
+  subscriptionPayments: () => subscriptionPayments,
   transactions: () => transactions,
   transactionsRelations: () => transactionsRelations,
   users: () => users,
-  usersRelations: () => usersRelations
+  usersRelations: () => usersRelations,
+  whatsappMessages: () => whatsappMessages
 });
-import { pgTable as pgTable2, text as text2, serial as serial2, integer as integer2, boolean as boolean2, date as date2, time as time2, decimal as decimal2, timestamp as timestamp2, jsonb as jsonb2, unique as unique2 } from "drizzle-orm/pg-core";
+import { pgTable as pgTable2, text as text2, serial as serial2, integer as integer2, boolean as boolean2, date as date2, time as time2, decimal as decimal2, timestamp as timestamp2, jsonb as jsonb2, unique as unique2, index } from "drizzle-orm/pg-core";
 import { createInsertSchema as createInsertSchema2 } from "drizzle-zod";
 import { z } from "zod";
 import { relations as relations2 } from "drizzle-orm";
@@ -576,7 +584,10 @@ var users = pgTable2("users", {
   avatarUrl: text2("avatar_url"),
   birthDate: date2("birth_date"),
   // Null for accounts created before the column existed
-  createdAt: timestamp2("created_at").defaultNow()
+  createdAt: timestamp2("created_at").defaultNow(),
+  // Last access (owner panel); null until the first access after the columns existed
+  lastLoginAt: timestamp2("last_login_at", { withTimezone: true }),
+  lastSeenAt: timestamp2("last_seen_at", { withTimezone: true })
 });
 var insertUserSchema = createInsertSchema2(users).pick({
   username: true,
@@ -600,8 +611,57 @@ var companies = pgTable2("companies", {
   logoMimeType: text2("logo_mime_type"),
   status: text2("status").notNull().default("active"),
   // active, suspended
+  // Set by the platform admin: the clinic is blocked after this day (null = no expiry)
+  accessValidUntil: date2("access_valid_until"),
+  // Groq features (assistant, invoice reading, document summaries) for this clinic
+  aiEnabled: boolean2("ai_enabled").notNull().default(true),
+  // Automatic WhatsApp reminders sent through Twilio (Configurações), and how early
+  whatsappAutoReminders: boolean2("whatsapp_auto_reminders").notNull().default(false),
+  reminderLeadHours: integer2("reminder_lead_hours").notNull().default(24),
+  // 24, 12 or 2
+  // Subscription (owner panel): plan, agreed monthly price and when it started
+  plan: text2("plan"),
+  // solo, intermediario, expert (null = not set)
+  monthlyPrice: decimal2("monthly_price", { precision: 10, scale: 2 }),
+  subscriptionStartedAt: date2("subscription_started_at"),
   createdAt: timestamp2("created_at").notNull().defaultNow()
 });
+var SUBSCRIPTION_PLANS = ["solo", "intermediario", "expert"];
+var SUBSCRIPTION_PAYMENT_METHODS = ["pix", "cartao", "boleto", "transferencia", "dinheiro", "outro"];
+var subscriptionPayments = pgTable2(
+  "subscription_payments",
+  {
+    id: serial2("id").primaryKey(),
+    companyId: integer2("company_id").notNull().references(() => companies.id),
+    amount: decimal2("amount", { precision: 10, scale: 2 }).notNull(),
+    paidAt: date2("paid_at").notNull(),
+    referenceMonth: text2("reference_month").notNull(),
+    // YYYY-MM
+    monthsCovered: integer2("months_covered").notNull().default(1),
+    method: text2("method").notNull(),
+    // SUBSCRIPTION_PAYMENT_METHODS
+    notes: text2("notes"),
+    // companies.access_valid_until right after this payment
+    validUntilAfter: date2("valid_until_after"),
+    createdBy: integer2("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp2("created_at").notNull().defaultNow()
+  },
+  (t) => [index("subscription_payments_company_idx").on(t.companyId), index("subscription_payments_paid_at_idx").on(t.paidAt)]
+);
+var subscriptionEvents = pgTable2(
+  "subscription_events",
+  {
+    id: serial2("id").primaryKey(),
+    companyId: integer2("company_id").notNull().references(() => companies.id),
+    // created, plan_changed, price_changed, start_changed, validity_changed, payment_added,
+    // payment_removed, ai_toggled, suspended, reactivated, renamed
+    type: text2("type").notNull(),
+    details: jsonb2("details"),
+    userId: integer2("user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp2("created_at").notNull().defaultNow()
+  },
+  (t) => [index("subscription_events_company_created_idx").on(t.companyId, t.createdAt)]
+);
 var DEFAULT_COMPANY_SLUG = "empresa-1";
 var companyMemberships = pgTable2(
   "company_memberships",
@@ -891,11 +951,47 @@ var calendarEvents = pgTable2("calendar_events", {
   userId: integer2("user_id").notNull().references(() => users.id),
   lastSynced: timestamp2("last_synced").notNull().defaultNow()
 });
+var roomBookingEvents = pgTable2("room_booking_events", {
+  id: serial2("id").primaryKey(),
+  bookingId: integer2("booking_id").notNull().unique().references(() => roomBookings.id, { onDelete: "cascade" }),
+  googleEventId: text2("google_event_id").notNull(),
+  userId: integer2("user_id").notNull().references(() => users.id),
+  lastSynced: timestamp2("last_synced").notNull().defaultNow()
+});
 var insertCalendarEventSchema = createInsertSchema2(calendarEvents).pick({
   appointmentId: true,
   googleEventId: true,
   userId: true
 });
+var messageTemplates = pgTable2("message_templates", {
+  id: serial2("id").primaryKey(),
+  companyId: integer2("company_id").notNull().references(() => companies.id),
+  key: text2("key").notNull(),
+  // appointment_reminder
+  body: text2("body").notNull(),
+  updatedBy: integer2("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp2("updated_at").notNull().defaultNow()
+}, (t) => [unique2("message_templates_company_key").on(t.companyId, t.key)]);
+var appointmentReminders = pgTable2("appointment_reminders", {
+  appointmentId: integer2("appointment_id").primaryKey().references(() => appointments.id, { onDelete: "cascade" }),
+  companyId: integer2("company_id").notNull().references(() => companies.id),
+  sentBy: integer2("sent_by").references(() => users.id, { onDelete: "set null" }),
+  sentAt: timestamp2("sent_at").notNull().defaultNow()
+});
+var whatsappMessages = pgTable2("whatsapp_messages", {
+  id: serial2("id").primaryKey(),
+  companyId: integer2("company_id").notNull().references(() => companies.id),
+  appointmentId: integer2("appointment_id").references(() => appointments.id, { onDelete: "cascade" }),
+  kind: text2("kind").notNull(),
+  // appointment_reminder
+  toPhone: text2("to_phone"),
+  // sending, sent (accepted by Twilio), delivered, read, failed, undelivered, skipped (no phone)
+  status: text2("status").notNull(),
+  twilioSid: text2("twilio_sid"),
+  error: text2("error"),
+  createdAt: timestamp2("created_at").notNull().defaultNow(),
+  updatedAt: timestamp2("updated_at").notNull().defaultNow()
+}, (t) => [unique2("whatsapp_messages_appointment_kind").on(t.appointmentId, t.kind)]);
 var calendarEventsRelations = relations2(calendarEvents, ({ one }) => ({
   appointment: one(appointments, {
     fields: [calendarEvents.appointmentId],
@@ -1170,7 +1266,7 @@ if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL must be set. Did you forget to provision a database?");
 }
 var pool = new Pool({ connectionString: process.env.DATABASE_URL });
-var db2 = drizzle(pool, { schema: schema_exports });
+var db = drizzle(pool, { schema: schema_exports });
 
 // server/storage.ts
 import { eq, and, gte, lte, sql, desc, ilike, or, getTableColumns } from "drizzle-orm";
@@ -1198,40 +1294,40 @@ var DatabaseStorage = class {
   // autenticada via passport deserializeUser, então nunca deve trazer o
   // binário da foto. Quem precisa da foto usa getUserProfilePhoto().
   async getUser(id) {
-    const [user] = await db2.select(userColumns).from(users).where(eq(users.id, id));
+    const [user] = await db.select(userColumns).from(users).where(eq(users.id, id));
     return user;
   }
   async getUserByUsername(username) {
-    const [user] = await db2.select(userColumns).from(users).where(eq(users.username, username));
+    const [user] = await db.select(userColumns).from(users).where(eq(users.username, username));
     return user;
   }
   async createUser(user) {
-    const [newUser] = await db2.insert(users).values(user).returning();
+    const [newUser] = await db.insert(users).values(user).returning();
     return newUser;
   }
   async updateUser(id, userData) {
-    const [updatedUser] = await db2.update(users).set(userData).where(eq(users.id, id)).returning();
+    const [updatedUser] = await db.update(users).set(userData).where(eq(users.id, id)).returning();
     return updatedUser;
   }
   async deleteUser(id) {
-    const [deletedUser] = await db2.delete(users).where(eq(users.id, id)).returning();
+    const [deletedUser] = await db.delete(users).where(eq(users.id, id)).returning();
     return !!deletedUser;
   }
   /** Members of the company, with `role` = their role there. */
   async getAllUsers(companyId) {
-    const rows = await db2.select({ user: userColumns, role: companyMemberships.role }).from(companyMemberships).innerJoin(users, eq(companyMemberships.userId, users.id)).where(and(eq(companyMemberships.companyId, companyId), eq(companyMemberships.status, "active")));
+    const rows = await db.select({ user: userColumns, role: companyMemberships.role }).from(companyMemberships).innerJoin(users, eq(companyMemberships.userId, users.id)).where(and(eq(companyMemberships.companyId, companyId), eq(companyMemberships.status, "active")));
     return rows.map((r) => ({ ...r.user, role: r.role }));
   }
   async getUserByEmail(email) {
-    const [user] = await db2.select(userColumns).from(users).where(eq(users.email, email));
+    const [user] = await db.select(userColumns).from(users).where(eq(users.email, email));
     return user;
   }
   async getUserByGoogleId(googleId) {
-    const [user] = await db2.select(userColumns).from(users).where(eq(users.googleId, googleId));
+    const [user] = await db.select(userColumns).from(users).where(eq(users.googleId, googleId));
     return user;
   }
   async getUserProfilePhoto(id) {
-    const [row] = await db2.select({
+    const [row] = await db.select({
       data: users.profileImageData,
       mimeType: users.profileImageMimeType
     }).from(users).where(eq(users.id, id));
@@ -1240,7 +1336,7 @@ var DatabaseStorage = class {
   }
   // Password Reset
   async savePasswordResetToken(userId, token, expiresAt) {
-    await db2.insert(passwordResetTokens).values({
+    await db.insert(passwordResetTokens).values({
       userId,
       token,
       expiresAt,
@@ -1249,7 +1345,7 @@ var DatabaseStorage = class {
   }
   async getPasswordResetToken(token) {
     console.log("\u{1F50D} [DB] Buscando token:", token.substring(0, 8) + "...");
-    const [resetToken] = await db2.select().from(passwordResetTokens).where(eq(passwordResetTokens.token, token));
+    const [resetToken] = await db.select().from(passwordResetTokens).where(eq(passwordResetTokens.token, token));
     if (!resetToken) {
       console.log("\u274C [DB] Token n\xE3o encontrado");
       return void 0;
@@ -1268,15 +1364,15 @@ var DatabaseStorage = class {
     return resetToken;
   }
   async invalidatePasswordResetToken(token) {
-    await db2.update(passwordResetTokens).set({ used: true }).where(eq(passwordResetTokens.token, token));
+    await db.update(passwordResetTokens).set({ used: true }).where(eq(passwordResetTokens.token, token));
   }
   async updateUserPassword(userId, hashedPassword) {
-    const [updatedUser] = await db2.update(users).set({ password: hashedPassword }).where(eq(users.id, userId)).returning();
+    const [updatedUser] = await db.update(users).set({ password: hashedPassword }).where(eq(users.id, userId)).returning();
     return !!updatedUser;
   }
   // Psychologist methods
   async getPsychologist(companyId, id) {
-    const [psych] = await db2.select().from(psychologists).where(and(eq(psychologists.id, id), eq(psychologists.companyId, companyId)));
+    const [psych] = await db.select().from(psychologists).where(and(eq(psychologists.id, id), eq(psychologists.companyId, companyId)));
     return psych;
   }
   /**
@@ -1284,15 +1380,15 @@ var DatabaseStorage = class {
    * company: the psychologist's companyId is what scopes everything after it.
    */
   async getPsychologistForPublicPage(id) {
-    const [psych] = await db2.select().from(psychologists).where(eq(psychologists.id, id));
+    const [psych] = await db.select().from(psychologists).where(eq(psychologists.id, id));
     return psych;
   }
   async getPsychologistByUserId(companyId, userId) {
-    const [psych] = await db2.select().from(psychologists).where(and(eq(psychologists.userId, userId), eq(psychologists.companyId, companyId)));
+    const [psych] = await db.select().from(psychologists).where(and(eq(psychologists.userId, userId), eq(psychologists.companyId, companyId)));
     return psych;
   }
   async createPsychologist(companyId, psychologist) {
-    const [newPsych] = await db2.insert(psychologists).values({
+    const [newPsych] = await db.insert(psychologists).values({
       ...psychologist,
       companyId,
       hourlyRate: psychologist.hourlyRate.toString()
@@ -1300,58 +1396,58 @@ var DatabaseStorage = class {
     return newPsych;
   }
   async updatePsychologist(companyId, id, data) {
-    const [updated] = await db2.update(psychologists).set(withoutCompany(data)).where(and(eq(psychologists.id, id), eq(psychologists.companyId, companyId))).returning();
+    const [updated] = await db.update(psychologists).set(withoutCompany(data)).where(and(eq(psychologists.id, id), eq(psychologists.companyId, companyId))).returning();
     return updated;
   }
   async deletePsychologist(companyId, id) {
-    const [deleted] = await db2.delete(psychologists).where(and(eq(psychologists.id, id), eq(psychologists.companyId, companyId))).returning();
+    const [deleted] = await db.delete(psychologists).where(and(eq(psychologists.id, id), eq(psychologists.companyId, companyId))).returning();
     return !!deleted;
   }
   async getAllPsychologists(companyId) {
-    return await db2.select().from(psychologists).where(eq(psychologists.companyId, companyId));
+    return await db.select().from(psychologists).where(eq(psychologists.companyId, companyId));
   }
   // Room methods
   async getRoom(companyId, id) {
-    const [room] = await db2.select().from(rooms).where(and(eq(rooms.id, id), eq(rooms.companyId, companyId)));
+    const [room] = await db.select().from(rooms).where(and(eq(rooms.id, id), eq(rooms.companyId, companyId)));
     return room;
   }
   async createRoom(companyId, room) {
-    const [newRoom] = await db2.insert(rooms).values({ ...room, companyId }).returning();
+    const [newRoom] = await db.insert(rooms).values({ ...room, companyId }).returning();
     return newRoom;
   }
   async updateRoom(companyId, id, data) {
-    const [updated] = await db2.update(rooms).set(withoutCompany(data)).where(and(eq(rooms.id, id), eq(rooms.companyId, companyId))).returning();
+    const [updated] = await db.update(rooms).set(withoutCompany(data)).where(and(eq(rooms.id, id), eq(rooms.companyId, companyId))).returning();
     return updated;
   }
   async deleteRoom(companyId, id) {
-    const [deleted] = await db2.delete(rooms).where(and(eq(rooms.id, id), eq(rooms.companyId, companyId))).returning();
+    const [deleted] = await db.delete(rooms).where(and(eq(rooms.id, id), eq(rooms.companyId, companyId))).returning();
     return !!deleted;
   }
   async getAllRooms(companyId) {
-    return await db2.select().from(rooms).where(eq(rooms.companyId, companyId));
+    return await db.select().from(rooms).where(eq(rooms.companyId, companyId));
   }
   // Appointment methods
   async getAppointment(companyId, id) {
-    const [appt] = await db2.select().from(appointments).where(and(eq(appointments.id, id), eq(appointments.companyId, companyId)));
+    const [appt] = await db.select().from(appointments).where(and(eq(appointments.id, id), eq(appointments.companyId, companyId)));
     return appt;
   }
   async createAppointment(companyId, appointment) {
-    const [newAppt] = await db2.insert(appointments).values({ ...appointment, companyId }).returning();
+    const [newAppt] = await db.insert(appointments).values({ ...appointment, companyId }).returning();
     return newAppt;
   }
   async updateAppointment(companyId, id, data) {
-    const [updated] = await db2.update(appointments).set(withoutCompany(data)).where(and(eq(appointments.id, id), eq(appointments.companyId, companyId))).returning();
+    const [updated] = await db.update(appointments).set(withoutCompany(data)).where(and(eq(appointments.id, id), eq(appointments.companyId, companyId))).returning();
     return updated;
   }
   async deleteAppointment(companyId, id) {
-    const [deleted] = await db2.delete(appointments).where(and(eq(appointments.id, id), eq(appointments.companyId, companyId))).returning();
+    const [deleted] = await db.delete(appointments).where(and(eq(appointments.id, id), eq(appointments.companyId, companyId))).returning();
     return !!deleted;
   }
   async getAllAppointments(companyId) {
-    return await db2.select().from(appointments).where(eq(appointments.companyId, companyId));
+    return await db.select().from(appointments).where(eq(appointments.companyId, companyId));
   }
   async getAppointmentsByPsychologistId(companyId, psychologistId) {
-    return await db2.select().from(appointments).where(and(eq(appointments.psychologistId, psychologistId), eq(appointments.companyId, companyId)));
+    return await db.select().from(appointments).where(and(eq(appointments.psychologistId, psychologistId), eq(appointments.companyId, companyId)));
   }
   async getAppointmentsByDate(companyId, date3) {
     const all = await this.getAllAppointments(companyId);
@@ -1359,14 +1455,14 @@ var DatabaseStorage = class {
     return all.filter((a) => new Date(a.date).toISOString().split("T")[0] === dateString);
   }
   async getAppointmentsByDateRange(companyId, startDate, endDate) {
-    return await db2.select().from(appointments).where(and(
+    return await db.select().from(appointments).where(and(
       eq(appointments.companyId, companyId),
       gte(appointments.date, startDate.toISOString()),
       lte(appointments.date, endDate.toISOString())
     ));
   }
   async getAppointmentsByPsychologistIdAndDateRange(companyId, psychologistId, startDate, endDate) {
-    return await db2.select().from(appointments).where(and(
+    return await db.select().from(appointments).where(and(
       eq(appointments.companyId, companyId),
       eq(appointments.psychologistId, psychologistId),
       gte(appointments.date, startDate.toISOString()),
@@ -1375,11 +1471,11 @@ var DatabaseStorage = class {
   }
   // Transaction methods
   async getTransaction(companyId, id) {
-    const [tx] = await db2.select().from(transactions).where(and(eq(transactions.id, id), eq(transactions.companyId, companyId)));
+    const [tx] = await db.select().from(transactions).where(and(eq(transactions.id, id), eq(transactions.companyId, companyId)));
     return tx;
   }
   async createTransaction(companyId, transaction) {
-    const [newTx] = await db2.insert(transactions).values({
+    const [newTx] = await db.insert(transactions).values({
       ...transaction,
       companyId,
       amount: transaction.amount.toString()
@@ -1387,21 +1483,21 @@ var DatabaseStorage = class {
     return newTx;
   }
   async updateTransaction(companyId, id, data) {
-    const [updated] = await db2.update(transactions).set(withoutCompany(data)).where(and(eq(transactions.id, id), eq(transactions.companyId, companyId))).returning();
+    const [updated] = await db.update(transactions).set(withoutCompany(data)).where(and(eq(transactions.id, id), eq(transactions.companyId, companyId))).returning();
     return updated;
   }
   async deleteTransaction(companyId, id) {
-    const [deleted] = await db2.delete(transactions).where(and(eq(transactions.id, id), eq(transactions.companyId, companyId))).returning();
+    const [deleted] = await db.delete(transactions).where(and(eq(transactions.id, id), eq(transactions.companyId, companyId))).returning();
     return !!deleted;
   }
   async getAllTransactions(companyId) {
-    return await db2.select().from(transactions).where(eq(transactions.companyId, companyId));
+    return await db.select().from(transactions).where(eq(transactions.companyId, companyId));
   }
   async getTransactionsByType(companyId, type) {
-    return await db2.select().from(transactions).where(and(eq(transactions.type, type), eq(transactions.companyId, companyId)));
+    return await db.select().from(transactions).where(and(eq(transactions.type, type), eq(transactions.companyId, companyId)));
   }
   async getTransactionsByDateRange(companyId, startDate, endDate) {
-    return await db2.select().from(transactions).where(and(
+    return await db.select().from(transactions).where(and(
       eq(transactions.companyId, companyId),
       gte(transactions.date, startDate.toISOString()),
       lte(transactions.date, endDate.toISOString())
@@ -1409,26 +1505,26 @@ var DatabaseStorage = class {
   }
   // RoomBooking methods
   async getRoomBooking(companyId, id) {
-    const [booking] = await db2.select().from(roomBookings).where(and(eq(roomBookings.id, id), eq(roomBookings.companyId, companyId)));
+    const [booking] = await db.select().from(roomBookings).where(and(eq(roomBookings.id, id), eq(roomBookings.companyId, companyId)));
     return booking;
   }
   async createRoomBooking(companyId, booking) {
-    const [newBooking] = await db2.insert(roomBookings).values({ ...booking, companyId }).returning();
+    const [newBooking] = await db.insert(roomBookings).values({ ...booking, companyId }).returning();
     return newBooking;
   }
   async updateRoomBooking(companyId, id, data) {
-    const [updated] = await db2.update(roomBookings).set(withoutCompany(data)).where(and(eq(roomBookings.id, id), eq(roomBookings.companyId, companyId))).returning();
+    const [updated] = await db.update(roomBookings).set(withoutCompany(data)).where(and(eq(roomBookings.id, id), eq(roomBookings.companyId, companyId))).returning();
     return updated;
   }
   async deleteRoomBooking(companyId, id) {
-    const [deleted] = await db2.delete(roomBookings).where(and(eq(roomBookings.id, id), eq(roomBookings.companyId, companyId))).returning();
+    const [deleted] = await db.delete(roomBookings).where(and(eq(roomBookings.id, id), eq(roomBookings.companyId, companyId))).returning();
     return !!deleted;
   }
   async getAllRoomBookings(companyId) {
-    return await db2.select().from(roomBookings).where(eq(roomBookings.companyId, companyId));
+    return await db.select().from(roomBookings).where(eq(roomBookings.companyId, companyId));
   }
   async getRoomBookingsByRoomId(companyId, roomId) {
-    return await db2.select().from(roomBookings).where(and(eq(roomBookings.roomId, roomId), eq(roomBookings.companyId, companyId)));
+    return await db.select().from(roomBookings).where(and(eq(roomBookings.roomId, roomId), eq(roomBookings.companyId, companyId)));
   }
   async getRoomBookingsByDate(companyId, date3) {
     const all = await this.getAllRoomBookings(companyId);
@@ -1436,7 +1532,7 @@ var DatabaseStorage = class {
     return all.filter((b) => new Date(b.date).toISOString().split("T")[0] === dateString);
   }
   async getRoomBookingsByDateRange(companyId, startDate, endDate) {
-    return await db2.select().from(roomBookings).where(and(
+    return await db.select().from(roomBookings).where(and(
       eq(roomBookings.companyId, companyId),
       gte(roomBookings.date, startDate.toISOString()),
       lte(roomBookings.date, endDate.toISOString())
@@ -1452,62 +1548,62 @@ var DatabaseStorage = class {
   }
   // Permission methods
   async getPermission(id) {
-    const [perm] = await db2.select().from(permissions).where(eq(permissions.id, id));
+    const [perm] = await db.select().from(permissions).where(eq(permissions.id, id));
     return perm;
   }
   async createPermission(permission) {
-    const [newPerm] = await db2.insert(permissions).values(permission).returning();
+    const [newPerm] = await db.insert(permissions).values(permission).returning();
     return newPerm;
   }
   async updatePermission(id, data) {
-    const [updated] = await db2.update(permissions).set(data).where(eq(permissions.id, id)).returning();
+    const [updated] = await db.update(permissions).set(data).where(eq(permissions.id, id)).returning();
     return updated;
   }
   async deletePermission(id) {
-    const [deleted] = await db2.delete(permissions).where(eq(permissions.id, id)).returning();
+    const [deleted] = await db.delete(permissions).where(eq(permissions.id, id)).returning();
     return !!deleted;
   }
   async getAllPermissions() {
-    return await db2.select().from(permissions);
+    return await db.select().from(permissions);
   }
   // RolePermission methods
   async getRolePermission(id) {
-    const [rp] = await db2.select().from(rolePermissions).where(eq(rolePermissions.id, id));
+    const [rp] = await db.select().from(rolePermissions).where(eq(rolePermissions.id, id));
     return rp;
   }
   async createRolePermission(rolePermission) {
-    const [newRp] = await db2.insert(rolePermissions).values(rolePermission).returning();
+    const [newRp] = await db.insert(rolePermissions).values(rolePermission).returning();
     return newRp;
   }
   async updateRolePermission(id, data) {
-    const [updated] = await db2.update(rolePermissions).set(data).where(eq(rolePermissions.id, id)).returning();
+    const [updated] = await db.update(rolePermissions).set(data).where(eq(rolePermissions.id, id)).returning();
     return updated;
   }
   async deleteRolePermission(id) {
-    const [deleted] = await db2.delete(rolePermissions).where(eq(rolePermissions.id, id)).returning();
+    const [deleted] = await db.delete(rolePermissions).where(eq(rolePermissions.id, id)).returning();
     return !!deleted;
   }
   async getAllRolePermissions() {
-    return await db2.select().from(rolePermissions);
+    return await db.select().from(rolePermissions);
   }
   async getRolePermissionsByRole(role) {
-    return await db2.select().from(rolePermissions).where(eq(rolePermissions.role, role));
+    return await db.select().from(rolePermissions).where(eq(rolePermissions.role, role));
   }
   // Invoice methods (NFS-e)
   async getInvoice(companyId, id) {
-    const [invoice] = await db2.select().from(invoices).where(and(eq(invoices.id, id), eq(invoices.companyId, companyId)));
+    const [invoice] = await db.select().from(invoices).where(and(eq(invoices.id, id), eq(invoices.companyId, companyId)));
     return invoice;
   }
   async createInvoice(companyId, invoice) {
-    const [newInvoice] = await db2.insert(invoices).values({ ...invoice, companyId }).returning();
+    const [newInvoice] = await db.insert(invoices).values({ ...invoice, companyId }).returning();
     return newInvoice;
   }
   async updateInvoice(companyId, id, data) {
-    const [updated] = await db2.update(invoices).set({ ...withoutCompany(data), updatedAt: /* @__PURE__ */ new Date() }).where(and(eq(invoices.id, id), eq(invoices.companyId, companyId))).returning();
+    const [updated] = await db.update(invoices).set({ ...withoutCompany(data), updatedAt: /* @__PURE__ */ new Date() }).where(and(eq(invoices.id, id), eq(invoices.companyId, companyId))).returning();
     return updated;
   }
   async deleteInvoice(companyId, id) {
-    const [deleted] = await db2.delete(invoices).where(and(eq(invoices.id, id), eq(invoices.companyId, companyId))).returning();
+    const [deleted] = await db.delete(invoices).where(and(eq(invoices.id, id), eq(invoices.companyId, companyId))).returning();
     return !!deleted;
   }
   async getInvoicesByUserId(companyId, psychologistId, opts) {
@@ -1520,9 +1616,9 @@ var DatabaseStorage = class {
       conditions.push(or(ilike(invoices.tomadorNome, term), ilike(invoices.tomadorCpfCnpj, term)));
     }
     const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
-    const totalResult = await db2.select({ count: sql`count(*)::int` }).from(invoices).where(whereClause);
+    const totalResult = await db.select({ count: sql`count(*)::int` }).from(invoices).where(whereClause);
     const total = totalResult[0]?.count ?? 0;
-    let query = db2.select(invoiceListColumns).from(invoices).where(whereClause).orderBy(desc(invoices.dataUpload));
+    let query = db.select(invoiceListColumns).from(invoices).where(whereClause).orderBy(desc(invoices.dataUpload));
     if (opts?.limit != null) query = query.limit(opts.limit);
     if (opts?.offset != null) query = query.offset(opts.offset);
     const rows = await query;
@@ -1534,7 +1630,7 @@ var DatabaseStorage = class {
     if (opts?.dataEmissaoTo) conditions.push(lte(invoices.dataEmissao, opts.dataEmissaoTo));
     if (opts?.status) conditions.push(eq(invoices.status, opts.status));
     const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
-    const [row] = await db2.select({
+    const [row] = await db.select({
       totalCount: sql`count(*)::int`,
       sumValorServicos: sql`coalesce(sum(${invoices.valorServicos})::text, '0')`,
       sumValorLiquido: sql`coalesce(sum(${invoices.valorLiquido})::text, '0')`
@@ -1542,10 +1638,10 @@ var DatabaseStorage = class {
     return { totalCount: row?.totalCount ?? 0, sumValorServicos: row?.sumValorServicos ?? "0", sumValorLiquido: row?.sumValorLiquido ?? "0" };
   }
   async getAllInvoices(companyId) {
-    return await db2.select().from(invoices).where(eq(invoices.companyId, companyId));
+    return await db.select().from(invoices).where(eq(invoices.companyId, companyId));
   }
   async getInvoicesByReferenceMonth(companyId, _referenceMonth) {
-    return await db2.select().from(invoices).where(eq(invoices.companyId, companyId));
+    return await db.select().from(invoices).where(eq(invoices.companyId, companyId));
   }
   async getInvoiceByUserAndMonth(_companyId, _userId, _referenceMonth) {
     return void 0;
@@ -1561,11 +1657,11 @@ var DatabaseStorage = class {
       conditions.push(or(ilike(invoices.tomadorNome, term), ilike(invoices.tomadorCpfCnpj, term)));
     }
     const whereClause = conditions.length === 0 ? sql`1=1` : conditions.length === 1 ? conditions[0] : and(...conditions);
-    const totalCountResult = await db2.select({ count: sql`count(*)::int` }).from(invoices).where(whereClause);
+    const totalCountResult = await db.select({ count: sql`count(*)::int` }).from(invoices).where(whereClause);
     const totalCount = totalCountResult[0]?.count ?? 0;
     const limit = opts?.limit ?? 20;
     const offset = opts?.offset ?? 0;
-    const result = await db2.select({ invoices: invoiceListColumns, users: userColumns }).from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).where(whereClause).orderBy(desc(invoices.dataUpload)).limit(limit).offset(offset);
+    const result = await db.select({ invoices: invoiceListColumns, users: userColumns }).from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).where(whereClause).orderBy(desc(invoices.dataUpload)).limit(limit).offset(offset);
     const invoicesWithUsers = result.map((r) => ({ ...r.invoices, user: r.users }));
     return { invoices: invoicesWithUsers, total: totalCount };
   }
@@ -1576,80 +1672,80 @@ var DatabaseStorage = class {
     if (opts?.dataEmissaoTo) conditions.push(lte(invoices.dataEmissao, opts.dataEmissaoTo));
     if (opts?.status) conditions.push(eq(invoices.status, opts.status));
     const whereClause = conditions.length === 0 ? sql`1=1` : conditions.length === 1 ? conditions[0] : and(...conditions);
-    const [row] = await db2.select({ totalCount: sql`count(*)::int`, sumValorServicos: sql`coalesce(sum(${invoices.valorServicos})::text, '0')`, sumValorLiquido: sql`coalesce(sum(${invoices.valorLiquido})::text, '0')` }).from(invoices).where(whereClause);
+    const [row] = await db.select({ totalCount: sql`count(*)::int`, sumValorServicos: sql`coalesce(sum(${invoices.valorServicos})::text, '0')`, sumValorLiquido: sql`coalesce(sum(${invoices.valorLiquido})::text, '0')` }).from(invoices).where(whereClause);
     return { totalCount: row?.totalCount ?? 0, sumValorServicos: row?.sumValorServicos ?? "0", sumValorLiquido: row?.sumValorLiquido ?? "0" };
   }
   async getInvoiceWithUser(companyId, id) {
-    const result = await db2.select().from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).where(and(eq(invoices.id, id), eq(invoices.companyId, companyId)));
+    const result = await db.select().from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).where(and(eq(invoices.id, id), eq(invoices.companyId, companyId)));
     if (result.length === 0) return void 0;
     return { ...result[0].invoices, user: result[0].users };
   }
   async getAllInvoicesWithUsers(companyId) {
-    const result = await db2.select().from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).where(eq(invoices.companyId, companyId)).orderBy(desc(invoices.dataUpload));
+    const result = await db.select().from(invoices).innerJoin(users, eq(invoices.psychologistId, users.id)).where(eq(invoices.companyId, companyId)).orderBy(desc(invoices.dataUpload));
     return result.map((r) => ({ ...r.invoices, user: r.users }));
   }
   // Patient Record System Implementation
   // Patients
   async getPatient(companyId, id) {
-    const [patient] = await db2.select().from(patients).where(and(eq(patients.id, id), eq(patients.companyId, companyId)));
+    const [patient] = await db.select().from(patients).where(and(eq(patients.id, id), eq(patients.companyId, companyId)));
     return patient;
   }
   async getPatientByCpf(companyId, cpf) {
-    const [patient] = await db2.select().from(patients).where(and(eq(patients.cpf, cpf), eq(patients.companyId, companyId)));
+    const [patient] = await db.select().from(patients).where(and(eq(patients.cpf, cpf), eq(patients.companyId, companyId)));
     return patient;
   }
   async createPatient(companyId, patient) {
-    const [newPatient] = await db2.insert(patients).values({ ...patient, companyId }).returning();
+    const [newPatient] = await db.insert(patients).values({ ...patient, companyId }).returning();
     return newPatient;
   }
   async updatePatient(companyId, id, data) {
-    const [updated] = await db2.update(patients).set(withoutCompany(data)).where(and(eq(patients.id, id), eq(patients.companyId, companyId))).returning();
+    const [updated] = await db.update(patients).set(withoutCompany(data)).where(and(eq(patients.id, id), eq(patients.companyId, companyId))).returning();
     return updated;
   }
   async listPatients(companyId, activeOnly = true) {
     const ofCompany = eq(patients.companyId, companyId);
-    return await db2.select().from(patients).where(activeOnly ? and(ofCompany, eq(patients.status, "active")) : ofCompany);
+    return await db.select().from(patients).where(activeOnly ? and(ofCompany, eq(patients.status, "active")) : ofCompany);
   }
   // Medical Records
   async getMedicalRecordByPatientId(patientId) {
-    const [record] = await db2.select().from(medicalRecords).where(eq(medicalRecords.patientId, patientId));
+    const [record] = await db.select().from(medicalRecords).where(eq(medicalRecords.patientId, patientId));
     return record;
   }
   async createMedicalRecord(record) {
-    const [newRecord] = await db2.insert(medicalRecords).values(record).returning();
+    const [newRecord] = await db.insert(medicalRecords).values(record).returning();
     return newRecord;
   }
   async updateMedicalRecord(id, record) {
-    const [updated] = await db2.update(medicalRecords).set(record).where(eq(medicalRecords.id, id)).returning();
+    const [updated] = await db.update(medicalRecords).set(record).where(eq(medicalRecords.id, id)).returning();
     return updated;
   }
   // Clinical Sessions
   async getSession(id) {
-    const [session3] = await db2.select().from(clinicalSessions).where(eq(clinicalSessions.id, id));
+    const [session3] = await db.select().from(clinicalSessions).where(eq(clinicalSessions.id, id));
     return session3;
   }
   async createSession(session3) {
-    const [newSession] = await db2.insert(clinicalSessions).values(session3).returning();
+    const [newSession] = await db.insert(clinicalSessions).values(session3).returning();
     return newSession;
   }
   async updateSession(id, session3) {
-    const [updated] = await db2.update(clinicalSessions).set(session3).where(eq(clinicalSessions.id, id)).returning();
+    const [updated] = await db.update(clinicalSessions).set(session3).where(eq(clinicalSessions.id, id)).returning();
     return updated;
   }
   async listSessionsByPatientId(patientId) {
-    return await db2.select().from(clinicalSessions).where(eq(clinicalSessions.patientId, patientId)).orderBy(sql`${clinicalSessions.sessionDate} DESC, ${clinicalSessions.sessionTime} DESC`);
+    return await db.select().from(clinicalSessions).where(eq(clinicalSessions.patientId, patientId)).orderBy(sql`${clinicalSessions.sessionDate} DESC, ${clinicalSessions.sessionTime} DESC`);
   }
   // Documents
   async getDocument(id) {
-    const [doc] = await db2.select().from(patientDocuments).where(eq(patientDocuments.id, id));
+    const [doc] = await db.select().from(patientDocuments).where(eq(patientDocuments.id, id));
     return doc;
   }
   async createDocument(document) {
-    const [newDoc] = await db2.insert(patientDocuments).values(document).returning();
+    const [newDoc] = await db.insert(patientDocuments).values(document).returning();
     return newDoc;
   }
   async listDocumentsByPatientId(patientId) {
-    return await db2.select({
+    return await db.select({
       id: patientDocuments.id,
       patientId: patientDocuments.patientId,
       documentType: patientDocuments.documentType,
@@ -1664,40 +1760,40 @@ var DatabaseStorage = class {
     }).from(patientDocuments).where(eq(patientDocuments.patientId, patientId));
   }
   async saveDocumentSummary(id, summary, model) {
-    const [doc] = await db2.update(patientDocuments).set({ aiSummary: summary, aiSummaryAt: /* @__PURE__ */ new Date(), aiSummaryModel: model }).where(eq(patientDocuments.id, id)).returning();
+    const [doc] = await db.update(patientDocuments).set({ aiSummary: summary, aiSummaryAt: /* @__PURE__ */ new Date(), aiSummaryModel: model }).where(eq(patientDocuments.id, id)).returning();
     return doc;
   }
   async deleteDocument(id) {
-    const [deleted] = await db2.delete(patientDocuments).where(eq(patientDocuments.id, id)).returning();
+    const [deleted] = await db.delete(patientDocuments).where(eq(patientDocuments.id, id)).returning();
     return !!deleted;
   }
   // Assessments
   async getAssessment(id) {
-    const [assessment] = await db2.select().from(psychologicalAssessments).where(eq(psychologicalAssessments.id, id));
+    const [assessment] = await db.select().from(psychologicalAssessments).where(eq(psychologicalAssessments.id, id));
     return assessment;
   }
   async createAssessment(assessment) {
-    const [newAssessment] = await db2.insert(psychologicalAssessments).values(assessment).returning();
+    const [newAssessment] = await db.insert(psychologicalAssessments).values(assessment).returning();
     return newAssessment;
   }
   async listAssessmentsByPatientId(patientId) {
-    return await db2.select().from(psychologicalAssessments).where(eq(psychologicalAssessments.patientId, patientId));
+    return await db.select().from(psychologicalAssessments).where(eq(psychologicalAssessments.patientId, patientId));
   }
   // Audit & History
   async createAuditLog(companyId, log2) {
-    const [newLog] = await db2.insert(auditLogs).values({ ...log2, companyId }).returning();
+    const [newLog] = await db.insert(auditLogs).values({ ...log2, companyId }).returning();
     return newLog;
   }
   async listAuditLogsByPatientId(patientId) {
-    return await db2.select().from(auditLogs).where(eq(auditLogs.patientId, patientId)).orderBy(sql`${auditLogs.createdAt} DESC`);
+    return await db.select().from(auditLogs).where(eq(auditLogs.patientId, patientId)).orderBy(sql`${auditLogs.createdAt} DESC`);
   }
   async getSessionHistory(sessionId) {
-    return await db2.select().from(sessionHistory).where(eq(sessionHistory.sessionId, sessionId)).orderBy(sql`${sessionHistory.version} DESC`);
+    return await db.select().from(sessionHistory).where(eq(sessionHistory.sessionId, sessionId)).orderBy(sql`${sessionHistory.version} DESC`);
   }
   // Patient Transfers
   async transferPatient(companyId, data) {
     let transfer;
-    await db2.transaction(async (tx) => {
+    await db.transaction(async (tx) => {
       await tx.update(patients).set({ psychologistId: data.toPsychologistId }).where(and(eq(patients.id, data.patientId), eq(patients.companyId, companyId)));
       const [newTransfer] = await tx.insert(patientTransfers).values({
         patientId: data.patientId,
@@ -1711,14 +1807,14 @@ var DatabaseStorage = class {
     return transfer;
   }
   async listTransfersByPatientId(patientId) {
-    return await db2.select().from(patientTransfers).where(eq(patientTransfers.patientId, patientId)).orderBy(sql`${patientTransfers.createdAt} DESC`);
+    return await db.select().from(patientTransfers).where(eq(patientTransfers.patientId, patientId)).orderBy(sql`${patientTransfers.createdAt} DESC`);
   }
   async listCommissionPayoutConfigs(companyId, psychologistId) {
     const ofCompany = eq(commissionPayoutConfigs.companyId, companyId);
-    return await db2.select().from(commissionPayoutConfigs).where(psychologistId !== void 0 ? and(ofCompany, eq(commissionPayoutConfigs.psychologistId, psychologistId)) : ofCompany).orderBy(sql`${commissionPayoutConfigs.validFrom} DESC`);
+    return await db.select().from(commissionPayoutConfigs).where(psychologistId !== void 0 ? and(ofCompany, eq(commissionPayoutConfigs.psychologistId, psychologistId)) : ofCompany).orderBy(sql`${commissionPayoutConfigs.validFrom} DESC`);
   }
   async getActiveCommissionPayoutConfig(companyId, psychologistId, forDate) {
-    const results = await db2.select().from(commissionPayoutConfigs).where(
+    const results = await db.select().from(commissionPayoutConfigs).where(
       and(
         eq(commissionPayoutConfigs.companyId, companyId),
         eq(commissionPayoutConfigs.psychologistId, psychologistId),
@@ -1732,11 +1828,11 @@ var DatabaseStorage = class {
     return results[0];
   }
   async createCommissionPayoutConfig(companyId, data) {
-    const [config] = await db2.insert(commissionPayoutConfigs).values({ ...data, companyId }).returning();
+    const [config] = await db.insert(commissionPayoutConfigs).values({ ...data, companyId }).returning();
     return config;
   }
   async updateCommissionPayoutConfig(companyId, id, data) {
-    const [updated] = await db2.update(commissionPayoutConfigs).set(withoutCompany(data)).where(and(eq(commissionPayoutConfigs.id, id), eq(commissionPayoutConfigs.companyId, companyId))).returning();
+    const [updated] = await db.update(commissionPayoutConfigs).set(withoutCompany(data)).where(and(eq(commissionPayoutConfigs.id, id), eq(commissionPayoutConfigs.companyId, companyId))).returning();
     return updated;
   }
   async listCommissions(companyId, filters) {
@@ -1750,14 +1846,14 @@ var DatabaseStorage = class {
       if (filters?.periodStart) conditions.push(gte(commissions.periodStart, filters.periodStart));
       if (filters?.periodEnd) conditions.push(lte(commissions.periodEnd, filters.periodEnd));
     }
-    return await db2.select().from(commissions).where(and(...conditions)).orderBy(sql`${commissions.createdAt} DESC`);
+    return await db.select().from(commissions).where(and(...conditions)).orderBy(sql`${commissions.createdAt} DESC`);
   }
   async getCommission(companyId, id) {
-    const [c] = await db2.select().from(commissions).where(and(eq(commissions.id, id), eq(commissions.companyId, companyId)));
+    const [c] = await db.select().from(commissions).where(and(eq(commissions.id, id), eq(commissions.companyId, companyId)));
     return c;
   }
   async createCommission(companyId, data) {
-    const [c] = await db2.insert(commissions).values({
+    const [c] = await db.insert(commissions).values({
       ...data,
       companyId,
       createdAt: /* @__PURE__ */ new Date(),
@@ -1766,22 +1862,22 @@ var DatabaseStorage = class {
     return c;
   }
   async updateCommission(companyId, id, data) {
-    const [updated] = await db2.update(commissions).set({ ...withoutCompany(data), updatedAt: /* @__PURE__ */ new Date() }).where(and(eq(commissions.id, id), eq(commissions.companyId, companyId))).returning();
+    const [updated] = await db.update(commissions).set({ ...withoutCompany(data), updatedAt: /* @__PURE__ */ new Date() }).where(and(eq(commissions.id, id), eq(commissions.companyId, companyId))).returning();
     return updated;
   }
   async listCommissionItems(commissionId) {
-    return await db2.select().from(commissionItems).where(eq(commissionItems.commissionId, commissionId)).orderBy(sql`${commissionItems.bookingDate} ASC`);
+    return await db.select().from(commissionItems).where(eq(commissionItems.commissionId, commissionId)).orderBy(sql`${commissionItems.bookingDate} ASC`);
   }
   async createCommissionItems(items) {
     if (items.length === 0) return [];
-    return await db2.insert(commissionItems).values(items).returning();
+    return await db.insert(commissionItems).values(items).returning();
   }
   async getCommissionDashboard(companyId, month) {
     const [year, mon] = month.split("-");
     const periodStart = `${year}-${mon}-01`;
     const lastDay = new Date(parseInt(year), parseInt(mon), 0).getDate();
     const periodEnd = `${year}-${mon}-${lastDay.toString().padStart(2, "0")}`;
-    const rows = await db2.select().from(commissions).where(
+    const rows = await db.select().from(commissions).where(
       and(
         eq(commissions.companyId, companyId),
         gte(commissions.periodStart, periodStart),
@@ -1806,7 +1902,7 @@ var storage = new DatabaseStorage();
 import { createHmac } from "crypto";
 
 // server/lib/companies.ts
-import { and as and3, eq as eq3, isNull as isNull2, sql as sql3 } from "drizzle-orm";
+import { and as and3, eq as eq4, isNull as isNull2, sql as sql3 } from "drizzle-orm";
 import { z as z2 } from "zod";
 
 // server/lib/access-invites.ts
@@ -1814,15 +1910,308 @@ import { and as and2, eq as eq2, isNull, sql as sql2 } from "drizzle-orm";
 var normalizeEmail = (email) => email.trim().toLowerCase();
 async function applyPendingInvites(user) {
   if (!user.email) return user;
-  const pending = await db2.select().from(accessInvites).where(and2(sql2`lower(${accessInvites.email}) = ${normalizeEmail(user.email)}`, isNull(accessInvites.acceptedAt)));
+  const pending = await db.select().from(accessInvites).where(and2(sql2`lower(${accessInvites.email}) = ${normalizeEmail(user.email)}`, isNull(accessInvites.acceptedAt)));
   if (pending.length === 0) return user;
   for (const invite of pending) {
     const companyId = invite.companyId ?? await getDefaultCompanyId();
     if (companyId) await upsertMembership(user.id, companyId, invite.role);
   }
-  await db2.update(users).set({ status: "active" }).where(eq2(users.id, user.id));
-  await db2.update(accessInvites).set({ acceptedAt: /* @__PURE__ */ new Date(), acceptedUserId: user.id }).where(and2(sql2`lower(${accessInvites.email}) = ${normalizeEmail(user.email)}`, isNull(accessInvites.acceptedAt)));
+  await db.update(users).set({ status: "active" }).where(eq2(users.id, user.id));
+  await db.update(accessInvites).set({ acceptedAt: /* @__PURE__ */ new Date(), acceptedUserId: user.id }).where(and2(sql2`lower(${accessInvites.email}) = ${normalizeEmail(user.email)}`, isNull(accessInvites.acceptedAt)));
   return { ...user, status: "active" };
+}
+
+// server/lib/admin-invite-email.ts
+import { eq as eq3 } from "drizzle-orm";
+
+// server/services/email.ts
+import { Resend } from "resend";
+import nodemailer from "nodemailer";
+if (!process.env.RESEND_API_KEY) {
+  console.warn("RESEND_API_KEY not set. Password recovery emails will not be sent.");
+}
+var resend = new Resend(process.env.RESEND_API_KEY);
+var EMAIL_FROM = process.env.EMAIL_FROM || "ConsultaPsi <onboarding@resend.dev>";
+var smtpConfigured = () => !!(process.env.SMTP_USER && process.env.SMTP_PASS);
+var smtp = null;
+var smtpTransport = () => smtp ??= nodemailer.createTransport({
+  host: process.env.SMTP_HOST || "smtp.gmail.com",
+  port: 465,
+  secure: true,
+  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+});
+async function sendAppEmail(params) {
+  if (smtpConfigured()) {
+    try {
+      await smtpTransport().sendMail({
+        from: { name: params.fromName || "ConsultaPsi", address: process.env.SMTP_USER },
+        to: params.to,
+        subject: params.subject,
+        html: params.html,
+        replyTo: params.replyTo,
+        bcc: params.bcc
+      });
+      return true;
+    } catch (error) {
+      console.error("sendAppEmail: SMTP refused the e-mail:", error);
+      return false;
+    }
+  }
+  const from = params.fromName ? `${params.fromName} <${EMAIL_FROM.match(/<(.+)>/)?.[1] ?? EMAIL_FROM}>` : EMAIL_FROM;
+  try {
+    const { error } = await resend.emails.send({
+      from,
+      to: [params.to],
+      subject: params.subject,
+      html: params.html,
+      replyTo: params.replyTo,
+      bcc: params.bcc ? [params.bcc] : void 0
+    });
+    if (error) {
+      console.error("sendAppEmail: Resend refused the e-mail:", error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error("sendAppEmail error:", error);
+    return false;
+  }
+}
+var getAppUrl = () => {
+  if (process.env.APP_URL || process.env.BASE_URL) {
+    return (process.env.APP_URL || process.env.BASE_URL).replace(/\/+$/, "");
+  }
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  }
+  if (process.env.REPLIT_DEV_DOMAIN) {
+    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  }
+  return "http://localhost:5000";
+};
+var sendPasswordResetEmail = async (user, resetToken) => {
+  const appUrl = getAppUrl();
+  const resetLink = `${appUrl}/reset-password?token=${resetToken}`;
+  if (process.env.NODE_ENV !== "production") {
+    console.log("\u{1F4E7} DESENVOLVIMENTO: Email de recupera\xE7\xE3o seria enviado para:", user.email);
+    console.log("\u{1F517} Link de recupera\xE7\xE3o:", resetLink);
+    console.log("\u26A0\uFE0F  Link v\xE1lido por 1 hora. Use este link para testar a recupera\xE7\xE3o de senha.");
+  }
+  try {
+    if (!user.email || !user.email.includes("@")) {
+      throw new Error("Email do usu\xE1rio inv\xE1lido");
+    }
+    console.log("\u{1F4E7} Enviando email para:", user.email);
+    const subject = "Recupera\xE7\xE3o de Senha - ConsultaPsi";
+    const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="text-align: center; margin-bottom: 30px;">
+            <h1 style="color: #0097FB; margin: 0; font-size: 28px;">ConsultaPsi</h1>
+          </div>
+          
+          <div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px; border-left: 4px solid #0097FB;">
+            <h2 style="color: #0097FB; margin-top: 0;">Recupera\xE7\xE3o de Senha</h2>
+            <p style="font-size: 16px; line-height: 1.6; color: #333;">Ol\xE1 <strong>${user.fullName}</strong>,</p>
+            <p style="font-size: 16px; line-height: 1.6; color: #333;">
+              Recebemos uma solicita\xE7\xE3o para redefinir sua senha. Se voc\xEA n\xE3o fez esta solicita\xE7\xE3o, 
+              por favor ignore este email e sua senha permanecer\xE1 inalterada.
+            </p>
+            
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${resetLink}" 
+                 style="background-color: #0097FB; color: white; padding: 14px 28px; 
+                        text-decoration: none; border-radius: 6px; display: inline-block;
+                        font-weight: bold; font-size: 16px;">
+                \u{1F510} Redefinir Senha
+              </a>
+            </div>
+            
+            <div style="background-color: #fff3cd; padding: 15px; border-radius: 6px; margin: 20px 0;">
+              <p style="margin: 0; font-size: 14px; color: #856404;">
+                \u23F0 <strong>Este link \xE9 v\xE1lido por apenas 1 hora</strong> por motivos de seguran\xE7a.
+              </p>
+            </div>
+            
+            <p style="font-size: 14px; line-height: 1.6; color: #666;">
+              Se o bot\xE3o n\xE3o funcionar, voc\xEA pode copiar e colar o link abaixo no seu navegador:
+            </p>
+            <p style="word-break: break-all; font-size: 12px; color: #666; background-color: #f1f1f1; padding: 10px; border-radius: 4px;">
+              ${resetLink}
+            </p>
+          </div>
+          
+          <div style="margin-top: 30px; text-align: center; border-top: 1px solid #eee; padding-top: 20px;">
+            <p style="color: #999; font-size: 12px; margin: 0;">
+              Este \xE9 um email autom\xE1tico. Por favor, n\xE3o responda a este email.
+            </p>
+            <p style="color: #999; font-size: 12px; margin: 5px 0 0 0;">
+              \xA9 ${(/* @__PURE__ */ new Date()).getFullYear()} ConsultaPsi - Sistema de Gest\xE3o em Psicologia
+            </p>
+          </div>
+        </div>
+      `;
+    if (smtpConfigured()) {
+      if (!await sendAppEmail({ to: user.email, subject, html })) throw new Error("Falha no envio do email via SMTP");
+      console.log("\u2705 Email de recupera\xE7\xE3o enviado via SMTP");
+      return { id: "smtp", email: user.email };
+    }
+    const { data, error } = await resend.emails.send({ from: EMAIL_FROM, to: [user.email], subject, html });
+    if (error) {
+      console.error("\u274C Erro detalhado do Resend:", error);
+      const err = error;
+      if (err.statusCode === 403 && err.message && err.message.includes("You can only send testing emails to your own email address")) {
+        console.log("\u26A0\uFE0F  RESEND LIMITATION: Este \xE9 um API key de teste que s\xF3 pode enviar emails para: andrewsfranco93@gmail.com");
+        console.log("\u{1F517} Para enviar para outros emails, verifique um dom\xEDnio em resend.com/domains");
+        console.log("\u{1F4DD} Link de recupera\xE7\xE3o (para teste manual):", resetLink);
+        console.log("\u2705 Token gerado com sucesso. Use o link acima para testar o reset de senha.");
+        return { id: "resend-limitation", email: user.email, testLink: resetLink };
+      }
+      console.error("\u274C Tipo do erro:", typeof error);
+      console.error("\u274C Conte\xFAdo do erro:", JSON.stringify(error, null, 2));
+      throw new Error(`Falha no envio do email via Resend: ${error.message || JSON.stringify(error)}`);
+    }
+    console.log("\u2705 Email de recupera\xE7\xE3o enviado com sucesso via Resend!");
+    console.log("\u{1F4E8} Detalhes do envio:", {
+      to: user.email,
+      messageId: data?.id,
+      from: EMAIL_FROM,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    return data;
+  } catch (error) {
+    console.error("\u274C Erro cr\xEDtico no envio de email:", error);
+    console.error("\u274C Stack trace:", error instanceof Error ? error.stack : "No stack trace");
+    console.error("\u274C Tipo do erro:", typeof error);
+    if (error instanceof Error) {
+      console.error("\u274C Mensagem do erro:", error.message);
+    }
+    throw error;
+  }
+};
+
+// server/lib/admin-invite-email.ts
+var escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+var B = 'style="color:#1f3344;"';
+var INVITE_BCC = process.env.ADMIN_INVITE_BCC ?? "andrewsfranco93@gmail.com";
+function adminInviteEmailHtml(p) {
+  const clinic = escapeHtml(p.clinicName);
+  const email = escapeHtml(p.email);
+  const by = p.invitedBy ? escapeHtml(p.invitedBy) : null;
+  const accessUrl = `${p.appUrl}/auth`;
+  const preheader = by ? `${by} deu a voc\xEA acesso de administrador(a) da cl\xEDnica ${clinic}.` : `Voc\xEA recebeu acesso de administrador(a) da cl\xEDnica ${clinic}.`;
+  const intro = by ? `<strong ${B}>${by}</strong> deu a voc\xEA` : "Voc\xEA recebeu";
+  const howTo = p.hasAccount ? `Entre com a sua conta de sempre (<strong ${B}>${email}</strong>). Se voc\xEA participa de mais de uma cl\xEDnica, escolha <strong ${B}>${clinic}</strong> em \u201CTrocar\u201D, no menu.` : `Na tela de entrada, use <strong ${B}>Continuar com Google</strong> com a conta <strong ${B}>${email}</strong>, ou toque em <strong ${B}>Criar conta</strong> usando esse mesmo e-mail. No primeiro acesso voc\xEA j\xE1 entra como administrador(a) da cl\xEDnica.`;
+  const cell = "padding:14px 0;";
+  const items = [
+    "Agenda, consultas, reuni\xF5es e reservas de salas",
+    "Pacientes, psic\xF3logas e salas da cl\xEDnica",
+    "Financeiro, notas fiscais e repasses",
+    "Permiss\xF5es da equipe e dados da cl\xEDnica"
+  ].map((t, i, all) => {
+    const border = `border-top:1px solid #e6e2d8;${i === all.length - 1 ? "border-bottom:1px solid #e6e2d8;" : ""}`;
+    return `<tr><td width="38" style="${border}${cell}font-family:Georgia,serif;font-size:15px;color:#a99bc8;">0${i + 1}</td><td style="${border}${cell}font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:21px;color:#1f3344;">${t}</td></tr>`;
+  }).join("\n        ");
+  return `<!DOCTYPE html>
+<html lang="pt-BR" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Seu acesso ao ConsultaPsi est\xE1 pronto</title>
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+  body{margin:0;padding:0;width:100%!important;background:#faf8f3;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}
+  table{border-collapse:collapse;mso-table-lspace:0;mso-table-rspace:0}
+  img{border:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic;display:block}
+  a{color:#2a7fa6}
+  @media only screen and (max-width:620px){
+    .container{width:100%!important}
+    .px{padding-left:24px!important;padding-right:24px!important}
+    .h1{font-size:28px!important;line-height:34px!important}
+    .outer{padding-left:12px!important;padding-right:12px!important}
+  }
+</style>
+</head>
+<body style="margin:0;padding:0;background:#faf8f3;">
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#faf8f3;">${preheader}</div>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#faf8f3;">
+<tr><td align="center" class="outer" style="padding:40px 24px 32px;">
+
+  <table role="presentation" class="container" width="552" cellpadding="0" cellspacing="0" border="0" style="width:552px;max-width:552px;background:#ffffff;border-top:6px solid #1f3344;border-radius:4px;">
+
+    <tr><td class="px" style="padding:32px 48px 0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td align="left" valign="middle"><img src="${p.appUrl}/email/consultapsi-logo.png" width="134" height="30" alt="ConsultaPsi" style="width:134px;height:30px;"></td>
+        <td align="right" valign="middle" style="font-family:Helvetica,Arial,sans-serif;font-size:11px;letter-spacing:2px;font-weight:bold;color:#6b747c;">NOTIFICA\xC7\xC3O</td>
+      </tr></table>
+    </td></tr>
+
+    <tr><td class="px" style="padding:44px 48px 0;">
+      <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:12px;letter-spacing:2px;font-weight:bold;color:#5d7a62;">ACESSO DE ADMINISTRA\xC7\xC3O</p>
+      <h1 class="h1" style="margin:14px 0 0;font-family:Georgia,'Times New Roman',serif;font-size:36px;line-height:43px;font-weight:normal;color:#1f3344;">Seu acesso ao ConsultaPsi est\xE1 <em style="color:#2a7fa6;">pronto</em>.</h1>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px;"><tr><td width="48" height="2" style="width:48px;height:2px;background:#a99bc8;font-size:0;line-height:0;">&nbsp;</td></tr></table>
+      <p style="margin:24px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:27px;color:#4a5560;">${intro} acesso de <strong ${B}>administrador(a)</strong> da cl\xEDnica <strong ${B}>${clinic}</strong> no ConsultaPsi. A partir de agora voc\xEA j\xE1 pode acessar o sistema.</p>
+    </td></tr>
+
+    <tr><td class="px" style="padding:36px 48px 0;">
+      <p style="margin:0 0 12px;font-family:Georgia,'Times New Roman',serif;font-size:18px;color:#1f3344;">O que voc\xEA pode fazer</p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        ${items}
+      </table>
+    </td></tr>
+
+    <tr><td class="px" style="padding:36px 48px 0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="#1f3344" style="border-radius:6px;">
+        <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${accessUrl}" style="height:56px;v-text-anchor:middle;width:456px;" arcsize="11%" stroke="f" fillcolor="#1f3344"><w:anchorlock/><center style="color:#ffffff;font-family:Helvetica,Arial,sans-serif;font-size:16px;font-weight:bold;">Acessar o ConsultaPsi</center></v:roundrect><![endif]-->
+        <!--[if !mso]><!--><a href="${accessUrl}" target="_blank" style="display:block;padding:18px 0;font-family:Helvetica,Arial,sans-serif;font-size:16px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:6px;">Acessar o ConsultaPsi</a><!--<![endif]-->
+      </td></tr></table>
+    </td></tr>
+
+    <tr><td class="px" style="padding:28px 48px 0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td width="4" style="width:4px;background:#8fa88f;border-radius:2px;font-size:0;line-height:0;">&nbsp;</td>
+        <td style="padding-left:16px;font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:23px;color:#3d4752;"><strong ${B}>Como entrar:</strong> ${howTo}</td>
+      </tr></table>
+    </td></tr>
+
+    <tr><td class="px" style="padding:24px 48px 40px;font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:21px;color:#6b747c;">
+      Se o bot\xE3o n\xE3o funcionar, copie e cole no navegador:<br>
+      <a href="${accessUrl}" target="_blank" style="color:#2a7fa6;word-break:break-all;">${accessUrl}</a>
+    </td></tr>
+
+  </table>
+
+  <table role="presentation" class="container" width="552" cellpadding="0" cellspacing="0" border="0" style="width:552px;max-width:552px;">
+    <tr><td align="center" class="px" style="padding:24px 24px 0;font-family:Helvetica,Arial,sans-serif;font-size:12px;line-height:20px;color:#6b747c;">
+      Voc\xEA recebeu este e-mail porque foi definido(a) como administrador(a) de uma cl\xEDnica no ConsultaPsi. Se n\xE3o esperava por isso, pode ignorar esta mensagem.<br>
+      <a href="${p.appUrl}/privacidade" style="color:#6b747c;">Pol\xEDtica de Privacidade</a> \xB7 <a href="${p.appUrl}/termos" style="color:#6b747c;">Termos de Uso</a>
+    </td></tr>
+  </table>
+
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+async function sendAdminInviteEmail(p) {
+  try {
+    const [company] = await db.select({ name: companies.name }).from(companies).where(eq3(companies.id, p.companyId));
+    const [inviter] = await db.select({ fullName: users.fullName }).from(users).where(eq3(users.id, p.invitedByUserId));
+    const clinicName = company?.name ?? "sua cl\xEDnica";
+    return await sendAppEmail({
+      to: p.email,
+      bcc: INVITE_BCC && INVITE_BCC.toLowerCase() !== p.email.toLowerCase() ? INVITE_BCC : void 0,
+      subject: `Seu acesso de administra\xE7\xE3o \xE0 ${clinicName} no ConsultaPsi`,
+      html: adminInviteEmailHtml({ clinicName, invitedBy: inviter?.fullName, email: p.email, hasAccount: p.hasAccount, appUrl: getAppUrl() })
+    });
+  } catch (error) {
+    console.error("sendAdminInviteEmail error:", error);
+    return false;
+  }
 }
 
 // server/lib/companies.ts
@@ -1832,18 +2221,30 @@ function isPlatformAdmin(email) {
   const allowed = (process.env.PLATFORM_ADMIN_EMAILS || "").split(",").map((e) => normalizeEmail(e)).filter(Boolean);
   return allowed.includes(normalizeEmail(email));
 }
+var todaySaoPaulo = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(/* @__PURE__ */ new Date());
+var isAccessExpired = (validUntil) => !!validUntil && validUntil < todaySaoPaulo();
+var summaryColumns = {
+  id: companies.id,
+  name: companies.name,
+  slug: companies.slug,
+  logoUrl: companies.logoUrl,
+  accessValidUntil: companies.accessValidUntil,
+  aiEnabled: companies.aiEnabled
+};
+var withExpiry = (c) => ({ ...c, accessExpired: isAccessExpired(c.accessValidUntil) });
 async function listUserCompanies(userId) {
-  return db2.select({ id: companies.id, name: companies.name, slug: companies.slug, logoUrl: companies.logoUrl, role: companyMemberships.role }).from(companyMemberships).innerJoin(companies, eq3(companyMemberships.companyId, companies.id)).where(and3(eq3(companyMemberships.userId, userId), eq3(companyMemberships.status, "active"), eq3(companies.status, "active"))).orderBy(companies.name);
+  const rows = await db.select({ ...summaryColumns, role: companyMemberships.role }).from(companyMemberships).innerJoin(companies, eq4(companyMemberships.companyId, companies.id)).where(and3(eq4(companyMemberships.userId, userId), eq4(companyMemberships.status, "active"), eq4(companies.status, "active"))).orderBy(companies.name);
+  return rows.map(withExpiry);
 }
 async function findCompanyAccess(user, companyId) {
   const [own] = (await listUserCompanies(user.id)).filter((c) => c.id === companyId);
   if (own) return own;
   if (!isPlatformAdmin(user.email)) return void 0;
-  const [company] = await db2.select({ id: companies.id, name: companies.name, slug: companies.slug, logoUrl: companies.logoUrl }).from(companies).where(and3(eq3(companies.id, companyId), eq3(companies.status, "active")));
-  return company ? { ...company, role: "admin" } : void 0;
+  const [company] = await db.select(summaryColumns).from(companies).where(and3(eq4(companies.id, companyId), eq4(companies.status, "active")));
+  return company ? { ...withExpiry(company), role: "admin" } : void 0;
 }
 async function upsertMembership(userId, companyId, role) {
-  await db2.insert(companyMemberships).values({ userId, companyId, role, status: "active" }).onConflictDoUpdate({
+  await db.insert(companyMemberships).values({ userId, companyId, role, status: "active" }).onConflictDoUpdate({
     target: [companyMemberships.userId, companyMemberships.companyId],
     set: { role, status: "active" }
   });
@@ -1873,30 +2274,32 @@ var adminColumns = {
 };
 async function addCompanyAdmin(companyId, rawEmail, invitedByUserId) {
   const email = normalizeEmail(rawEmail);
-  const [existing] = await db2.select(adminColumns).from(users).where(sql3`lower(${users.email}) = ${email}`).limit(1);
+  const [existing] = await db.select(adminColumns).from(users).where(sql3`lower(${users.email}) = ${email}`).limit(1);
   if (existing) {
-    const [current] = await db2.select({ id: companyMemberships.id }).from(companyMemberships).where(
+    const [current] = await db.select({ id: companyMemberships.id }).from(companyMemberships).where(
       and3(
-        eq3(companyMemberships.companyId, companyId),
-        eq3(companyMemberships.userId, existing.id),
-        eq3(companyMemberships.role, "admin"),
-        eq3(companyMemberships.status, "active")
+        eq4(companyMemberships.companyId, companyId),
+        eq4(companyMemberships.userId, existing.id),
+        eq4(companyMemberships.role, "admin"),
+        eq4(companyMemberships.status, "active")
       )
     );
     if (current) return { type: "conflict", message: "Este e-mail j\xE1 \xE9 administrador." };
     await upsertMembership(existing.id, companyId, "admin");
-    await db2.update(users).set({ status: "active" }).where(eq3(users.id, existing.id));
-    return { type: "promoted", admin: { ...existing, status: "active" } };
+    await db.update(users).set({ status: "active" }).where(eq4(users.id, existing.id));
+    const emailSent2 = await sendAdminInviteEmail({ companyId, email: existing.email ?? email, hasAccount: true, invitedByUserId });
+    return { type: "promoted", admin: { ...existing, status: "active" }, emailSent: emailSent2 };
   }
-  const sameInvite = and3(sql3`lower(${accessInvites.email}) = ${email}`, eq3(accessInvites.companyId, companyId));
-  const [pending] = await db2.select({ id: accessInvites.id }).from(accessInvites).where(and3(sameInvite, isNull2(accessInvites.acceptedAt))).limit(1);
+  const sameInvite = and3(sql3`lower(${accessInvites.email}) = ${email}`, eq4(accessInvites.companyId, companyId));
+  const [pending] = await db.select({ id: accessInvites.id }).from(accessInvites).where(and3(sameInvite, isNull2(accessInvites.acceptedAt))).limit(1);
   if (pending) return { type: "conflict", message: "Este e-mail j\xE1 est\xE1 pr\xE9-autorizado." };
-  await db2.delete(accessInvites).where(sameInvite);
-  const [invite] = await db2.insert(accessInvites).values({ email, role: "admin", companyId, invitedByUserId }).returning({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt });
-  return { type: "invited", invite };
+  await db.delete(accessInvites).where(sameInvite);
+  const [invite] = await db.insert(accessInvites).values({ email, role: "admin", companyId, invitedByUserId }).returning({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt });
+  const emailSent = await sendAdminInviteEmail({ companyId, email, hasAccount: false, invitedByUserId });
+  return { type: "invited", invite, emailSent };
 }
 async function getDefaultCompanyId() {
-  const [row] = await db2.select({ id: companies.id }).from(companies).where(eq3(companies.slug, DEFAULT_COMPANY_SLUG));
+  const [row] = await db.select({ id: companies.id }).from(companies).where(eq4(companies.slug, DEFAULT_COMPANY_SLUG));
   return row?.id;
 }
 async function resolveCompanyContext(req) {
@@ -1914,6 +2317,7 @@ async function resolveCompanyContext(req) {
     }
   }
   req.companyId = active?.id;
+  req.company = active;
   req.user.role = active?.role ?? NO_COMPANY_ROLE;
   return active;
 }
@@ -1921,7 +2325,7 @@ var DEFAULT_COMPANY_NAME = "Empresa 1";
 async function publicClinic(companyId) {
   const fallback = { name: process.env.CLINIC_NAME || "ConsultaPsi", logoUrl: null };
   if (!companyId) return fallback;
-  const [company] = await db2.select({ name: companies.name, slug: companies.slug, logoUrl: companies.logoUrl }).from(companies).where(eq3(companies.id, companyId));
+  const [company] = await db.select({ name: companies.name, slug: companies.slug, logoUrl: companies.logoUrl }).from(companies).where(eq4(companies.id, companyId));
   if (!company) return fallback;
   const untouchedDefault = company.slug === DEFAULT_COMPANY_SLUG && company.name === DEFAULT_COMPANY_NAME;
   return { name: untouchedDefault ? fallback.name : company.name, logoUrl: company.logoUrl };
@@ -1977,6 +2381,20 @@ function requireCompany(req, res, next) {
   if (!req.companyId) {
     return res.status(409).json({ message: "Selecione uma empresa para continuar.", code: "NO_COMPANY" });
   }
+  if (req.company?.accessExpired && !isPlatformAdmin(req.user.email)) {
+    const [y, m, d] = req.company.accessValidUntil.split("-");
+    return res.status(403).json({
+      message: `O acesso desta cl\xEDnica venceu em ${d}/${m}/${y}. Fale com o suporte para renovar.`,
+      code: "ACCESS_EXPIRED"
+    });
+  }
+  next();
+}
+var aiAllowed = (req) => !!process.env.GROQ_API_KEY && req.company?.aiEnabled !== false;
+function requireAi(req, res, next) {
+  if (req.company?.aiEnabled === false) {
+    return res.status(403).json({ message: "Os recursos de intelig\xEAncia artificial n\xE3o est\xE3o dispon\xEDveis para esta cl\xEDnica.", code: "AI_DISABLED" });
+  }
   next();
 }
 function requireCompanyExcept(publicRoutes) {
@@ -1991,6 +2409,76 @@ function requirePlatformAdmin(req, res, next) {
   if (!req.isAuthenticated()) return res.status(401).json({ message: "N\xE3o autenticado" });
   if (!isPlatformAdmin(req.user.email)) return res.status(403).json({ message: "Acesso n\xE3o autorizado" });
   next();
+}
+
+// server/lib/logins.ts
+async function takenLogin(username, email, caller) {
+  const byEmail = email ? await storage.getUserByEmail(email) : void 0;
+  const byUsername = !byEmail && username ? await storage.getUserByUsername(username) : void 0;
+  const existing = byEmail ?? byUsername;
+  if (!existing) return null;
+  const field = byEmail ? "email" : "username";
+  const what = byEmail ? "e-mail" : "usu\xE1rio";
+  if (caller) {
+    if (existing.id === caller.id) {
+      return { field, userId: existing.id, message: `Este \xE9 o seu pr\xF3prio ${what} de acesso. Se voc\xEA tamb\xE9m atende, use o seu acesso em vez de criar outro.` };
+    }
+    const member = (await storage.getAllUsers(caller.companyId)).some((u) => u.id === existing.id);
+    if (member) {
+      return { field, userId: existing.id, message: `Este ${what} j\xE1 pertence a ${existing.fullName}, que j\xE1 tem acesso \xE0 cl\xEDnica. Use o usu\xE1rio dela em vez de criar outro.` };
+    }
+  }
+  return { field, message: byEmail ? "Este e-mail j\xE1 est\xE1 cadastrado no sistema. Use outro e-mail." : "Este usu\xE1rio j\xE1 est\xE1 em uso. Escolha outro." };
+}
+
+// server/lib/last-access.ts
+import { sql as sql4 } from "drizzle-orm";
+var SEEN_INTERVAL_MS = 5 * 60 * 1e3;
+var lastTouched = /* @__PURE__ */ new Map();
+async function recordLogin(userId) {
+  try {
+    await db.execute(sql4`UPDATE users SET last_login_at = now(), last_seen_at = now() WHERE id = ${userId}`);
+    lastTouched.set(userId, Date.now());
+  } catch (error) {
+    console.error("recordLogin:", error);
+  }
+}
+function touchLastSeen() {
+  return async (req, _res, next) => {
+    const userId = req.isAuthenticated?.() ? req.user?.id : void 0;
+    const now = Date.now();
+    if (userId && now - (lastTouched.get(userId) ?? 0) >= SEEN_INTERVAL_MS) {
+      lastTouched.set(userId, now);
+      try {
+        await db.execute(sql4`
+          UPDATE users SET last_seen_at = now()
+          WHERE id = ${userId} AND (last_seen_at IS NULL OR last_seen_at < now() - interval '5 minutes')
+        `);
+      } catch (error) {
+        console.error("touchLastSeen:", error);
+      }
+    }
+    next();
+  };
+}
+
+// server/middleware/painel-cors.ts
+function painelOrigins() {
+  return (process.env.PAINEL_ORIGIN || "").split(",").map((o) => o.trim().replace(/\/+$/, "")).filter(Boolean);
+}
+var PAINEL_PATHS = /^\/api\/(platform\/.*|mobile\/login|user|logout)$/;
+function painelCors() {
+  return (req, res, next) => {
+    const origin = req.headers.origin;
+    if (!origin || !PAINEL_PATHS.test(req.path) || !painelOrigins().includes(origin)) return next();
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.vary("Origin");
+    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
+    res.setHeader("Access-Control-Max-Age", "600");
+    if (req.method === "OPTIONS") return res.status(204).end();
+    next();
+  };
 }
 
 // server/auth.ts
@@ -2010,7 +2498,9 @@ async function comparePasswords(supplied, stored) {
 var MOBILE_SESSION_MAX_AGE = 30 * 24 * 60 * 60 * 1e3;
 var MOBILE_REDIRECT_PREFIXES = ["exp://", "exps://", "consultapsi://"];
 function isAllowedMobileRedirect(url) {
-  return typeof url === "string" && MOBILE_REDIRECT_PREFIXES.some((p) => url.startsWith(p));
+  if (typeof url !== "string") return false;
+  const prefixes = [...MOBILE_REDIRECT_PREFIXES, ...painelOrigins().map((o) => `${o}/`)];
+  return prefixes.some((p) => url.startsWith(p));
 }
 async function ensurePsychologistProfile(req) {
   if (!req.user || req.user.role !== "psychologist" || !req.companyId) return;
@@ -2035,6 +2525,7 @@ function setupAuth(app) {
   app.use(session2(sessionSettings));
   app.use(passport.initialize());
   app.use(passport.session());
+  app.use(touchLastSeen());
   app.use(companyContext);
   passport.use(
     new LocalStrategy(async (username, password, done) => {
@@ -2140,6 +2631,7 @@ function setupAuth(app) {
         } catch (error) {
           return next(error);
         }
+        if (req.user) await recordLogin(req.user.id);
         const mobileRedirect = res.locals.mobileRedirect;
         if (!isAllowedMobileRedirect(mobileRedirect)) return res.redirect("/");
         req.session.cookie.maxAge = MOBILE_SESSION_MAX_AGE;
@@ -2175,10 +2667,9 @@ function setupAuth(app) {
   });
   app.post("/api/register", async (req, res, next) => {
     try {
-      const existingUser = await storage.getUserByUsername(req.body.username);
-      if (existingUser) {
-        return res.status(400).json({ message: "Username already exists" });
-      }
+      const caller = req.isAuthenticated() && req.companyId ? { id: req.user.id, companyId: req.companyId } : void 0;
+      const taken = await takenLogin(String(req.body.username ?? ""), String(req.body.email ?? ""), caller);
+      if (taken) return res.status(400).json(taken);
       const hashedPassword = await hashPassword(req.body.password);
       const isAdminCaller = req.isAuthenticated() && req.user.role === "admin" && !!req.companyId;
       const role = isAdminCaller && req.body.role ? req.body.role : "psychologist";
@@ -2205,6 +2696,7 @@ function setupAuth(app) {
       }
       req.login(user, async (err) => {
         if (err) return next(err);
+        await recordLogin(user.id);
         try {
           await resolveCompanyContext(req);
           await ensurePsychologistProfile(req);
@@ -2214,6 +2706,7 @@ function setupAuth(app) {
         }
       });
     } catch (error) {
+      if (error?.code === "23505") return res.status(400).json({ message: "Este e-mail ou usu\xE1rio j\xE1 est\xE1 cadastrado." });
       next(error);
     }
   });
@@ -2225,6 +2718,7 @@ function setupAuth(app) {
       }
       req.login(user, async (loginErr) => {
         if (loginErr) return next(loginErr);
+        await recordLogin(user.id);
         let userResponse;
         try {
           await resolveCompanyContext(req);
@@ -2299,119 +2793,6 @@ import multer5 from "multer";
 import path2 from "path";
 import crypto2 from "crypto";
 
-// server/services/email.ts
-import { Resend } from "resend";
-if (!process.env.RESEND_API_KEY) {
-  console.warn("RESEND_API_KEY not set. Password recovery emails will not be sent.");
-}
-var resend = new Resend(process.env.RESEND_API_KEY);
-var getAppUrl = () => {
-  if (process.env.APP_URL) {
-    return process.env.APP_URL;
-  }
-  if (process.env.REPLIT_DEV_DOMAIN) {
-    return `https://${process.env.REPLIT_DEV_DOMAIN}`;
-  }
-  return "http://localhost:5000";
-};
-var sendPasswordResetEmail = async (user, resetToken) => {
-  const appUrl = getAppUrl();
-  const resetLink = `${appUrl}/reset-password?token=${resetToken}`;
-  if (process.env.NODE_ENV !== "production") {
-    console.log("\u{1F4E7} DESENVOLVIMENTO: Email de recupera\xE7\xE3o seria enviado para:", user.email);
-    console.log("\u{1F517} Link de recupera\xE7\xE3o:", resetLink);
-    console.log("\u26A0\uFE0F  Link v\xE1lido por 1 hora. Use este link para testar a recupera\xE7\xE3o de senha.");
-  }
-  try {
-    if (!user.email || !user.email.includes("@")) {
-      throw new Error("Email do usu\xE1rio inv\xE1lido");
-    }
-    console.log("\u{1F4E7} Enviando email para:", user.email);
-    const { data, error } = await resend.emails.send({
-      from: "ConsultaPsi <onboarding@resend.dev>",
-      to: [user.email],
-      subject: "Recupera\xE7\xE3o de Senha - ConsultaPsi",
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <div style="text-align: center; margin-bottom: 30px;">
-            <h1 style="color: #0097FB; margin: 0; font-size: 28px;">ConsultaPsi</h1>
-          </div>
-          
-          <div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px; border-left: 4px solid #0097FB;">
-            <h2 style="color: #0097FB; margin-top: 0;">Recupera\xE7\xE3o de Senha</h2>
-            <p style="font-size: 16px; line-height: 1.6; color: #333;">Ol\xE1 <strong>${user.fullName}</strong>,</p>
-            <p style="font-size: 16px; line-height: 1.6; color: #333;">
-              Recebemos uma solicita\xE7\xE3o para redefinir sua senha. Se voc\xEA n\xE3o fez esta solicita\xE7\xE3o, 
-              por favor ignore este email e sua senha permanecer\xE1 inalterada.
-            </p>
-            
-            <div style="text-align: center; margin: 30px 0;">
-              <a href="${resetLink}" 
-                 style="background-color: #0097FB; color: white; padding: 14px 28px; 
-                        text-decoration: none; border-radius: 6px; display: inline-block;
-                        font-weight: bold; font-size: 16px;">
-                \u{1F510} Redefinir Senha
-              </a>
-            </div>
-            
-            <div style="background-color: #fff3cd; padding: 15px; border-radius: 6px; margin: 20px 0;">
-              <p style="margin: 0; font-size: 14px; color: #856404;">
-                \u23F0 <strong>Este link \xE9 v\xE1lido por apenas 1 hora</strong> por motivos de seguran\xE7a.
-              </p>
-            </div>
-            
-            <p style="font-size: 14px; line-height: 1.6; color: #666;">
-              Se o bot\xE3o n\xE3o funcionar, voc\xEA pode copiar e colar o link abaixo no seu navegador:
-            </p>
-            <p style="word-break: break-all; font-size: 12px; color: #666; background-color: #f1f1f1; padding: 10px; border-radius: 4px;">
-              ${resetLink}
-            </p>
-          </div>
-          
-          <div style="margin-top: 30px; text-align: center; border-top: 1px solid #eee; padding-top: 20px;">
-            <p style="color: #999; font-size: 12px; margin: 0;">
-              Este \xE9 um email autom\xE1tico. Por favor, n\xE3o responda a este email.
-            </p>
-            <p style="color: #999; font-size: 12px; margin: 5px 0 0 0;">
-              \xA9 ${(/* @__PURE__ */ new Date()).getFullYear()} ConsultaPsi - Sistema de Gest\xE3o em Psicologia
-            </p>
-          </div>
-        </div>
-      `
-    });
-    if (error) {
-      console.error("\u274C Erro detalhado do Resend:", error);
-      const err = error;
-      if (err.statusCode === 403 && err.message && err.message.includes("You can only send testing emails to your own email address")) {
-        console.log("\u26A0\uFE0F  RESEND LIMITATION: Este \xE9 um API key de teste que s\xF3 pode enviar emails para: andrewsfranco93@gmail.com");
-        console.log("\u{1F517} Para enviar para outros emails, verifique um dom\xEDnio em resend.com/domains");
-        console.log("\u{1F4DD} Link de recupera\xE7\xE3o (para teste manual):", resetLink);
-        console.log("\u2705 Token gerado com sucesso. Use o link acima para testar o reset de senha.");
-        return { id: "resend-limitation", email: user.email, testLink: resetLink };
-      }
-      console.error("\u274C Tipo do erro:", typeof error);
-      console.error("\u274C Conte\xFAdo do erro:", JSON.stringify(error, null, 2));
-      throw new Error(`Falha no envio do email via Resend: ${error.message || JSON.stringify(error)}`);
-    }
-    console.log("\u2705 Email de recupera\xE7\xE3o enviado com sucesso via Resend!");
-    console.log("\u{1F4E8} Detalhes do envio:", {
-      to: user.email,
-      messageId: data?.id,
-      from: "ConsultaPsi <onboarding@resend.dev>",
-      timestamp: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    return data;
-  } catch (error) {
-    console.error("\u274C Erro cr\xEDtico no envio de email:", error);
-    console.error("\u274C Stack trace:", error instanceof Error ? error.stack : "No stack trace");
-    console.error("\u274C Tipo do erro:", typeof error);
-    if (error instanceof Error) {
-      console.error("\u274C Mensagem do erro:", error.message);
-    }
-    throw error;
-  }
-};
-
 // server/services/whatsapp.ts
 import axios from "axios";
 var WHATSAPP_API_URL = "https://graph.facebook.com/v17.0";
@@ -2468,11 +2849,10 @@ import { Router } from "express";
 // server/services/google-calendar.ts
 import { google } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
-import { eq as eq4 } from "drizzle-orm";
-var SCOPES = [
-  "https://www.googleapis.com/auth/calendar",
-  "https://www.googleapis.com/auth/gmail.send"
-];
+import { eq as eq5 } from "drizzle-orm";
+var SCOPES = ["https://www.googleapis.com/auth/calendar.events"];
+var APP_EVENT_TAG = "consultapsi";
+var appEventProperties = { private: { [APP_EVENT_TAG]: "1" } };
 function buildCalendarRedirectUri() {
   if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
   const replitDomain = process.env.REPLIT_DEV_DOMAIN;
@@ -2507,17 +2887,17 @@ async function handleAuthCode(code, userId) {
       return false;
     }
     tokenCache[userId] = tokens;
-    const existingTokens = await db2.select().from(googleTokens).where(eq4(googleTokens.userId, userId));
+    const existingTokens = await db.select().from(googleTokens).where(eq5(googleTokens.userId, userId));
     const expiryDate = tokens.expiry_date ? new Date(tokens.expiry_date) : new Date(Date.now() + 3600 * 1e3);
     if (existingTokens.length > 0) {
-      await db2.update(googleTokens).set({
+      await db.update(googleTokens).set({
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token ?? existingTokens[0].refreshToken,
         expiryDate,
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq4(googleTokens.userId, userId));
+      }).where(eq5(googleTokens.userId, userId));
     } else {
-      await db2.insert(googleTokens).values({
+      await db.insert(googleTokens).values({
         userId,
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token ?? null,
@@ -2539,7 +2919,7 @@ async function getUserTokens(userId) {
       return tokenCache[userId];
     }
   }
-  const tokens = await db2.select().from(googleTokens).where(eq4(googleTokens.userId, userId));
+  const tokens = await db.select().from(googleTokens).where(eq5(googleTokens.userId, userId));
   if (tokens.length === 0) {
     return null;
   }
@@ -2554,11 +2934,11 @@ async function getUserTokens(userId) {
       });
       const { credentials: credentials2 } = await oauth2Client.refreshAccessToken();
       const expiryDate = credentials2.expiry_date ? new Date(credentials2.expiry_date) : new Date(Date.now() + 3600 * 1e3);
-      await db2.update(googleTokens).set({
+      await db.update(googleTokens).set({
         accessToken: credentials2.access_token,
         expiryDate,
         updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq4(googleTokens.userId, userId));
+      }).where(eq5(googleTokens.userId, userId));
       tokenCache[userId] = credentials2;
       return credentials2;
     } catch (error) {
@@ -2607,7 +2987,8 @@ async function addEventToCalendar(userId, event) {
         attendees: event.attendees,
         reminders: {
           useDefault: true
-        }
+        },
+        extendedProperties: appEventProperties
       }
     });
     return response.data.id || null;
@@ -2616,7 +2997,7 @@ async function addEventToCalendar(userId, event) {
     return null;
   }
 }
-async function updateCalendarEvent(userId, eventId, event) {
+async function updateCalendarEvent(userId, eventId, event, sendUpdates = "none") {
   const calendar = await setupClientForUser(userId);
   if (!calendar) {
     return false;
@@ -2650,7 +3031,8 @@ async function updateCalendarEvent(userId, eventId, event) {
     await calendar.events.update({
       calendarId: "primary",
       eventId,
-      requestBody
+      requestBody,
+      sendUpdates
     });
     return true;
   } catch (error) {
@@ -2658,7 +3040,7 @@ async function updateCalendarEvent(userId, eventId, event) {
     return false;
   }
 }
-async function deleteCalendarEvent(userId, eventId) {
+async function deleteCalendarEvent(userId, eventId, sendUpdates = "none") {
   const calendar = await setupClientForUser(userId);
   if (!calendar) {
     return false;
@@ -2666,7 +3048,8 @@ async function deleteCalendarEvent(userId, eventId) {
   try {
     await calendar.events.delete({
       calendarId: "primary",
-      eventId
+      eventId,
+      sendUpdates
     });
     return true;
   } catch (error) {
@@ -2685,7 +3068,8 @@ async function listUpcomingEvents(userId, maxResults = 10) {
       timeMin: (/* @__PURE__ */ new Date()).toISOString(),
       maxResults,
       singleEvents: true,
-      orderBy: "startTime"
+      orderBy: "startTime",
+      privateExtendedProperty: [`${APP_EVENT_TAG}=1`]
     });
     return response.data.items || [];
   } catch (error) {
@@ -2695,7 +3079,7 @@ async function listUpcomingEvents(userId, maxResults = 10) {
 }
 async function isUserAuthenticated(userId) {
   try {
-    const tokens = await db2.select().from(googleTokens).where(eq4(googleTokens.userId, userId));
+    const tokens = await db.select().from(googleTokens).where(eq5(googleTokens.userId, userId));
     return tokens.length > 0;
   } catch (error) {
     console.error("Erro ao verificar autentica\xE7\xE3o do usu\xE1rio:", error);
@@ -2703,7 +3087,7 @@ async function isUserAuthenticated(userId) {
   }
 }
 async function disconnectUser(userId) {
-  const [row] = await db2.select().from(googleTokens).where(eq4(googleTokens.userId, userId));
+  const [row] = await db.select().from(googleTokens).where(eq5(googleTokens.userId, userId));
   const token = row?.refreshToken || row?.accessToken;
   if (token) {
     try {
@@ -2712,32 +3096,22 @@ async function disconnectUser(userId) {
       console.warn("N\xE3o foi poss\xEDvel revogar o token do Google (seguindo com a remo\xE7\xE3o local):", error);
     }
   }
-  await db2.delete(googleTokens).where(eq4(googleTokens.userId, userId));
+  await db.delete(googleTokens).where(eq5(googleTokens.userId, userId));
   delete tokenCache[userId];
 }
 function getAppointmentSchedulingLink(psychologistUserId, eventData) {
   return "https://calendar.google.com/calendar/u/0/appointments/schedules/AcZssZ3aKuNW3rK7lCY0OqdA6kDDjma9niQdzEMxU7GkWhEfBGHjPHUcrX27OIVwwR9WMc2HZ04Uaj-C";
-}
-async function getUserOAuthClient(userId) {
-  const tokens = await getUserTokens(userId);
-  if (!tokens) return null;
-  const client = new OAuth2Client(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    REDIRECT_URI
-  );
-  client.setCredentials(tokens);
-  return client;
 }
 async function createMeetingEvent(userId, event) {
   const calendar = await setupClientForUser(userId);
   if (!calendar) return null;
   try {
     const attendees = [];
-    if (event.attendeeEmail) attendees.push({ email: event.attendeeEmail });
+    if (event.inviteEmail) attendees.push({ email: event.inviteEmail });
     const response = await calendar.events.insert({
       calendarId: "primary",
       conferenceDataVersion: 1,
+      sendUpdates: attendees.length > 0 ? "all" : "none",
       requestBody: {
         summary: event.summary,
         description: event.description || "Sess\xE3o de psicologia \u2014 ConsultaPsi",
@@ -2762,7 +3136,8 @@ async function createMeetingEvent(userId, event) {
             { method: "email", minutes: 60 },
             { method: "popup", minutes: 10 }
           ]
-        }
+        },
+        extendedProperties: appEventProperties
       }
     });
     const meetLink = response.data.conferenceData?.entryPoints?.find(
@@ -2775,11 +3150,6 @@ async function createMeetingEvent(userId, event) {
     return null;
   }
 }
-async function getGmailClient(userId) {
-  const oauthClient = await getUserOAuthClient(userId);
-  if (!oauthClient) return null;
-  return google.gmail({ version: "v1", auth: oauthClient });
-}
 function isGoogleTokenExpired(error) {
   if (!error || typeof error !== "object") return false;
   const e = error;
@@ -2787,77 +3157,27 @@ function isGoogleTokenExpired(error) {
   const message = String(e.message || "");
   return message.includes("invalid_grant") || message.includes("Token has been expired") || message.includes("token expired") || message.includes("Invalid Credentials");
 }
-async function sendMeetLinkEmail(params) {
+async function inviteToMeetingEvent(userId, eventId, email) {
+  const calendar = await setupClientForUser(userId);
+  if (!calendar) return false;
   try {
-    const gmail = await getGmailClient(params.userId);
-    if (!gmail) return false;
-    const dataHora = params.scheduledAt.toLocaleString("pt-BR", {
-      timeZone: "America/Sao_Paulo",
-      weekday: "long",
-      day: "2-digit",
-      month: "long",
-      hour: "2-digit",
-      minute: "2-digit"
-    });
-    const emailBody = `
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"></head>
-<body style="font-family: 'DM Sans', Arial, sans-serif; max-width: 560px; margin: 0 auto; color: #1f2937; background: #f9fafb; padding: 20px;">
-  <div style="background: #0D9488; padding: 24px; border-radius: 12px 12px 0 0; text-align: center;">
-    <h1 style="color: white; margin: 0; font-size: 22px; font-weight: 700;">ConsultaPsi</h1>
-    <p style="color: #ccfbf1; margin: 4px 0 0; font-size: 14px;">Sua sess\xE3o est\xE1 confirmada</p>
-  </div>
-  <div style="background: white; padding: 32px; border-radius: 0 0 12px 12px; border: 1px solid #e5e7eb; border-top: none;">
-    <p style="font-size: 16px; margin: 0 0 16px;">Ol\xE1, <strong>${params.patientName}</strong>!</p>
-    <p style="color: #6b7280; margin: 0 0 24px;">Sua sess\xE3o com <strong>${params.psychologistName}</strong> est\xE1 confirmada. Use o link abaixo para participar:</p>
-    
-    <div style="background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 8px; padding: 16px; margin: 0 0 24px;">
-      <p style="margin: 0 0 8px; font-size: 14px; color: #0f766e;"><strong>\u{1F4C5} Data e hor\xE1rio:</strong> ${dataHora}</p>
-      <p style="margin: 0; font-size: 14px; color: #0f766e;"><strong>\u23F1\uFE0F Dura\xE7\xE3o:</strong> ${params.durationMinutes} minutos</p>
-    </div>
-    
-    <div style="text-align: center; margin: 32px 0;">
-      <a href="${params.meetLink}" 
-         style="background: #0D9488; color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px; display: inline-block;">
-        \u{1F3A5} Entrar na Sess\xE3o
-      </a>
-    </div>
-    
-    <p style="font-size: 13px; color: #6b7280; border-top: 1px solid #e5e7eb; padding-top: 16px; margin: 0;">
-      Ou acesse pelo link: <a href="${params.meetLink}" style="color: #0D9488;">${params.meetLink}</a><br>
-      <em>N\xE3o \xE9 necess\xE1rio ter conta Google para participar.</em>
-    </p>
-  </div>
-</body>
-</html>`;
-    const subjectEncoded = Buffer.from(
-      `Sua sess\xE3o est\xE1 agendada \u2014 ${dataHora}`
-    ).toString("base64");
-    const rawMessage = [
-      `To: ${params.patientEmail}`,
-      `From: ${params.psychologistName} <${params.psychologistEmail}>`,
-      `Subject: =?utf-8?B?${subjectEncoded}?=`,
-      "MIME-Version: 1.0",
-      "Content-Type: text/html; charset=utf-8",
-      "",
-      emailBody
-    ].join("\r\n");
-    const encodedMessage = Buffer.from(rawMessage).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    await gmail.users.messages.send({
-      userId: "me",
-      requestBody: { raw: encodedMessage }
+    const current = await calendar.events.get({ calendarId: "primary", eventId });
+    const others = (current.data.attendees ?? []).filter((a) => a.email?.toLowerCase() !== email.toLowerCase());
+    await calendar.events.patch({
+      calendarId: "primary",
+      eventId,
+      sendUpdates: "all",
+      requestBody: { attendees: [...others, { email }] }
     });
     return true;
   } catch (error) {
     if (isGoogleTokenExpired(error)) throw error;
-    console.error("Erro ao enviar e-mail do Meet:", error);
+    console.error("Erro ao convidar a paciente para a reuni\xE3o:", error);
     return false;
   }
 }
 
 // server/routes/google-calendar.ts
-import { eq as eq5 } from "drizzle-orm";
 var router = Router();
 router.get("/auth", (req, res) => {
   if (!req.isAuthenticated()) {
@@ -2904,131 +3224,6 @@ router.delete("/auth", async (req, res) => {
   } catch (error) {
     console.error("Erro ao desconectar Google Calendar:", error);
     res.status(500).json({ error: "N\xE3o foi poss\xEDvel desconectar o Google Calendar" });
-  }
-});
-router.post("/sync/:appointmentId", async (req, res) => {
-  if (!req.isAuthenticated()) {
-    return res.status(401).json({ error: "Usu\xE1rio n\xE3o autenticado" });
-  }
-  const appointmentId = parseInt(req.params.appointmentId, 10);
-  try {
-    const appointmentResults = await db.select().from(appointments).where(eq5(appointments.id, appointmentId));
-    if (appointmentResults.length === 0) {
-      return res.status(404).json({ error: "Agendamento n\xE3o encontrado" });
-    }
-    const appointment = appointmentResults[0];
-    const existingSync = await db.select().from(calendarEvents).where(eq5(calendarEvents.appointmentId, appointmentId));
-    if (existingSync.length > 0) {
-      return res.status(409).json({
-        error: "Agendamento j\xE1 sincronizado",
-        calendarEventId: existingSync[0].googleEventId
-      });
-    }
-    const psychologistResults = await db.select({
-      fullName: users.fullName,
-      email: users.email
-    }).from(users).where(eq5(users.id, appointment.psychologistId));
-    const psychologist = psychologistResults[0];
-    const appointmentDate = appointment.date;
-    const startTime = appointment.startTime;
-    const endTime = appointment.endTime;
-    const startDateTime = (/* @__PURE__ */ new Date(`${appointmentDate}T${startTime}`)).toISOString();
-    const endDateTime = (/* @__PURE__ */ new Date(`${appointmentDate}T${endTime}`)).toISOString();
-    const eventId = await addEventToCalendar(
-      req.user.id,
-      {
-        summary: `Consulta com ${appointment.patientName}`,
-        description: appointment.notes || "Sem observa\xE7\xF5es adicionais",
-        location: `Sala ${appointment.roomId}`,
-        startDateTime,
-        endDateTime,
-        attendees: [
-          { email: req.user.email },
-          // Usuário atual
-          ...psychologist ? [{ email: psychologist.email }] : []
-          // Psicólogo, se disponível
-        ]
-      }
-    );
-    if (!eventId) {
-      return res.status(500).json({ error: "Erro ao criar evento no Google Calendar" });
-    }
-    await db.insert(calendarEvents).values({
-      appointmentId,
-      googleEventId: eventId,
-      userId: req.user.id
-    });
-    res.status(201).json({ googleEventId: eventId });
-  } catch (error) {
-    console.error("Erro ao sincronizar agendamento com Google Calendar:", error);
-    res.status(500).json({ error: "Erro ao sincronizar agendamento" });
-  }
-});
-router.put("/sync/:appointmentId", async (req, res) => {
-  if (!req.isAuthenticated()) {
-    return res.status(401).json({ error: "Usu\xE1rio n\xE3o autenticado" });
-  }
-  const appointmentId = parseInt(req.params.appointmentId, 10);
-  try {
-    const appointmentResults = await db.select().from(appointments).where(eq5(appointments.id, appointmentId));
-    if (appointmentResults.length === 0) {
-      return res.status(404).json({ error: "Agendamento n\xE3o encontrado" });
-    }
-    const appointment = appointmentResults[0];
-    const eventResults = await db.select().from(calendarEvents).where(eq5(calendarEvents.appointmentId, appointmentId));
-    if (eventResults.length === 0) {
-      return res.status(404).json({ error: "Evento n\xE3o encontrado no Google Calendar" });
-    }
-    const calendarEvent = eventResults[0];
-    const appointmentDate = appointment.date;
-    const startTime = appointment.startTime;
-    const endTime = appointment.endTime;
-    const startDateTime = (/* @__PURE__ */ new Date(`${appointmentDate}T${startTime}`)).toISOString();
-    const endDateTime = (/* @__PURE__ */ new Date(`${appointmentDate}T${endTime}`)).toISOString();
-    const success = await updateCalendarEvent(
-      req.user.id,
-      calendarEvent.googleEventId,
-      {
-        summary: `Consulta com ${appointment.patientName}`,
-        description: appointment.notes || "Sem observa\xE7\xF5es adicionais",
-        location: `Sala ${appointment.roomId}`,
-        startDateTime,
-        endDateTime
-      }
-    );
-    if (!success) {
-      return res.status(500).json({ error: "Erro ao atualizar evento no Google Calendar" });
-    }
-    await db.update(calendarEvents).set({ lastSynced: /* @__PURE__ */ new Date() }).where(eq5(calendarEvents.id, calendarEvent.id));
-    res.status(200).json({ success: true });
-  } catch (error) {
-    console.error("Erro ao atualizar evento no Google Calendar:", error);
-    res.status(500).json({ error: "Erro ao atualizar evento" });
-  }
-});
-router.delete("/sync/:appointmentId", async (req, res) => {
-  if (!req.isAuthenticated()) {
-    return res.status(401).json({ error: "Usu\xE1rio n\xE3o autenticado" });
-  }
-  const appointmentId = parseInt(req.params.appointmentId, 10);
-  try {
-    const eventResults = await db.select().from(calendarEvents).where(eq5(calendarEvents.appointmentId, appointmentId));
-    if (eventResults.length === 0) {
-      return res.status(404).json({ error: "Evento n\xE3o encontrado no Google Calendar" });
-    }
-    const calendarEvent = eventResults[0];
-    const success = await deleteCalendarEvent(
-      req.user.id,
-      calendarEvent.googleEventId
-    );
-    if (!success) {
-      return res.status(500).json({ error: "Erro ao remover evento do Google Calendar" });
-    }
-    await db.delete(calendarEvents).where(eq5(calendarEvents.id, calendarEvent.id));
-    res.status(200).json({ success: true });
-  } catch (error) {
-    console.error("Erro ao remover evento do Google Calendar:", error);
-    res.status(500).json({ error: "Erro ao remover evento" });
   }
 });
 router.get("/events", async (req, res) => {
@@ -3492,7 +3687,7 @@ router2.get("/", async (req, res) => {
       patientsList = patientsList.filter((p) => isPatientOwned(p, psychologistId, user.id));
     }
     if (user.role === "admin") {
-      const allPsychologists = await db2.select({ id: psychologists.id, fullName: users.fullName }).from(psychologists).innerJoin(users, eq6(psychologists.userId, users.id)).where(eq6(psychologists.companyId, req.companyId));
+      const allPsychologists = await db.select({ id: psychologists.id, fullName: users.fullName }).from(psychologists).innerJoin(users, eq6(psychologists.userId, users.id)).where(eq6(psychologists.companyId, req.companyId));
       const psychologistNames2 = {};
       for (const row of allPsychologists) {
         psychologistNames2[row.id] = row.fullName;
@@ -3655,6 +3850,11 @@ router2.post("/:id/sessions", checkPatientAccess, async (req, res) => {
     const patientId = parseInt(req.params.id);
     const userId = req.user.id;
     const data = insertClinicalSessionSchema.parse({ ...req.body, patientId });
+    const psychologist = await storage.getPsychologist(req.companyId, data.psychologistId);
+    if (!psychologist) return res.status(400).json({ field: "psychologistId", message: "Psic\xF3loga n\xE3o encontrada nesta cl\xEDnica." });
+    if (req.user.role === "psychologist" && psychologist.userId !== userId) {
+      return res.status(403).json({ message: "Voc\xEA s\xF3 pode registrar evolu\xE7\xF5es em seu pr\xF3prio nome." });
+    }
     const session3 = await storage.createSession(data);
     await storage.createAuditLog(req.companyId, {
       userId,
@@ -3668,10 +3868,11 @@ router2.post("/:id/sessions", checkPatientAccess, async (req, res) => {
     });
     res.status(201).json(session3);
   } catch (error) {
-    console.error(error);
-    if (error instanceof z3.ZodError) {
-      return res.status(400).json({ message: error.errors });
+    if (error instanceof z3.ZodError || error?.name === "ZodError") {
+      const issue = error.issues?.[0];
+      return res.status(400).json({ field: issue?.path?.[0], message: issue?.message ?? "Dados inv\xE1lidos" });
     }
+    console.error(error);
     res.status(500).json({ message: "Erro ao criar sess\xE3o" });
   }
 });
@@ -3792,7 +3993,7 @@ router2.get("/documents/:docId/download", checkDocumentAccess, async (req, res) 
     res.status(500).json({ message: "Erro ao baixar documento" });
   }
 });
-router2.post("/documents/:docId/summarize", checkDocumentAccess, async (req, res) => {
+router2.post("/documents/:docId/summarize", requireAi, checkDocumentAccess, async (req, res) => {
   try {
     const docId = parseInt(req.params.docId);
     const doc = await storage.getDocument(docId);
@@ -3984,7 +4185,7 @@ var patient_records_default = router2;
 
 // server/routes/meetings.ts
 import { Router as Router3 } from "express";
-import { eq as eq7, and as and7, gte as gte2, lte as lte2, desc as desc2 } from "drizzle-orm";
+import { eq as eq7, and as and6, gte as gte2, lte as lte2, desc as desc2 } from "drizzle-orm";
 import { z as z4 } from "zod";
 var router3 = Router3();
 function requireAuth2(req, res, next) {
@@ -4023,7 +4224,7 @@ router3.get("/", requireAuth2, async (req, res) => {
     if (patientId) {
       conditions.push(eq7(meetings.patientId, parseInt(patientId)));
     }
-    const baseQuery = db2.select({
+    const baseQuery = db.select({
       id: meetings.id,
       psychologistId: meetings.psychologistId,
       patientId: meetings.patientId,
@@ -4047,7 +4248,7 @@ router3.get("/", requireAuth2, async (req, res) => {
       patientPhone: patients.phone,
       patientPhotoUrl: patients.photoUrl
     }).from(meetings).leftJoin(patients, eq7(meetings.patientId, patients.id)).orderBy(desc2(meetings.scheduledAt));
-    const rows = conditions.length > 0 ? await baseQuery.where(and7(...conditions)) : await baseQuery;
+    const rows = conditions.length > 0 ? await baseQuery.where(and6(...conditions)) : await baseQuery;
     const today = /* @__PURE__ */ new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -4065,7 +4266,7 @@ router3.get("/", requireAuth2, async (req, res) => {
 router3.get("/:id", requireAuth2, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const rows = await db2.select({
+    const rows = await db.select({
       id: meetings.id,
       psychologistId: meetings.psychologistId,
       companyId: meetings.companyId,
@@ -4113,16 +4314,18 @@ router3.post("/", requireAuth2, async (req, res) => {
     const user = req.user;
     const body = createSchema.parse(req.body);
     const psychologistId = user.id;
-    const patientRows = await db2.select().from(patients).where(and7(eq7(patients.id, body.patientId), eq7(patients.companyId, req.companyId)));
+    const patientRows = await db.select().from(patients).where(and6(eq7(patients.id, body.patientId), eq7(patients.companyId, req.companyId)));
     if (!patientRows.length) return res.status(404).json({ error: "Paciente n\xE3o encontrado" });
     const patient = patientRows[0];
     const scheduledAt = new Date(body.scheduledAt);
     const endDateTime = new Date(scheduledAt.getTime() + body.durationMinutes * 6e4);
     const title = body.title || `Sess\xE3o com ${patient.fullName}`;
-    const tokenRows = await db2.select().from(googleTokens).where(eq7(googleTokens.userId, psychologistId));
+    const tokenRows = await db.select().from(googleTokens).where(eq7(googleTokens.userId, psychologistId));
     const hasGoogleCalendar = tokenRows.length > 0;
     let googleEventId = null;
     let meetLink = null;
+    const inviteEmail = body.sendLinkNow && patient.email ? patient.email : void 0;
+    let emailSent = false;
     if (hasGoogleCalendar) {
       try {
         const calResult = await createMeetingEvent(psychologistId, {
@@ -4130,12 +4333,13 @@ router3.post("/", requireAuth2, async (req, res) => {
           description: body.description,
           startDateTime: scheduledAt.toISOString(),
           endDateTime: endDateTime.toISOString(),
-          attendeeEmail: patient.email || void 0,
+          inviteEmail,
           requestId: `consultapsi-${Date.now()}-${body.patientId}`
         });
         if (calResult) {
           googleEventId = calResult.googleEventId;
           meetLink = calResult.meetLink;
+          emailSent = !!inviteEmail;
         }
       } catch (googleErr) {
         if (isGoogleTokenExpired(googleErr)) {
@@ -4144,7 +4348,7 @@ router3.post("/", requireAuth2, async (req, res) => {
         console.error("Google Calendar error during create:", googleErr);
       }
     }
-    const [meeting] = await db2.insert(meetings).values({
+    const [meeting] = await db.insert(meetings).values({
       companyId: req.companyId,
       psychologistId,
       patientId: body.patientId,
@@ -4157,38 +4361,9 @@ router3.post("/", requireAuth2, async (req, res) => {
       scheduledAt,
       durationMinutes: body.durationMinutes,
       patientEmail: patient.email ?? null,
-      patientName: patient.fullName
+      patientName: patient.fullName,
+      linkSentAt: emailSent ? /* @__PURE__ */ new Date() : null
     }).returning();
-    let emailSent = false;
-    if (body.sendLinkNow && patient.email && meetLink) {
-      const psychUser = await db2.select({ fullName: users.fullName, email: users.email }).from(users).where(eq7(users.id, psychologistId));
-      const psych = psychUser[0];
-      try {
-        emailSent = await sendMeetLinkEmail({
-          userId: psychologistId,
-          patientName: patient.fullName,
-          patientEmail: patient.email,
-          psychologistName: psych?.fullName || user.fullName,
-          psychologistEmail: psych?.email || user.email,
-          meetLink,
-          scheduledAt,
-          durationMinutes: body.durationMinutes
-        });
-      } catch (emailErr) {
-        if (isGoogleTokenExpired(emailErr)) {
-          return res.status(201).json({
-            ...meeting,
-            emailSent: false,
-            hasGoogleCalendar,
-            warning: "GOOGLE_TOKEN_EXPIRED_EMAIL",
-            warningMessage: "Reuni\xE3o criada, mas n\xE3o foi poss\xEDvel enviar o e-mail: token Google expirado. Reconecte sua conta."
-          });
-        }
-      }
-      if (emailSent) {
-        await db2.update(meetings).set({ linkSentAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq7(meetings.id, meeting.id));
-      }
-    }
     res.status(201).json({ ...meeting, emailSent, hasGoogleCalendar });
   } catch (error) {
     if (error instanceof z4.ZodError) {
@@ -4204,7 +4379,7 @@ router3.post("/", requireAuth2, async (req, res) => {
 router3.patch("/:id", requireAuth2, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const rows = await db2.select().from(meetings).where(eq7(meetings.id, id));
+    const rows = await db.select().from(meetings).where(eq7(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
     if (!canAccessMeeting(req, meeting)) {
@@ -4227,19 +4402,24 @@ router3.patch("/:id", requireAuth2, async (req, res) => {
     if (meeting.googleEventId && (scheduledAt || durationMinutes || title)) {
       try {
         const endDt = new Date(newScheduledAt.getTime() + newDuration * 6e4);
-        await updateCalendarEvent(meeting.psychologistId, meeting.googleEventId, {
-          summary: title || meeting.title,
-          description,
-          startDateTime: newScheduledAt.toISOString(),
-          endDateTime: endDt.toISOString()
-        });
+        await updateCalendarEvent(
+          meeting.psychologistId,
+          meeting.googleEventId,
+          {
+            summary: title || meeting.title,
+            description,
+            startDateTime: newScheduledAt.toISOString(),
+            endDateTime: endDt.toISOString()
+          },
+          "all"
+        );
       } catch (googleErr) {
         if (isGoogleTokenExpired(googleErr)) {
           return handleGoogleError(res, googleErr);
         }
       }
     }
-    const [updated] = await db2.update(meetings).set(updates).where(eq7(meetings.id, id)).returning();
+    const [updated] = await db.update(meetings).set(updates).where(eq7(meetings.id, id)).returning();
     res.json(updated);
   } catch (error) {
     if (isGoogleTokenExpired(error)) return handleGoogleError(res, error);
@@ -4249,13 +4429,13 @@ router3.patch("/:id", requireAuth2, async (req, res) => {
 router3.post("/:id/start", requireAuth2, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const rows = await db2.select().from(meetings).where(eq7(meetings.id, id));
+    const rows = await db.select().from(meetings).where(eq7(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
     if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: "Acesso negado" });
     }
-    const [updated] = await db2.update(meetings).set({ status: "active", startedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq7(meetings.id, id)).returning();
+    const [updated] = await db.update(meetings).set({ status: "active", startedAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq7(meetings.id, id)).returning();
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: "Erro ao iniciar reuni\xE3o" });
@@ -4264,7 +4444,7 @@ router3.post("/:id/start", requireAuth2, async (req, res) => {
 router3.post("/:id/end", requireAuth2, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const rows = await db2.select().from(meetings).where(eq7(meetings.id, id));
+    const rows = await db.select().from(meetings).where(eq7(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
     if (!canAccessMeeting(req, meeting)) {
@@ -4274,7 +4454,7 @@ router3.post("/:id/end", requireAuth2, async (req, res) => {
     const startedAt = meeting.startedAt || meeting.scheduledAt;
     const actualDuration = Math.round((endedAt.getTime() - startedAt.getTime()) / 6e4);
     const { notes } = req.body;
-    const [updated] = await db2.update(meetings).set({
+    const [updated] = await db.update(meetings).set({
       status: "ended",
       endedAt,
       actualDuration,
@@ -4289,13 +4469,13 @@ router3.post("/:id/end", requireAuth2, async (req, res) => {
 router3.patch("/:id/notes", requireAuth2, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const rows = await db2.select().from(meetings).where(eq7(meetings.id, id));
+    const rows = await db.select().from(meetings).where(eq7(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
     if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: "Acesso negado" });
     }
-    const [updated] = await db2.update(meetings).set({ notes: req.body.notes, updatedAt: /* @__PURE__ */ new Date() }).where(eq7(meetings.id, id)).returning();
+    const [updated] = await db.update(meetings).set({ notes: req.body.notes, updatedAt: /* @__PURE__ */ new Date() }).where(eq7(meetings.id, id)).returning();
     res.json(updated);
   } catch (error) {
     res.status(500).json({ error: "Erro ao salvar anota\xE7\xF5es" });
@@ -4303,31 +4483,19 @@ router3.patch("/:id/notes", requireAuth2, async (req, res) => {
 });
 router3.post("/:id/send-link", requireAuth2, async (req, res) => {
   try {
-    const user = req.user;
     const id = parseInt(req.params.id);
-    const rows = await db2.select().from(meetings).where(eq7(meetings.id, id));
+    const rows = await db.select().from(meetings).where(eq7(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
     if (!canAccessMeeting(req, meeting)) {
       return res.status(403).json({ error: "Acesso negado" });
     }
-    if (!meeting.meetLink) return res.status(400).json({ error: "Sem link do Meet" });
+    if (!meeting.meetLink || !meeting.googleEventId) return res.status(400).json({ error: "Sem link do Meet" });
     if (!meeting.patientEmail) return res.status(400).json({ error: "Paciente sem e-mail" });
-    const psychUser = await db2.select({ fullName: users.fullName, email: users.email }).from(users).where(eq7(users.id, meeting.psychologistId));
-    const psych = psychUser[0];
     try {
-      const sent = await sendMeetLinkEmail({
-        userId: meeting.psychologistId,
-        patientName: meeting.patientName || "Paciente",
-        patientEmail: meeting.patientEmail,
-        psychologistName: psych?.fullName || user.fullName,
-        psychologistEmail: psych?.email || user.email,
-        meetLink: meeting.meetLink,
-        scheduledAt: meeting.scheduledAt,
-        durationMinutes: meeting.durationMinutes
-      });
+      const sent = await inviteToMeetingEvent(meeting.psychologistId, meeting.googleEventId, meeting.patientEmail);
       if (sent) {
-        await db2.update(meetings).set({ linkSentAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq7(meetings.id, id));
+        await db.update(meetings).set({ linkSentAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() }).where(eq7(meetings.id, id));
       }
       res.json({ sent });
     } catch (emailErr) {
@@ -4344,7 +4512,7 @@ router3.post("/:id/send-link", requireAuth2, async (req, res) => {
 router3.delete("/:id", requireAuth2, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const rows = await db2.select().from(meetings).where(eq7(meetings.id, id));
+    const rows = await db.select().from(meetings).where(eq7(meetings.id, id));
     if (!rows.length) return res.status(404).json({ error: "Reuni\xE3o n\xE3o encontrada" });
     const meeting = rows[0];
     if (!canAccessMeeting(req, meeting)) {
@@ -4352,14 +4520,14 @@ router3.delete("/:id", requireAuth2, async (req, res) => {
     }
     if (meeting.googleEventId) {
       try {
-        await deleteCalendarEvent(meeting.psychologistId, meeting.googleEventId);
+        await deleteCalendarEvent(meeting.psychologistId, meeting.googleEventId, "all");
       } catch (googleErr) {
         if (isGoogleTokenExpired(googleErr)) {
           console.warn("Token expirado ao remover evento do Calendar \u2014 prosseguindo com cancelamento:", googleErr);
         }
       }
     }
-    await db2.update(meetings).set({ status: "cancelled", updatedAt: /* @__PURE__ */ new Date() }).where(eq7(meetings.id, id));
+    await db.update(meetings).set({ status: "cancelled", updatedAt: /* @__PURE__ */ new Date() }).where(eq7(meetings.id, id));
     res.json({ success: true });
   } catch (error) {
     if (isGoogleTokenExpired(error)) return handleGoogleError(res, error);
@@ -4370,7 +4538,7 @@ var meetings_default = router3;
 
 // server/routes/profile.ts
 import { Router as Router4 } from "express";
-import { and as and8, eq as eq8 } from "drizzle-orm";
+import { and as and7, eq as eq8 } from "drizzle-orm";
 import multer2 from "multer";
 var router4 = Router4();
 var avatarUpload = multer2({
@@ -4397,16 +4565,16 @@ function calcAge(birthDate) {
   return age;
 }
 router4.use(requireAuth3);
-var ownProfile = (companyId, userId) => and8(eq8(psychologists.userId, userId), eq8(psychologists.companyId, companyId));
+var ownProfile = (companyId, userId) => and7(eq8(psychologists.userId, userId), eq8(psychologists.companyId, companyId));
 router4.get("/", async (req, res) => {
   try {
     const user = req.user;
-    const [userData] = await db2.select().from(users).where(eq8(users.id, user.id));
+    const [userData] = await db.select().from(users).where(eq8(users.id, user.id));
     if (!userData) return res.status(404).json({ error: "Usu\xE1rio n\xE3o encontrado." });
-    const [psychData] = await db2.select().from(psychologists).where(ownProfile(req.companyId, user.id));
+    const [psychData] = await db.select().from(psychologists).where(ownProfile(req.companyId, user.id));
     let specializations = [];
     if (psychData) {
-      const rows = await db2.select({ id: specializationAreas.id, name: specializationAreas.name, category: specializationAreas.category }).from(psychologistSpecializations).innerJoin(specializationAreas, eq8(psychologistSpecializations.specializationAreaId, specializationAreas.id)).where(eq8(psychologistSpecializations.psychologistId, psychData.id));
+      const rows = await db.select({ id: specializationAreas.id, name: specializationAreas.name, category: specializationAreas.category }).from(psychologistSpecializations).innerJoin(specializationAreas, eq8(psychologistSpecializations.specializationAreaId, specializationAreas.id)).where(eq8(psychologistSpecializations.psychologistId, psychData.id));
       specializations = rows;
     }
     const { password, profileImageData, ...safeUser } = userData;
@@ -4429,20 +4597,20 @@ router4.patch("/", async (req, res) => {
     if (fullName !== void 0) userUpdate.fullName = fullName;
     if (birthDate !== void 0) userUpdate.birthDate = birthDate || null;
     if (Object.keys(userUpdate).length > 0) {
-      await db2.update(users).set(userUpdate).where(eq8(users.id, user.id));
+      await db.update(users).set(userUpdate).where(eq8(users.id, user.id));
     }
     const psychUpdate = {};
     if (phone !== void 0) psychUpdate.phone = phone || null;
     if (crpNumber !== void 0) psychUpdate.crpNumber = crpNumber || null;
     if (bio !== void 0) psychUpdate.bio = bio || null;
     if (Object.keys(psychUpdate).length > 0) {
-      const [existing] = await db2.select().from(psychologists).where(ownProfile(req.companyId, user.id));
+      const [existing] = await db.select().from(psychologists).where(ownProfile(req.companyId, user.id));
       if (existing) {
-        await db2.update(psychologists).set(psychUpdate).where(ownProfile(req.companyId, user.id));
+        await db.update(psychologists).set(psychUpdate).where(ownProfile(req.companyId, user.id));
       }
     }
-    const [updated] = await db2.select().from(users).where(eq8(users.id, user.id));
-    const [updatedPsych] = await db2.select().from(psychologists).where(ownProfile(req.companyId, user.id));
+    const [updated] = await db.select().from(users).where(eq8(users.id, user.id));
+    const [updatedPsych] = await db.select().from(psychologists).where(ownProfile(req.companyId, user.id));
     const { password, profileImageData, ...safeUser } = updated;
     return res.json({ ...safeUser, psychologist: updatedPsych || null, age: calcAge(updated.birthDate) });
   } catch (e) {
@@ -4457,15 +4625,15 @@ router4.put("/specializations", async (req, res) => {
     if (!Array.isArray(specializationIds)) {
       return res.status(400).json({ error: "specializationIds deve ser um array." });
     }
-    const [psych] = await db2.select().from(psychologists).where(ownProfile(req.companyId, user.id));
+    const [psych] = await db.select().from(psychologists).where(ownProfile(req.companyId, user.id));
     if (!psych) return res.status(404).json({ error: "Perfil de psic\xF3loga n\xE3o encontrado." });
-    await db2.delete(psychologistSpecializations).where(eq8(psychologistSpecializations.psychologistId, psych.id));
+    await db.delete(psychologistSpecializations).where(eq8(psychologistSpecializations.psychologistId, psych.id));
     if (specializationIds.length > 0) {
-      await db2.insert(psychologistSpecializations).values(
+      await db.insert(psychologistSpecializations).values(
         specializationIds.map((id) => ({ psychologistId: psych.id, specializationAreaId: id }))
       );
     }
-    const rows = await db2.select({ id: specializationAreas.id, name: specializationAreas.name, category: specializationAreas.category }).from(psychologistSpecializations).innerJoin(specializationAreas, eq8(psychologistSpecializations.specializationAreaId, specializationAreas.id)).where(eq8(psychologistSpecializations.psychologistId, psych.id));
+    const rows = await db.select({ id: specializationAreas.id, name: specializationAreas.name, category: specializationAreas.category }).from(psychologistSpecializations).innerJoin(specializationAreas, eq8(psychologistSpecializations.specializationAreaId, specializationAreas.id)).where(eq8(psychologistSpecializations.psychologistId, psych.id));
     return res.json({ specializations: rows });
   } catch (e) {
     console.error("PUT /api/profile/specializations error:", e);
@@ -4489,10 +4657,10 @@ router4.post(
     try {
       const user = req.user;
       if (!req.file) return res.status(400).json({ error: "Nenhum arquivo enviado." });
-      const [existingUser] = await db2.select().from(users).where(eq8(users.id, user.id));
+      const [existingUser] = await db.select().from(users).where(eq8(users.id, user.id));
       if (!existingUser) return res.status(404).json({ error: "Usu\xE1rio n\xE3o encontrado." });
       const imageUrl = `/api/users/${user.id}/photo`;
-      await db2.update(users).set({
+      await db.update(users).set({
         profileImage: imageUrl,
         profileImageData: req.file.buffer,
         profileImageMimeType: req.file.mimetype
@@ -4517,7 +4685,7 @@ function requireAuth4(req, res, next) {
 router5.use(requireAuth4);
 router5.get("/", async (_req, res) => {
   try {
-    const areas = await db2.select().from(specializationAreas).orderBy(specializationAreas.category, specializationAreas.name);
+    const areas = await db.select().from(specializationAreas).orderBy(specializationAreas.category, specializationAreas.name);
     const grouped = {};
     for (const area of areas) {
       const cat = area.category || "Outras";
@@ -4534,9 +4702,9 @@ router5.post("/", async (req, res) => {
   try {
     const { name, category } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: "Nome \xE9 obrigat\xF3rio." });
-    const [existing] = await db2.select().from(specializationAreas).where(eq9(specializationAreas.name, name.trim()));
+    const [existing] = await db.select().from(specializationAreas).where(eq9(specializationAreas.name, name.trim()));
     if (existing) return res.json(existing);
-    const [created] = await db2.insert(specializationAreas).values({ name: name.trim(), category: category || "Personalizada", isCustom: true }).returning();
+    const [created] = await db.insert(specializationAreas).values({ name: name.trim(), category: category || "Personalizada", isCustom: true }).returning();
     return res.status(201).json(created);
   } catch (e) {
     console.error("POST /api/specialization-areas error:", e);
@@ -4547,7 +4715,7 @@ var specialization_areas_default = router5;
 
 // server/routes/admin-psychologists.ts
 import { Router as Router6 } from "express";
-import { eq as eq10, and as and9, ne, sql as sql4 } from "drizzle-orm";
+import { eq as eq10, and as and8, ne, sql as sql5 } from "drizzle-orm";
 var router6 = Router6();
 function requireAdmin2(req, res, next) {
   if (!req.isAuthenticated()) return res.status(401).json({ error: "N\xE3o autenticado." });
@@ -4574,37 +4742,37 @@ function monthsAgo(dateStr) {
   return (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
 }
 async function findPsych(companyId, id) {
-  const [psych] = await db2.select().from(psychologists).where(and9(eq10(psychologists.id, id), eq10(psychologists.companyId, companyId)));
+  const [psych] = await db.select().from(psychologists).where(and8(eq10(psychologists.id, id), eq10(psychologists.companyId, companyId)));
   return psych;
 }
 async function findUserInCompany(companyId, userId) {
-  const [row] = await db2.select({ user: users, membershipStatus: companyMemberships.status }).from(users).leftJoin(
+  const [row] = await db.select({ user: users, membershipStatus: companyMemberships.status }).from(users).leftJoin(
     companyMemberships,
-    and9(eq10(companyMemberships.userId, users.id), eq10(companyMemberships.companyId, companyId))
+    and8(eq10(companyMemberships.userId, users.id), eq10(companyMemberships.companyId, companyId))
   ).where(eq10(users.id, userId));
   if (!row) return void 0;
   const { password, ...safeUser } = row.user;
   return { ...safeUser, status: row.membershipStatus ?? "inactive" };
 }
 async function isInOtherCompany(companyId, userId) {
-  const [other] = await db2.select({ id: companyMemberships.id }).from(companyMemberships).where(and9(eq10(companyMemberships.userId, userId), ne(companyMemberships.companyId, companyId))).limit(1);
+  const [other] = await db.select({ id: companyMemberships.id }).from(companyMemberships).where(and8(eq10(companyMemberships.userId, userId), ne(companyMemberships.companyId, companyId))).limit(1);
   return !!other;
 }
 async function setStatusInCompany(companyId, userId, status) {
-  await db2.update(companyMemberships).set({ status }).where(and9(eq10(companyMemberships.userId, userId), eq10(companyMemberships.companyId, companyId)));
+  await db.update(companyMemberships).set({ status }).where(and8(eq10(companyMemberships.userId, userId), eq10(companyMemberships.companyId, companyId)));
   if (status === "active") {
-    await db2.update(users).set({ status: "active" }).where(eq10(users.id, userId));
+    await db.update(users).set({ status: "active" }).where(eq10(users.id, userId));
   }
 }
 async function getSpecializationsForPsych(psychId) {
-  return db2.select({ id: specializationAreas.id, name: specializationAreas.name, category: specializationAreas.category }).from(psychologistSpecializations).innerJoin(specializationAreas, eq10(psychologistSpecializations.specializationAreaId, specializationAreas.id)).where(eq10(psychologistSpecializations.psychologistId, psychId));
+  return db.select({ id: specializationAreas.id, name: specializationAreas.name, category: specializationAreas.category }).from(psychologistSpecializations).innerJoin(specializationAreas, eq10(psychologistSpecializations.specializationAreaId, specializationAreas.id)).where(eq10(psychologistSpecializations.psychologistId, psychId));
 }
 router6.get("/", async (req, res) => {
   try {
     const { search, status, specializationId } = req.query;
-    const rows = await db2.select({ psych: psychologists, user: users, membershipStatus: companyMemberships.status }).from(psychologists).innerJoin(users, eq10(psychologists.userId, users.id)).leftJoin(
+    const rows = await db.select({ psych: psychologists, user: users, membershipStatus: companyMemberships.status }).from(psychologists).innerJoin(users, eq10(psychologists.userId, users.id)).leftJoin(
       companyMemberships,
-      and9(eq10(companyMemberships.userId, users.id), eq10(companyMemberships.companyId, req.companyId))
+      and8(eq10(companyMemberships.userId, users.id), eq10(companyMemberships.companyId, req.companyId))
     ).where(eq10(psychologists.companyId, req.companyId)).orderBy(users.fullName);
     let psychList = rows.map((r) => ({ psych: r.psych, user: { ...r.user, status: r.membershipStatus ?? "inactive" } }));
     if (search) {
@@ -4624,8 +4792,8 @@ router6.get("/", async (req, res) => {
         if (specializationId && !specs.some((s) => s.id === parseInt(specializationId))) {
           return null;
         }
-        const activePatientsCount = await db2.select({ count: sql4`count(*)` }).from(patients).where(and9(eq10(patients.psychologistId, psych.id), eq10(patients.status, "active")));
-        const sessionsCount = await db2.select({ count: sql4`count(*)` }).from(clinicalSessions).where(eq10(clinicalSessions.psychologistId, psych.id));
+        const activePatientsCount = await db.select({ count: sql5`count(*)` }).from(patients).where(and8(eq10(patients.psychologistId, psych.id), eq10(patients.status, "active")));
+        const sessionsCount = await db.select({ count: sql5`count(*)` }).from(clinicalSessions).where(eq10(clinicalSessions.psychologistId, psych.id));
         const { password, ...safeUser } = user;
         return {
           ...psych,
@@ -4652,8 +4820,8 @@ router6.get("/:id", async (req, res) => {
     const user = await findUserInCompany(req.companyId, psych.userId);
     if (!user) return res.status(404).json({ error: "Usu\xE1rio n\xE3o encontrado." });
     const specs = await getSpecializationsForPsych(psych.id);
-    const activePatientsCount = await db2.select({ count: sql4`count(*)` }).from(patients).where(and9(eq10(patients.psychologistId, psych.id), eq10(patients.status, "active")));
-    const sessionsCount = await db2.select({ count: sql4`count(*)` }).from(clinicalSessions).where(eq10(clinicalSessions.psychologistId, psych.id));
+    const activePatientsCount = await db.select({ count: sql5`count(*)` }).from(patients).where(and8(eq10(patients.psychologistId, psych.id), eq10(patients.status, "active")));
+    const sessionsCount = await db.select({ count: sql5`count(*)` }).from(clinicalSessions).where(eq10(clinicalSessions.psychologistId, psych.id));
     return res.json({
       ...psych,
       user,
@@ -4685,7 +4853,7 @@ router6.patch("/:id", async (req, res) => {
           error: "Esta psic\xF3loga tamb\xE9m atende em outra cl\xEDnica: nome, e-mail e nascimento s\xF3 podem ser alterados por ela, em Meu Perfil."
         });
       }
-      await db2.update(users).set(userUpdate).where(eq10(users.id, psych.userId));
+      await db.update(users).set(userUpdate).where(eq10(users.id, psych.userId));
     }
     if (status !== void 0) {
       await setStatusInCompany(companyId, psych.userId, status === "active" ? "active" : "inactive");
@@ -4696,7 +4864,7 @@ router6.patch("/:id", async (req, res) => {
     if (bio !== void 0) psychUpdate.bio = bio || null;
     if (startedAtClinic !== void 0) psychUpdate.startedAtClinic = startedAtClinic || null;
     if (Object.keys(psychUpdate).length > 0) {
-      await db2.update(psychologists).set(psychUpdate).where(eq10(psychologists.id, id));
+      await db.update(psychologists).set(psychUpdate).where(eq10(psychologists.id, id));
     }
     const updatedUser = await findUserInCompany(companyId, psych.userId);
     const updatedPsych = await findPsych(companyId, id);
@@ -4721,9 +4889,9 @@ router6.put("/:id/specializations", async (req, res) => {
     }
     const psych = await findPsych(req.companyId, id);
     if (!psych) return res.status(404).json({ error: "Psic\xF3loga n\xE3o encontrada." });
-    await db2.delete(psychologistSpecializations).where(eq10(psychologistSpecializations.psychologistId, id));
+    await db.delete(psychologistSpecializations).where(eq10(psychologistSpecializations.psychologistId, id));
     if (specializationIds.length > 0) {
-      await db2.insert(psychologistSpecializations).values(
+      await db.insert(psychologistSpecializations).values(
         specializationIds.map((sid) => ({ psychologistId: id, specializationAreaId: sid }))
       );
     }
@@ -4754,7 +4922,7 @@ var admin_psychologists_default = router6;
 // server/routes/admin-access.ts
 import { Router as Router7 } from "express";
 import { z as z5 } from "zod";
-import { and as and10, desc as desc3, eq as eq11, isNull as isNull3, ne as ne2, sql as sql5 } from "drizzle-orm";
+import { and as and9, desc as desc3, eq as eq11, isNull as isNull3, ne as ne2, sql as sql6 } from "drizzle-orm";
 var router7 = Router7();
 var adminColumns2 = {
   id: users.id,
@@ -4765,12 +4933,12 @@ var adminColumns2 = {
   avatarUrl: users.avatarUrl
 };
 var emailSchema = z5.object({ email: z5.string().trim().email("Informe um e-mail v\xE1lido.") });
-var isCompanyAdmin = (companyId) => and10(eq11(companyMemberships.companyId, companyId), eq11(companyMemberships.role, "admin"), eq11(companyMemberships.status, "active"));
+var isCompanyAdmin = (companyId) => and9(eq11(companyMemberships.companyId, companyId), eq11(companyMemberships.role, "admin"), eq11(companyMemberships.status, "active"));
 router7.get("/admins", requireCompany, requireAdmin, async (req, res) => {
   const companyId = req.companyId;
   try {
-    const admins = await db2.select(adminColumns2).from(companyMemberships).innerJoin(users, eq11(companyMemberships.userId, users.id)).where(isCompanyAdmin(companyId)).orderBy(users.fullName);
-    const invites = await db2.select({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt }).from(accessInvites).where(and10(isNull3(accessInvites.acceptedAt), eq11(accessInvites.role, "admin"), eq11(accessInvites.companyId, companyId))).orderBy(desc3(accessInvites.createdAt));
+    const admins = await db.select(adminColumns2).from(companyMemberships).innerJoin(users, eq11(companyMemberships.userId, users.id)).where(isCompanyAdmin(companyId)).orderBy(users.fullName);
+    const invites = await db.select({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt }).from(accessInvites).where(and9(isNull3(accessInvites.acceptedAt), eq11(accessInvites.role, "admin"), eq11(accessInvites.companyId, companyId))).orderBy(desc3(accessInvites.createdAt));
     res.json({ admins, invites });
   } catch (error) {
     console.error("GET /api/admin/admins:", error);
@@ -4795,11 +4963,11 @@ router7.delete("/admins/:userId", requireCompany, requireAdmin, async (req, res)
   if (!Number.isInteger(userId)) return res.status(400).json({ message: "Usu\xE1rio inv\xE1lido." });
   if (userId === req.user.id) return res.status(400).json({ message: "Voc\xEA n\xE3o pode remover o seu pr\xF3prio acesso de administrador." });
   try {
-    const [target] = await db2.select({ id: companyMemberships.id }).from(companyMemberships).where(and10(isCompanyAdmin(companyId), eq11(companyMemberships.userId, userId)));
+    const [target] = await db.select({ id: companyMemberships.id }).from(companyMemberships).where(and9(isCompanyAdmin(companyId), eq11(companyMemberships.userId, userId)));
     if (!target) return res.status(404).json({ message: "Administrador n\xE3o encontrado." });
-    const [{ count: count4 }] = await db2.select({ count: sql5`count(*)::int` }).from(companyMemberships).innerJoin(users, eq11(companyMemberships.userId, users.id)).where(and10(isCompanyAdmin(companyId), eq11(users.status, "active"), ne2(users.id, userId)));
+    const [{ count: count4 }] = await db.select({ count: sql6`count(*)::int` }).from(companyMemberships).innerJoin(users, eq11(companyMemberships.userId, users.id)).where(and9(isCompanyAdmin(companyId), eq11(users.status, "active"), ne2(users.id, userId)));
     if (count4 === 0) return res.status(400).json({ message: "A empresa precisa de pelo menos um administrador." });
-    await db2.update(companyMemberships).set({ role: "psychologist" }).where(eq11(companyMemberships.id, target.id));
+    await db.update(companyMemberships).set({ role: "psychologist" }).where(eq11(companyMemberships.id, target.id));
     res.status(204).end();
   } catch (error) {
     console.error("DELETE /api/admin/admins:", error);
@@ -4810,7 +4978,7 @@ router7.delete("/invites/:id", requireCompany, requireAdmin, async (req, res) =>
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ message: "Convite inv\xE1lido." });
   try {
-    const deleted = await db2.delete(accessInvites).where(and10(eq11(accessInvites.id, id), eq11(accessInvites.companyId, req.companyId), isNull3(accessInvites.acceptedAt))).returning({ id: accessInvites.id });
+    const deleted = await db.delete(accessInvites).where(and9(eq11(accessInvites.id, id), eq11(accessInvites.companyId, req.companyId), isNull3(accessInvites.acceptedAt))).returning({ id: accessInvites.id });
     if (deleted.length === 0) return res.status(404).json({ message: "Convite n\xE3o encontrado." });
     res.status(204).end();
   } catch (error) {
@@ -4869,11 +5037,20 @@ router8.post("/switch", requireAuth, async (req, res) => {
     res.status(500).json({ message: "Erro ao trocar de empresa." });
   }
 });
-var currentColumns = { id: companies.id, name: companies.name, slug: companies.slug, cnpj: companies.cnpj, logoUrl: companies.logoUrl };
+var currentColumns = {
+  id: companies.id,
+  name: companies.name,
+  slug: companies.slug,
+  cnpj: companies.cnpj,
+  logoUrl: companies.logoUrl,
+  accessValidUntil: companies.accessValidUntil,
+  aiEnabled: companies.aiEnabled
+};
+var withExpiry2 = (c) => ({ ...c, accessExpired: isAccessExpired(c.accessValidUntil) });
 router8.get("/current", requireCompany, async (req, res) => {
   try {
-    const [company] = await db2.select(currentColumns).from(companies).where(eq12(companies.id, req.companyId));
-    res.json(company);
+    const [company] = await db.select(currentColumns).from(companies).where(eq12(companies.id, req.companyId));
+    res.json(withExpiry2(company));
   } catch (error) {
     console.error("GET /api/companies/current:", error);
     res.status(500).json({ message: "Erro ao carregar a empresa." });
@@ -4885,8 +5062,8 @@ router8.patch("/current", requireCompany, requireAdmin, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0].message });
   if (Object.keys(parsed.data).length === 0) return res.status(400).json({ message: "Nada para alterar." });
   try {
-    const [company] = await db2.update(companies).set(parsed.data).where(eq12(companies.id, req.companyId)).returning(currentColumns);
-    res.json(company);
+    const [company] = await db.update(companies).set(parsed.data).where(eq12(companies.id, req.companyId)).returning(currentColumns);
+    res.json(withExpiry2(company));
   } catch (error) {
     console.error("PATCH /api/companies/current:", error);
     res.status(500).json({ message: "Erro ao salvar a empresa." });
@@ -4918,8 +5095,8 @@ router8.post(
     try {
       const id = req.companyId;
       const logoUrl = `/api/companies/${id}/logo?v=${Date.now()}`;
-      const [company] = await db2.update(companies).set({ logoUrl, logoData: req.file.buffer, logoMimeType: req.file.mimetype }).where(eq12(companies.id, id)).returning(currentColumns);
-      res.json(company);
+      const [company] = await db.update(companies).set({ logoUrl, logoData: req.file.buffer, logoMimeType: req.file.mimetype }).where(eq12(companies.id, id)).returning(currentColumns);
+      res.json(withExpiry2(company));
     } catch (error) {
       console.error("POST /api/companies/current/logo:", error);
       res.status(500).json({ message: "Erro ao salvar o logo." });
@@ -4928,8 +5105,8 @@ router8.post(
 );
 router8.delete("/current/logo", requireCompany, requireAdmin, async (req, res) => {
   try {
-    const [company] = await db2.update(companies).set({ logoUrl: null, logoData: null, logoMimeType: null }).where(eq12(companies.id, req.companyId)).returning(currentColumns);
-    res.json(company);
+    const [company] = await db.update(companies).set({ logoUrl: null, logoData: null, logoMimeType: null }).where(eq12(companies.id, req.companyId)).returning(currentColumns);
+    res.json(withExpiry2(company));
   } catch (error) {
     console.error("DELETE /api/companies/current/logo:", error);
     res.status(500).json({ message: "Erro ao remover o logo." });
@@ -4939,7 +5116,7 @@ router8.get("/:id/logo", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ message: "Empresa inv\xE1lida." });
   try {
-    const [row] = await db2.select({ data: companies.logoData, mimeType: companies.logoMimeType }).from(companies).where(eq12(companies.id, id));
+    const [row] = await db.select({ data: companies.logoData, mimeType: companies.logoMimeType }).from(companies).where(eq12(companies.id, id));
     if (!row?.data) return res.status(404).json({ message: "Logo n\xE3o encontrado." });
     res.setHeader("Content-Type", row.mimeType || "image/png");
     res.setHeader("Cache-Control", "public, max-age=86400");
@@ -4953,8 +5130,42 @@ var companies_default = router8;
 
 // server/routes/platform.ts
 import { Router as Router9 } from "express";
+import { z as z8 } from "zod";
+import { and as and10, asc, count, desc as desc4, eq as eq13, gte as gte3, inArray, isNull as isNull4, lte as lte3, ne as ne3, sql as sql7 } from "drizzle-orm";
+
+// server/lib/subscriptions.ts
 import { z as z7 } from "zod";
-import { and as and11, asc, count, desc as desc4, eq as eq13, isNull as isNull4, ne as ne3, sql as sql6 } from "drizzle-orm";
+var saoPauloDate = (d) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(d);
+var toUtc = (date3) => {
+  const [y, m, d] = date3.split("-").map(Number);
+  return Date.UTC(y, m - 1, d);
+};
+var isValidDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(toUtc(v)).toISOString().slice(0, 10) === v;
+var dateSchema = (message) => z7.string({ required_error: message, invalid_type_error: message }).refine(isValidDate, message);
+function addMonths(date3, months) {
+  const [y, m, d] = date3.split("-").map(Number);
+  const target = new Date(Date.UTC(y, m - 1 + months, 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(d, lastDay));
+  return target.toISOString().slice(0, 10);
+}
+var daysBetween = (from, to) => Math.round((toUtc(to) - toUtc(from)) / 864e5);
+function monthsBetween(start, end) {
+  const [sy, sm, sd] = start.split("-").map(Number);
+  const [ey, em, ed] = end.split("-").map(Number);
+  const months = (ey - sy) * 12 + (em - sm) - (ed < sd ? 1 : 0);
+  return Math.max(0, months);
+}
+function lastTwelveMonths(today) {
+  const first = `${today.slice(0, 7)}-01`;
+  return Array.from({ length: 12 }, (_, i) => addMonths(first, i - 11).slice(0, 7));
+}
+var toNumber = (v) => v === null || v === void 0 ? null : Number(v);
+async function recordSubscriptionEvent(companyId, type, details, userId, executor = db) {
+  await executor.insert(subscriptionEvents).values({ companyId, type, details, userId });
+}
+
+// server/routes/platform.ts
 var router9 = Router9();
 router9.use(requirePlatformAdmin);
 var companyColumns = {
@@ -4964,8 +5175,22 @@ var companyColumns = {
   cnpj: companies.cnpj,
   logoUrl: companies.logoUrl,
   status: companies.status,
+  accessValidUntil: companies.accessValidUntil,
+  aiEnabled: companies.aiEnabled,
   createdAt: companies.createdAt
 };
+var withExpiry3 = (c) => ({ ...c, accessExpired: isAccessExpired(c.accessValidUntil) });
+var subscriptionColumns = {
+  ...companyColumns,
+  plan: companies.plan,
+  monthlyPrice: companies.monthlyPrice,
+  subscriptionStartedAt: companies.subscriptionStartedAt
+};
+var withSubscription = (c) => ({
+  ...withExpiry3(c),
+  monthlyPrice: toNumber(c.monthlyPrice)
+});
+var zodError = (error) => ({ field: String(error.issues[0].path[0] ?? ""), message: error.issues[0].message });
 function slugify(name) {
   return name.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "empresa";
 }
@@ -4973,7 +5198,7 @@ async function uniqueSlug(name) {
   const base = slugify(name);
   for (let i = 1; ; i++) {
     const slug = i === 1 ? base : `${base}-${i}`;
-    const [taken] = await db2.select({ id: companies.id }).from(companies).where(eq13(companies.slug, slug));
+    const [taken] = await db.select({ id: companies.id }).from(companies).where(eq13(companies.slug, slug));
     if (!taken) return slug;
   }
 }
@@ -4983,14 +5208,14 @@ var parseId = (raw) => {
 };
 router9.get("/companies", async (_req, res) => {
   try {
-    const list = await db2.select(companyColumns).from(companies).orderBy(asc(companies.name));
-    const members = await db2.select({ companyId: companyMemberships.companyId, role: companyMemberships.role, total: count() }).from(companyMemberships).where(eq13(companyMemberships.status, "active")).groupBy(companyMemberships.companyId, companyMemberships.role);
-    const pending = await db2.select({ companyId: accessInvites.companyId, total: count() }).from(accessInvites).where(isNull4(accessInvites.acceptedAt)).groupBy(accessInvites.companyId);
+    const list = await db.select(companyColumns).from(companies).orderBy(asc(companies.name));
+    const members = await db.select({ companyId: companyMemberships.companyId, role: companyMemberships.role, total: count() }).from(companyMemberships).where(eq13(companyMemberships.status, "active")).groupBy(companyMemberships.companyId, companyMemberships.role);
+    const pending = await db.select({ companyId: accessInvites.companyId, total: count() }).from(accessInvites).where(isNull4(accessInvites.acceptedAt)).groupBy(accessInvites.companyId);
     res.json(
       list.map((c) => {
         const rows = members.filter((m) => m.companyId === c.id);
         return {
-          ...c,
+          ...withExpiry3(c),
           membersCount: rows.reduce((acc, m) => acc + Number(m.total), 0),
           adminsCount: Number(rows.find((m) => m.role === "admin")?.total ?? 0),
           pendingInvitesCount: Number(pending.find((p) => p.companyId === c.id)?.total ?? 0)
@@ -5002,17 +5227,18 @@ router9.get("/companies", async (_req, res) => {
     res.status(500).json({ message: "Erro ao carregar empresas." });
   }
 });
-var createSchema2 = z7.object({
+var createSchema2 = z8.object({
   name: companyNameSchema,
   cnpj: cnpjSchema.optional(),
-  adminEmail: z7.string().trim().email("Informe um e-mail v\xE1lido.").optional().or(z7.literal(""))
+  adminEmail: z8.string().trim().email("Informe um e-mail v\xE1lido.").optional().or(z8.literal(""))
 });
 router9.post("/companies", async (req, res) => {
   const parsed = createSchema2.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0].message });
   const { name, cnpj, adminEmail } = parsed.data;
   try {
-    const [company] = await db2.insert(companies).values({ name, cnpj: cnpj ?? null, slug: await uniqueSlug(name) }).returning(companyColumns);
+    const [company] = await db.insert(companies).values({ name, cnpj: cnpj ?? null, slug: await uniqueSlug(name) }).returning(companyColumns);
+    await recordSubscriptionEvent(company.id, "created", { name: company.name, cnpj: company.cnpj }, req.user.id);
     const admin = adminEmail ? await addCompanyAdmin(company.id, adminEmail, req.user.id) : null;
     res.status(201).json({ company, admin });
   } catch (error) {
@@ -5020,20 +5246,51 @@ router9.post("/companies", async (req, res) => {
     res.status(500).json({ message: "Erro ao criar empresa." });
   }
 });
-var updateSchema2 = z7.object({
+var updateSchema2 = z8.object({
   name: companyNameSchema.optional(),
   cnpj: cnpjSchema.optional(),
-  status: z7.enum(["active", "suspended"]).optional()
+  status: z8.enum(["active", "suspended"]).optional(),
+  // Last day of access (inclusive); null removes the expiry
+  accessValidUntil: dateSchema("Data de validade inv\xE1lida.").nullable().optional(),
+  aiEnabled: z8.boolean().optional(),
+  plan: z8.enum(SUBSCRIPTION_PLANS, { message: "Plano inv\xE1lido." }).nullable().optional(),
+  monthlyPrice: z8.number({ invalid_type_error: "Valor mensal inv\xE1lido." }).min(0, "Valor mensal inv\xE1lido.").max(9999999999e-2, "Valor mensal inv\xE1lido.").nullable().optional(),
+  subscriptionStartedAt: dateSchema("Data de in\xEDcio inv\xE1lida.").nullable().optional()
 }).refine((v) => Object.keys(v).length > 0, "Nada para alterar.");
+var eventFor = {
+  name: () => "renamed",
+  plan: () => "plan_changed",
+  monthlyPrice: () => "price_changed",
+  subscriptionStartedAt: () => "start_changed",
+  accessValidUntil: () => "validity_changed",
+  aiEnabled: () => "ai_toggled",
+  status: (to) => to === "suspended" ? "suspended" : "reactivated"
+};
 router9.patch("/companies/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ message: "Empresa inv\xE1lida." });
   const parsed = updateSchema2.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0].message });
+  if (!parsed.success) return res.status(400).json(zodError(parsed.error));
+  const { monthlyPrice, ...rest } = parsed.data;
+  const values = {
+    ...rest,
+    ...monthlyPrice !== void 0 ? { monthlyPrice: monthlyPrice === null ? null : monthlyPrice.toFixed(2) } : {}
+  };
   try {
-    const [updated] = await db2.update(companies).set(parsed.data).where(eq13(companies.id, id)).returning(companyColumns);
+    const updated = await db.transaction(async (tx) => {
+      const [before] = await tx.select(subscriptionColumns).from(companies).where(eq13(companies.id, id)).for("update");
+      if (!before) return void 0;
+      const [after] = await tx.update(companies).set(values).where(eq13(companies.id, id)).returning(subscriptionColumns);
+      const from = withSubscription(before);
+      const to = withSubscription(after);
+      for (const field of Object.keys(eventFor)) {
+        if (!(field in parsed.data) || from[field] === to[field]) continue;
+        await recordSubscriptionEvent(id, eventFor[field](to[field]), { from: from[field], to: to[field] }, req.user.id, tx);
+      }
+      return after;
+    });
     if (!updated) return res.status(404).json({ message: "Empresa n\xE3o encontrada." });
-    res.json(updated);
+    res.json(withSubscription(updated));
   } catch (error) {
     console.error("PATCH /api/platform/companies/:id:", error);
     res.status(500).json({ message: "Erro ao atualizar empresa." });
@@ -5043,9 +5300,9 @@ router9.get("/companies/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ message: "Empresa inv\xE1lida." });
   try {
-    const [company] = await db2.select(companyColumns).from(companies).where(eq13(companies.id, id));
+    const [company] = await db.select(companyColumns).from(companies).where(eq13(companies.id, id));
     if (!company) return res.status(404).json({ message: "Empresa n\xE3o encontrada." });
-    const members = await db2.select({
+    const members = await db.select({
       id: users.id,
       fullName: users.fullName,
       email: users.email,
@@ -5053,21 +5310,21 @@ router9.get("/companies/:id", async (req, res) => {
       role: companyMemberships.role,
       status: companyMemberships.status
     }).from(companyMemberships).innerJoin(users, eq13(companyMemberships.userId, users.id)).where(eq13(companyMemberships.companyId, id)).orderBy(asc(users.fullName));
-    const invites = await db2.select({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt }).from(accessInvites).where(and11(eq13(accessInvites.companyId, id), isNull4(accessInvites.acceptedAt))).orderBy(asc(accessInvites.createdAt));
-    res.json({ company, members, invites });
+    const invites = await db.select({ id: accessInvites.id, email: accessInvites.email, role: accessInvites.role, createdAt: accessInvites.createdAt }).from(accessInvites).where(and10(eq13(accessInvites.companyId, id), isNull4(accessInvites.acceptedAt))).orderBy(asc(accessInvites.createdAt));
+    res.json({ company: withExpiry3(company), members, invites });
   } catch (error) {
     console.error("GET /api/platform/companies/:id:", error);
     res.status(500).json({ message: "Erro ao carregar empresa." });
   }
 });
-var emailSchema2 = z7.object({ email: z7.string().trim().email("Informe um e-mail v\xE1lido.") });
+var emailSchema2 = z8.object({ email: z8.string().trim().email("Informe um e-mail v\xE1lido.") });
 router9.post("/companies/:id/admins", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ message: "Empresa inv\xE1lida." });
   const parsed = emailSchema2.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0].message });
   try {
-    const [company] = await db2.select({ id: companies.id }).from(companies).where(eq13(companies.id, id));
+    const [company] = await db.select({ id: companies.id }).from(companies).where(eq13(companies.id, id));
     if (!company) return res.status(404).json({ message: "Empresa n\xE3o encontrada." });
     const result = await addCompanyAdmin(id, parsed.data.email, req.user.id);
     if (result.type === "conflict") return res.status(409).json({ message: result.message });
@@ -5082,7 +5339,7 @@ router9.delete("/companies/:id/invites/:inviteId", async (req, res) => {
   const inviteId = parseId(req.params.inviteId);
   if (!id || !inviteId) return res.status(400).json({ message: "Convite inv\xE1lido." });
   try {
-    const deleted = await db2.delete(accessInvites).where(and11(eq13(accessInvites.id, inviteId), eq13(accessInvites.companyId, id), isNull4(accessInvites.acceptedAt))).returning({ id: accessInvites.id });
+    const deleted = await db.delete(accessInvites).where(and10(eq13(accessInvites.id, inviteId), eq13(accessInvites.companyId, id), isNull4(accessInvites.acceptedAt))).returning({ id: accessInvites.id });
     if (deleted.length === 0) return res.status(404).json({ message: "Convite n\xE3o encontrado." });
     res.status(204).end();
   } catch (error) {
@@ -5090,17 +5347,17 @@ router9.delete("/companies/:id/invites/:inviteId", async (req, res) => {
     res.status(500).json({ message: "Erro ao cancelar convite." });
   }
 });
-var hasActiveMembership = sql6`EXISTS (
+var hasActiveMembership = sql7`EXISTS (
   SELECT 1 FROM company_memberships m WHERE m.user_id = "users"."id" AND m.status = 'active'
 )`;
 async function findUnlinkedAccount(id) {
-  const [account] = await db2.select({ id: users.id, fullName: users.fullName, email: users.email, linked: hasActiveMembership }).from(users).where(eq13(users.id, id));
+  const [account] = await db.select({ id: users.id, fullName: users.fullName, email: users.email, linked: hasActiveMembership }).from(users).where(eq13(users.id, id));
   return account;
 }
 router9.get("/unlinked-accounts", async (req, res) => {
   const inactive = req.query.status === "inactive";
   try {
-    const rows = await db2.select({
+    const rows = await db.select({
       id: users.id,
       fullName: users.fullName,
       email: users.email,
@@ -5108,22 +5365,22 @@ router9.get("/unlinked-accounts", async (req, res) => {
       avatarUrl: users.avatarUrl,
       status: users.status,
       createdAt: users.createdAt,
-      viaGoogle: sql6`${users.googleId} IS NOT NULL`,
+      viaGoogle: sql7`${users.googleId} IS NOT NULL`,
       // The company they last belonged to, when every membership was deactivated
-      lastCompanyName: sql6`(
+      lastCompanyName: sql7`(
           SELECT c.name FROM company_memberships m JOIN companies c ON c.id = m.company_id
           WHERE m.user_id = "users"."id" ORDER BY m.created_at DESC LIMIT 1
         )`
-    }).from(users).where(and11(sql6`NOT ${hasActiveMembership}`, inactive ? ne3(users.status, "active") : eq13(users.status, "active"))).orderBy(desc4(users.id));
+    }).from(users).where(and10(sql7`NOT ${hasActiveMembership}`, inactive ? ne3(users.status, "active") : eq13(users.status, "active"))).orderBy(desc4(users.id));
     res.json(rows.filter((u) => !isPlatformAdmin(u.email)));
   } catch (error) {
     console.error("GET /api/platform/unlinked-accounts:", error);
     res.status(500).json({ message: "Erro ao carregar contas." });
   }
 });
-var linkSchema = z7.object({
-  companyId: z7.number().int().positive("Escolha a cl\xEDnica."),
-  role: z7.enum(["admin", "psychologist", "receptionist"], { message: "Escolha o papel." })
+var linkSchema = z8.object({
+  companyId: z8.number().int().positive("Escolha a cl\xEDnica."),
+  role: z8.enum(["admin", "psychologist", "receptionist"], { message: "Escolha o papel." })
 });
 router9.post("/unlinked-accounts/:id/link", async (req, res) => {
   const id = parseId(req.params.id);
@@ -5134,13 +5391,13 @@ router9.post("/unlinked-accounts/:id/link", async (req, res) => {
   try {
     const account = await findUnlinkedAccount(id);
     if (!account) return res.status(404).json({ message: "Conta n\xE3o encontrada." });
-    const [company] = await db2.select({ id: companies.id, name: companies.name, status: companies.status }).from(companies).where(eq13(companies.id, companyId));
+    const [company] = await db.select({ id: companies.id, name: companies.name, status: companies.status }).from(companies).where(eq13(companies.id, companyId));
     if (!company) return res.status(404).json({ message: "Empresa n\xE3o encontrada." });
     if (company.status !== "active") return res.status(409).json({ message: "Esta empresa est\xE1 suspensa." });
-    const [member] = await db2.select({ id: companyMemberships.id }).from(companyMemberships).where(and11(eq13(companyMemberships.userId, id), eq13(companyMemberships.companyId, companyId), eq13(companyMemberships.status, "active")));
+    const [member] = await db.select({ id: companyMemberships.id }).from(companyMemberships).where(and10(eq13(companyMemberships.userId, id), eq13(companyMemberships.companyId, companyId), eq13(companyMemberships.status, "active")));
     if (member) return res.status(409).json({ message: "Esta conta j\xE1 faz parte desta empresa." });
     await upsertMembership(id, companyId, role);
-    await db2.update(users).set({ status: "active" }).where(eq13(users.id, id));
+    await db.update(users).set({ status: "active" }).where(eq13(users.id, id));
     if (role === "psychologist") await ensurePsychologistProfileFor(companyId, id);
     await storage.createAuditLog(companyId, {
       userId: req.user.id,
@@ -5166,8 +5423,8 @@ router9.post("/unlinked-accounts/:id/deactivate", async (req, res) => {
     if (!account) return res.status(404).json({ message: "Conta n\xE3o encontrada." });
     if (account.linked) return res.status(409).json({ message: "Esta conta faz parte de uma empresa." });
     if (isPlatformAdmin(account.email)) return res.status(409).json({ message: "N\xE3o \xE9 poss\xEDvel desativar um super admin." });
-    await db2.update(users).set({ status: "inactive" }).where(eq13(users.id, id));
-    await db2.execute(sql6`DELETE FROM session WHERE sess->'passport'->>'user' = ${String(id)}`);
+    await db.update(users).set({ status: "inactive" }).where(eq13(users.id, id));
+    await db.execute(sql7`DELETE FROM session WHERE sess->'passport'->>'user' = ${String(id)}`);
     res.status(204).end();
   } catch (error) {
     console.error("POST /api/platform/unlinked-accounts/:id/deactivate:", error);
@@ -5180,11 +5437,302 @@ router9.post("/unlinked-accounts/:id/reactivate", async (req, res) => {
   try {
     const account = await findUnlinkedAccount(id);
     if (!account) return res.status(404).json({ message: "Conta n\xE3o encontrada." });
-    await db2.update(users).set({ status: "active" }).where(eq13(users.id, id));
+    await db.update(users).set({ status: "active" }).where(eq13(users.id, id));
     res.status(204).end();
   } catch (error) {
     console.error("POST /api/platform/unlinked-accounts/:id/reactivate:", error);
     res.status(500).json({ message: "Erro ao reativar conta." });
+  }
+});
+function parsePeriod(query) {
+  const today = todaySaoPaulo();
+  const from = typeof query.from === "string" && query.from ? query.from : `${today.slice(0, 7)}-01`;
+  const to = typeof query.to === "string" && query.to ? query.to : today;
+  if (!isValidDate(from)) return { error: { field: "from", message: "Data inicial inv\xE1lida." } };
+  if (!isValidDate(to)) return { error: { field: "to", message: "Data final inv\xE1lida." } };
+  if (from > to) return { error: { field: "to", message: "A data final deve ser depois da inicial." } };
+  return { from, to };
+}
+var sumAmount = sql7`sum(${subscriptionPayments.amount})`;
+async function loadSubscribers(onlyId) {
+  const today = todaySaoPaulo();
+  const list = await db.select(subscriptionColumns).from(companies).where(onlyId ? eq13(companies.id, onlyId) : void 0).orderBy(asc(companies.name));
+  if (list.length === 0) return [];
+  const ids = list.map((c) => c.id);
+  const totals = await db.select({
+    companyId: subscriptionPayments.companyId,
+    total: sumAmount,
+    count: count(),
+    last: sql7`max(${subscriptionPayments.paidAt})::text`
+  }).from(subscriptionPayments).where(inArray(subscriptionPayments.companyId, ids)).groupBy(subscriptionPayments.companyId);
+  const members = await db.select({
+    companyId: companyMemberships.companyId,
+    role: companyMemberships.role,
+    since: companyMemberships.createdAt,
+    id: users.id,
+    fullName: users.fullName,
+    email: users.email,
+    lastLoginAt: users.lastLoginAt,
+    lastSeenAt: users.lastSeenAt
+  }).from(companyMemberships).innerJoin(users, eq13(companyMemberships.userId, users.id)).where(and10(inArray(companyMemberships.companyId, ids), eq13(companyMemberships.status, "active"))).orderBy(asc(users.fullName));
+  return list.map((c) => {
+    const paid = totals.find((t) => t.companyId === c.id);
+    const own = members.filter((m) => m.companyId === c.id);
+    const admins = own.filter((m) => m.role === "admin");
+    const lastSeen = own.reduce(
+      (best, m) => m.lastSeenAt && !isPlatformAdmin(m.email) && (!best?.lastSeenAt || m.lastSeenAt > best.lastSeenAt) ? m : best,
+      null
+    );
+    const subscriptionStartedAt = c.subscriptionStartedAt ?? saoPauloDate(c.createdAt);
+    const { logoUrl, createdAt, ...rest } = withSubscription(c);
+    return {
+      row: {
+        ...rest,
+        subscriptionStartedAt,
+        monthsSubscribed: monthsBetween(subscriptionStartedAt, today),
+        totalPaid: Number(paid?.total ?? 0),
+        paymentsCount: Number(paid?.count ?? 0),
+        lastPaymentAt: paid?.last ?? null,
+        membersCount: own.length,
+        lastAccessAt: lastSeen?.lastSeenAt ?? null,
+        lastAccessBy: lastSeen ? { id: lastSeen.id, fullName: lastSeen.fullName } : null,
+        admins: admins.map(({ id, fullName, email, lastLoginAt, lastSeenAt }) => ({ id, fullName, email, lastLoginAt, lastSeenAt }))
+      },
+      createdAt,
+      admins: admins.map(({ id, fullName, email, since, lastLoginAt, lastSeenAt }) => ({ id, fullName, email, since, lastLoginAt, lastSeenAt })),
+      // Every active member, most recent use first (never-seen last)
+      members: [...own].sort((a, b) => (b.lastSeenAt?.getTime() ?? -1) - (a.lastSeenAt?.getTime() ?? -1)).map(({ id, fullName, email, role, since, lastLoginAt, lastSeenAt }) => ({ id, fullName, email, role, since, lastLoginAt, lastSeenAt }))
+    };
+  });
+}
+var paymentColumns = {
+  id: subscriptionPayments.id,
+  amount: subscriptionPayments.amount,
+  paidAt: subscriptionPayments.paidAt,
+  referenceMonth: subscriptionPayments.referenceMonth,
+  monthsCovered: subscriptionPayments.monthsCovered,
+  method: subscriptionPayments.method,
+  notes: subscriptionPayments.notes,
+  validUntilAfter: subscriptionPayments.validUntilAfter,
+  createdAt: subscriptionPayments.createdAt,
+  createdById: subscriptionPayments.createdBy,
+  createdByName: users.fullName
+};
+var serializePayment = ({ createdById, createdByName, amount, ...p }) => ({
+  ...p,
+  amount: Number(amount),
+  createdBy: createdById ? { id: createdById, fullName: createdByName ?? "" } : null
+});
+router9.get("/overview", async (req, res) => {
+  const period = parsePeriod(req.query);
+  if (period.error) return res.status(400).json(period.error);
+  const { from, to } = period;
+  try {
+    const today = todaySaoPaulo();
+    const list = (await db.select(subscriptionColumns).from(companies).orderBy(asc(companies.name))).map(withSubscription);
+    const notSuspended = list.filter((c) => c.status !== "suspended");
+    const active = list.filter((c) => c.status === "active" && !c.accessExpired);
+    const withinMonth = (c) => !!c.accessValidUntil && daysBetween(today, c.accessValidUntil) <= 30;
+    const [sums] = await db.select({
+      period: sql7`sum(${subscriptionPayments.amount}) FILTER (WHERE ${subscriptionPayments.paidAt} BETWEEN ${from} AND ${to})`,
+      total: sumAmount
+    }).from(subscriptionPayments);
+    const months = lastTwelveMonths(today);
+    const byMonth = await db.select({ month: sql7`to_char(${subscriptionPayments.paidAt}, 'YYYY-MM')`, amount: sumAmount }).from(subscriptionPayments).where(gte3(subscriptionPayments.paidAt, `${months[0]}-01`)).groupBy(sql7`1`);
+    const mrrCents = active.reduce((acc, c) => acc + Math.round((c.monthlyPrice ?? 0) * 100), 0);
+    res.json({
+      companies: {
+        total: list.length,
+        active: active.length,
+        expired: list.filter((c) => c.status === "active" && c.accessExpired).length,
+        expiringSoon: active.filter(withinMonth).length,
+        suspended: list.filter((c) => c.status === "suspended").length
+      },
+      revenue: { period: Number(sums?.period ?? 0), total: Number(sums?.total ?? 0), mrr: mrrCents / 100 },
+      revenueByMonth: months.map((month) => ({ month, amount: Number(byMonth.find((m) => m.month === month)?.amount ?? 0) })),
+      plans: [...SUBSCRIPTION_PLANS, null].map((plan) => ({ plan, count: notSuspended.filter((c) => (c.plan ?? null) === plan).length })),
+      upcoming: notSuspended.filter(withinMonth).sort((a, b) => a.accessValidUntil.localeCompare(b.accessValidUntil)).map((c) => ({
+        id: c.id,
+        name: c.name,
+        accessValidUntil: c.accessValidUntil,
+        accessExpired: c.accessExpired,
+        daysLeft: daysBetween(today, c.accessValidUntil)
+      }))
+    });
+  } catch (error) {
+    console.error("GET /api/platform/overview:", error);
+    res.status(500).json({ message: "Erro ao carregar o painel." });
+  }
+});
+router9.get("/subscribers", async (_req, res) => {
+  try {
+    res.json((await loadSubscribers()).map((s) => s.row));
+  } catch (error) {
+    console.error("GET /api/platform/subscribers:", error);
+    res.status(500).json({ message: "Erro ao carregar assinantes." });
+  }
+});
+router9.get("/companies/:id/subscription", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ message: "Empresa inv\xE1lida." });
+  try {
+    const [subscriber] = await loadSubscribers(id);
+    if (!subscriber) return res.status(404).json({ message: "Empresa n\xE3o encontrada." });
+    const payments = await db.select(paymentColumns).from(subscriptionPayments).leftJoin(users, eq13(subscriptionPayments.createdBy, users.id)).where(eq13(subscriptionPayments.companyId, id)).orderBy(desc4(subscriptionPayments.paidAt), desc4(subscriptionPayments.id));
+    const events = await db.select({
+      id: subscriptionEvents.id,
+      type: subscriptionEvents.type,
+      details: subscriptionEvents.details,
+      createdAt: subscriptionEvents.createdAt,
+      userId: subscriptionEvents.userId,
+      userName: users.fullName
+    }).from(subscriptionEvents).leftJoin(users, eq13(subscriptionEvents.userId, users.id)).where(eq13(subscriptionEvents.companyId, id)).orderBy(desc4(subscriptionEvents.createdAt), desc4(subscriptionEvents.id));
+    const [tracking] = await db.select({ since: sql7`min(${users.lastSeenAt})` }).from(users);
+    res.json({
+      company: { ...subscriber.row, createdAt: subscriber.createdAt },
+      admins: subscriber.admins,
+      members: subscriber.members,
+      // When access tracking started (the earliest recorded use), for "Sem registro ainda"
+      accessTrackingSince: tracking?.since ?? null,
+      payments: payments.map(serializePayment),
+      events: events.map(({ userId, userName, ...e }) => ({ ...e, user: userId ? { id: userId, fullName: userName ?? "" } : null }))
+    });
+  } catch (error) {
+    console.error("GET /api/platform/companies/:id/subscription:", error);
+    res.status(500).json({ message: "Erro ao carregar a assinatura." });
+  }
+});
+var paymentSchema = z8.object({
+  amount: z8.number({ required_error: "Informe o valor.", invalid_type_error: "Informe o valor." }).positive("O valor deve ser maior que zero.").max(9999999999e-2, "Valor muito alto."),
+  paidAt: dateSchema("Data do pagamento inv\xE1lida."),
+  referenceMonth: z8.string({ required_error: "Informe o m\xEAs de refer\xEAncia.", invalid_type_error: "M\xEAs de refer\xEAncia inv\xE1lido." }).regex(/^\d{4}-(0[1-9]|1[0-2])$/, "M\xEAs de refer\xEAncia inv\xE1lido."),
+  monthsCovered: z8.number({ invalid_type_error: "Quantidade de meses inv\xE1lida." }).int("Quantidade de meses inv\xE1lida.").min(1, "Quantidade de meses inv\xE1lida.").max(36, "No m\xE1ximo 36 meses por pagamento.").default(1),
+  method: z8.enum(SUBSCRIPTION_PAYMENT_METHODS, { message: "Forma de pagamento inv\xE1lida." }),
+  notes: z8.string({ invalid_type_error: "Observa\xE7\xE3o inv\xE1lida." }).trim().max(500, "Observa\xE7\xE3o muito longa (m\xE1x. 500 caracteres).").nullable().optional(),
+  extendValidity: z8.boolean({ invalid_type_error: "Op\xE7\xE3o de validade inv\xE1lida." }).default(true)
+});
+router9.post("/companies/:id/payments", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ message: "Empresa inv\xE1lida." });
+  const parsed = paymentSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json(zodError(parsed.error));
+  const { amount, paidAt, referenceMonth, monthsCovered, method, notes, extendValidity } = parsed.data;
+  try {
+    const result = await db.transaction(async (tx) => {
+      const [company] = await tx.select({ accessValidUntil: companies.accessValidUntil }).from(companies).where(eq13(companies.id, id)).for("update");
+      if (!company) return void 0;
+      const before = company.accessValidUntil;
+      let after = before;
+      if (extendValidity) {
+        const today = todaySaoPaulo();
+        after = addMonths(before && before > today ? before : today, monthsCovered);
+        await tx.update(companies).set({ accessValidUntil: after }).where(eq13(companies.id, id));
+      }
+      const [payment2] = await tx.insert(subscriptionPayments).values({
+        companyId: id,
+        amount: amount.toFixed(2),
+        paidAt,
+        referenceMonth,
+        monthsCovered,
+        method,
+        notes: notes || null,
+        validUntilAfter: after,
+        createdBy: req.user.id
+      }).returning();
+      await recordSubscriptionEvent(
+        id,
+        "payment_added",
+        { paymentId: payment2.id, amount: Number(payment2.amount), paidAt, referenceMonth, monthsCovered, method, validUntilBefore: before, validUntilAfter: after },
+        req.user.id,
+        tx
+      );
+      return { payment: payment2, accessValidUntil: after };
+    });
+    if (!result) return res.status(404).json({ message: "Empresa n\xE3o encontrada." });
+    const { companyId, createdBy, ...payment } = result.payment;
+    res.status(201).json({
+      payment: serializePayment({ ...payment, createdById: createdBy, createdByName: req.user.fullName }),
+      accessValidUntil: result.accessValidUntil
+    });
+  } catch (error) {
+    console.error("POST /api/platform/companies/:id/payments:", error);
+    res.status(500).json({ message: "Erro ao registrar pagamento." });
+  }
+});
+router9.delete("/companies/:id/payments/:paymentId", async (req, res) => {
+  const id = parseId(req.params.id);
+  const paymentId = parseId(req.params.paymentId);
+  if (!id || !paymentId) return res.status(400).json({ message: "Pagamento inv\xE1lido." });
+  try {
+    const [deleted] = await db.delete(subscriptionPayments).where(and10(eq13(subscriptionPayments.id, paymentId), eq13(subscriptionPayments.companyId, id))).returning();
+    if (!deleted) return res.status(404).json({ message: "Pagamento n\xE3o encontrado." });
+    await recordSubscriptionEvent(
+      id,
+      "payment_removed",
+      {
+        paymentId: deleted.id,
+        amount: Number(deleted.amount),
+        paidAt: deleted.paidAt,
+        referenceMonth: deleted.referenceMonth,
+        monthsCovered: deleted.monthsCovered,
+        method: deleted.method,
+        notes: deleted.notes,
+        validUntilAfter: deleted.validUntilAfter
+      },
+      req.user.id
+    );
+    res.status(204).end();
+  } catch (error) {
+    console.error("DELETE /api/platform/companies/:id/payments/:paymentId:", error);
+    res.status(500).json({ message: "Erro ao remover pagamento." });
+  }
+});
+router9.get("/payments", async (req, res) => {
+  const period = parsePeriod(req.query);
+  if (period.error) return res.status(400).json(period.error);
+  try {
+    const rows = await db.select({ ...paymentColumns, companyId: companies.id, companyName: companies.name }).from(subscriptionPayments).innerJoin(companies, eq13(subscriptionPayments.companyId, companies.id)).leftJoin(users, eq13(subscriptionPayments.createdBy, users.id)).where(and10(gte3(subscriptionPayments.paidAt, period.from), lte3(subscriptionPayments.paidAt, period.to))).orderBy(desc4(subscriptionPayments.paidAt), desc4(subscriptionPayments.id));
+    res.json(rows.map(({ companyId, companyName, ...p }) => ({ ...serializePayment(p), company: { id: companyId, name: companyName } })));
+  } catch (error) {
+    console.error("GET /api/platform/payments:", error);
+    res.status(500).json({ message: "Erro ao carregar pagamentos." });
+  }
+});
+router9.get("/admins", async (_req, res) => {
+  try {
+    const rows = await db.select({
+      id: users.id,
+      fullName: users.fullName,
+      email: users.email,
+      createdAt: users.createdAt,
+      clinicId: companies.id,
+      clinicName: companies.name,
+      clinicStatus: companies.status,
+      since: companyMemberships.createdAt,
+      accessValidUntil: companies.accessValidUntil,
+      lastLoginAt: users.lastLoginAt,
+      lastSeenAt: users.lastSeenAt
+    }).from(companyMemberships).innerJoin(users, eq13(companyMemberships.userId, users.id)).innerJoin(companies, eq13(companyMemberships.companyId, companies.id)).where(and10(eq13(companyMemberships.role, "admin"), eq13(companyMemberships.status, "active"))).orderBy(asc(users.fullName), asc(users.id), asc(companies.name));
+    const admins = /* @__PURE__ */ new Map();
+    for (const r of rows) {
+      let admin = admins.get(r.id);
+      if (!admin) {
+        admin = { id: r.id, fullName: r.fullName, email: r.email, createdAt: r.createdAt, lastLoginAt: r.lastLoginAt, lastSeenAt: r.lastSeenAt, clinics: [] };
+        admins.set(r.id, admin);
+      }
+      admin.clinics.push({
+        id: r.clinicId,
+        name: r.clinicName,
+        status: r.clinicStatus,
+        since: r.since,
+        accessValidUntil: r.accessValidUntil,
+        accessExpired: isAccessExpired(r.accessValidUntil)
+      });
+    }
+    res.json(Array.from(admins.values()));
+  } catch (error) {
+    console.error("GET /api/platform/admins:", error);
+    res.status(500).json({ message: "Erro ao carregar administradores." });
   }
 });
 var platform_default = router9;
@@ -5194,7 +5742,7 @@ import { Router as Router10 } from "express";
 import multer4 from "multer";
 import { inArray as inArray3 } from "drizzle-orm";
 import { toFile } from "groq-sdk";
-import { z as z8 } from "zod";
+import { z as z9 } from "zod";
 
 // server/agent/context.ts
 import { eq as eq14 } from "drizzle-orm";
@@ -5211,7 +5759,7 @@ function describeNow(now) {
 async function agentContext(req) {
   const companyId = req.companyId;
   const user = req.user;
-  const [company] = await db2.select({ name: companies.name }).from(companies).where(eq14(companies.id, companyId));
+  const [company] = await db.select({ name: companies.name }).from(companies).where(eq14(companies.id, companyId));
   const own = user.role === "psychologist" ? await storage.getPsychologistByUserId(companyId, user.id) : void 0;
   const now = /* @__PURE__ */ new Date();
   return {
@@ -5227,7 +5775,7 @@ async function agentContext(req) {
 }
 
 // server/agent/actions.ts
-import { and as and12, eq as eq15, inArray as inArray2 } from "drizzle-orm";
+import { and as and11, eq as eq16, inArray as inArray2 } from "drizzle-orm";
 
 // server/lib/room-bookings.ts
 var BookingError = class extends Error {
@@ -5257,6 +5805,102 @@ async function checkRoomBooking(companyId, data) {
 }
 async function createRoomBookingChecked(companyId, data) {
   return storage.createRoomBooking(companyId, await checkRoomBooking(companyId, data));
+}
+
+// server/lib/calendar-sync.ts
+import { eq as eq15 } from "drizzle-orm";
+var stores = {
+  appointment: {
+    table: calendarEvents,
+    find: async (id) => (await db.select().from(calendarEvents).where(eq15(calendarEvents.appointmentId, id)))[0],
+    insert: (id, googleEventId, userId) => db.insert(calendarEvents).values({ appointmentId: id, googleEventId, userId })
+  },
+  booking: {
+    table: roomBookingEvents,
+    find: async (id) => (await db.select().from(roomBookingEvents).where(eq15(roomBookingEvents.bookingId, id)))[0],
+    insert: (id, googleEventId, userId) => db.insert(roomBookingEvents).values({ bookingId: id, googleEventId, userId })
+  }
+};
+var hhmmss = (t) => t.length === 5 ? `${t}:00` : t.slice(0, 8);
+var times = (r) => ({
+  startDateTime: `${r.date}T${hhmmss(r.startTime)}`,
+  endDateTime: `${r.date}T${hhmmss(r.endTime)}`
+});
+async function drop(kind, id) {
+  const store = stores[kind];
+  const row = await store.find(id);
+  if (!row) return;
+  await deleteCalendarEvent(row.userId, row.googleEventId);
+  await db.delete(store.table).where(eq15(store.table.id, row.id));
+}
+async function upsert(kind, id, companyId, psychologistId, event) {
+  const store = stores[kind];
+  const userId = (await storage.getPsychologist(companyId, psychologistId))?.userId;
+  const existing = await store.find(id);
+  if (existing && existing.userId !== userId) await drop(kind, id);
+  if (!userId || !await isUserAuthenticated(userId)) {
+    console.log(`Google Calendar: ${kind} ${id} n\xE3o enviado \u2014 a psic\xF3loga ${psychologistId} (usu\xE1rio ${userId ?? "nenhum"}) n\xE3o conectou o Google Calendar`);
+    return "not_connected";
+  }
+  const current = existing && existing.userId === userId ? existing : void 0;
+  if (current && await updateCalendarEvent(userId, current.googleEventId, event)) {
+    await db.update(store.table).set({ lastSynced: /* @__PURE__ */ new Date() }).where(eq15(store.table.id, current.id));
+    console.log(`Google Calendar: ${kind} ${id} atualizado na agenda do usu\xE1rio ${userId}`);
+    return "synced";
+  }
+  const googleEventId = await addEventToCalendar(userId, event);
+  if (!googleEventId) {
+    console.error(`Google Calendar: n\xE3o foi poss\xEDvel criar o evento (${kind} ${id}, usu\xE1rio ${userId})`);
+    return "failed";
+  }
+  if (current) await db.update(store.table).set({ googleEventId, lastSynced: /* @__PURE__ */ new Date() }).where(eq15(store.table.id, current.id));
+  else await store.insert(id, googleEventId, userId);
+  console.log(`Google Calendar: ${kind} ${id} criado na agenda do usu\xE1rio ${userId}`);
+  return "synced";
+}
+async function safely(what, fn) {
+  try {
+    return await fn() ?? "removed";
+  } catch (error) {
+    console.error(`Google Calendar: falha ao sincronizar ${what}:`, error);
+    return "failed";
+  }
+}
+function syncAppointmentToCalendar(companyId, appointment) {
+  return safely(`a consulta ${appointment.id}`, async () => {
+    if (appointment.status === "canceled" || appointment.status === "cancelled") return drop("appointment", appointment.id);
+    const room = await storage.getRoom(companyId, appointment.roomId);
+    const type = appointment.sessionType ? ` (${appointment.sessionType})` : "";
+    const pending = appointment.status === "pending-confirmation" ? " \u2013 a confirmar" : "";
+    return upsert("appointment", appointment.id, companyId, appointment.psychologistId, {
+      summary: `Consulta: ${appointment.patientName}${type}${pending}`,
+      description: "Consulta agendada no ConsultaPsi.",
+      location: room?.name ?? (appointment.roomId === 0 ? "Online" : void 0),
+      ...times(appointment)
+    });
+  });
+}
+async function removeAppointmentFromCalendar(appointmentId) {
+  await safely(`a consulta ${appointmentId}`, () => drop("appointment", appointmentId));
+  await db.delete(calendarEvents).where(eq15(calendarEvents.appointmentId, appointmentId));
+}
+var fromAppointment = (b) => /^(Appointment with|Agendamento online com) /.test(b.purpose ?? "");
+function syncRoomBookingToCalendar(companyId, booking) {
+  return safely(`a reserva ${booking.id}`, async () => {
+    if (fromAppointment(booking)) return "skipped";
+    const room = await storage.getRoom(companyId, booking.roomId);
+    const roomName = room?.name ?? "Sala";
+    return upsert("booking", booking.id, companyId, booking.psychologistId, {
+      summary: `Reserva: ${roomName}`,
+      description: booking.purpose ? `Reserva de sala no ConsultaPsi.
+Finalidade: ${booking.purpose}` : "Reserva de sala no ConsultaPsi.",
+      location: roomName,
+      ...times(booking)
+    });
+  });
+}
+function removeRoomBookingFromCalendar(bookingId) {
+  return safely(`a reserva ${bookingId}`, () => drop("booking", bookingId));
 }
 
 // server/agent/actions.ts
@@ -5323,7 +5967,7 @@ async function proposeBookingCancel(ctx, conversationId, bookingId) {
   return insertAction(ctx, conversationId, "room_booking.cancel", payload);
 }
 async function insertAction(ctx, conversationId, type, payload) {
-  const [action] = await db2.insert(agentActions).values({ companyId: ctx.companyId, userId: ctx.userId, conversationId, type, payload }).returning();
+  const [action] = await db.insert(agentActions).values({ companyId: ctx.companyId, userId: ctx.userId, conversationId, type, payload }).returning();
   return action;
 }
 function presentAction(action) {
@@ -5338,7 +5982,7 @@ function presentAction(action) {
   };
 }
 async function ownAction(ctx, id) {
-  const [action] = await db2.select().from(agentActions).where(and12(eq15(agentActions.id, id), eq15(agentActions.companyId, ctx.companyId), eq15(agentActions.userId, ctx.userId)));
+  const [action] = await db.select().from(agentActions).where(and11(eq16(agentActions.id, id), eq16(agentActions.companyId, ctx.companyId), eq16(agentActions.userId, ctx.userId)));
   if (!action) throw new ActionError("A\xE7\xE3o n\xE3o encontrada.", 404);
   if (action.status !== "pending") throw new ActionError("Esta a\xE7\xE3o j\xE1 foi resolvida.", 409);
   if (presentAction(action).status === "expired") {
@@ -5348,12 +5992,12 @@ async function ownAction(ctx, id) {
   return action;
 }
 async function resolve(id, status, result, from = "pending") {
-  const [row] = await db2.update(agentActions).set({ status, result, resolvedAt: status === "processing" ? null : /* @__PURE__ */ new Date() }).where(and12(eq15(agentActions.id, id), eq15(agentActions.status, from))).returning();
+  const [row] = await db.update(agentActions).set({ status, result, resolvedAt: status === "processing" ? null : /* @__PURE__ */ new Date() }).where(and11(eq16(agentActions.id, id), eq16(agentActions.status, from))).returning();
   return row;
 }
 async function note(action, content) {
-  const [message] = await db2.insert(agentMessages).values({ conversationId: action.conversationId, role: "assistant", content, actionId: action.id }).returning();
-  await db2.update(agentConversations).set({ updatedAt: /* @__PURE__ */ new Date() }).where(eq15(agentConversations.id, action.conversationId));
+  const [message] = await db.insert(agentMessages).values({ conversationId: action.conversationId, role: "assistant", content, actionId: action.id }).returning();
+  await db.update(agentConversations).set({ updatedAt: /* @__PURE__ */ new Date() }).where(eq16(agentConversations.id, action.conversationId));
   return message;
 }
 var when = (p) => `${p.date.split("-").reverse().join("/")} das ${p.startTime.slice(0, 5)} \xE0s ${p.endTime.slice(0, 5)}`;
@@ -5366,13 +6010,16 @@ async function confirmAction(ctx, id) {
       const p = action.payload;
       const booking = await storage.createRoomBooking(ctx.companyId, await checkBooking(ctx, p));
       await audit(ctx, "agent_room_booking_create", booking.id, p);
+      await syncRoomBookingToCalendar(ctx.companyId, booking);
       const done = await finish("confirmed", { bookingId: booking.id });
       return { action: presentAction(done ?? action), message: await note(action, `Reserva feita: ${p.roomName} para ${p.psychologistName}, ${when(p)}.`) };
     }
     if (action.type === "room_booking.cancel") {
       const p = action.payload;
-      const inPayout = await db2.select({ id: commissionItems.id }).from(commissionItems).where(inArray2(commissionItems.bookingId, [p.bookingId]));
+      const inPayout = await db.select({ id: commissionItems.id }).from(commissionItems).where(inArray2(commissionItems.bookingId, [p.bookingId]));
       if (inPayout.length) throw new BookingError("Esta reserva j\xE1 entrou em um repasse e n\xE3o pode ser cancelada por aqui.", 409);
+      if (!await storage.getRoomBooking(ctx.companyId, p.bookingId)) throw new BookingError("Essa reserva n\xE3o existe mais.", 409);
+      await removeRoomBookingFromCalendar(p.bookingId);
       if (!await storage.deleteRoomBooking(ctx.companyId, p.bookingId)) throw new BookingError("Essa reserva n\xE3o existe mais.", 409);
       await audit(ctx, "agent_room_booking_cancel", p.bookingId, p);
       const done = await finish("confirmed", { bookingId: p.bookingId });
@@ -5409,7 +6056,7 @@ async function audit(ctx, action, bookingId, details) {
 }
 
 // server/agent/runner.ts
-import { and as and13, asc as asc2, desc as desc5, eq as eq16, gt, gte as gte3, sql as sql7 } from "drizzle-orm";
+import { and as and12, asc as asc2, desc as desc5, eq as eq17, gt, gte as gte4, sql as sql8 } from "drizzle-orm";
 
 // server/agent/prompt.ts
 var ROLE_NAMES = { admin: "administrador(a)", psychologist: "psic\xF3loga", receptionist: "recepcionista" };
@@ -5750,30 +6397,30 @@ var complete = async ({ messages, tools: tools2 }, timeoutMs) => {
   }
 };
 async function currentConversation(ctx, create) {
-  const [conv] = await db2.select().from(agentConversations).where(and13(eq16(agentConversations.userId, ctx.userId), eq16(agentConversations.companyId, ctx.companyId))).orderBy(desc5(agentConversations.updatedAt), desc5(agentConversations.id)).limit(1);
+  const [conv] = await db.select().from(agentConversations).where(and12(eq17(agentConversations.userId, ctx.userId), eq17(agentConversations.companyId, ctx.companyId))).orderBy(desc5(agentConversations.updatedAt), desc5(agentConversations.id)).limit(1);
   if (conv || !create) return conv;
   return newConversation(ctx);
 }
 async function newConversation(ctx) {
-  const [conv] = await db2.insert(agentConversations).values({ companyId: ctx.companyId, userId: ctx.userId }).returning();
+  const [conv] = await db.insert(agentConversations).values({ companyId: ctx.companyId, userId: ctx.userId }).returning();
   return conv;
 }
 async function messagesLastHour(ctx) {
-  const [row] = await db2.select({ n: sql7`count(*)` }).from(agentMessages).innerJoin(agentConversations, eq16(agentConversations.id, agentMessages.conversationId)).where(
-    and13(
-      eq16(agentConversations.userId, ctx.userId),
-      eq16(agentMessages.role, "user"),
+  const [row] = await db.select({ n: sql8`count(*)` }).from(agentMessages).innerJoin(agentConversations, eq17(agentConversations.id, agentMessages.conversationId)).where(
+    and12(
+      eq17(agentConversations.userId, ctx.userId),
+      eq17(agentMessages.role, "user"),
       gt(agentMessages.createdAt, new Date(Date.now() - 60 * 60 * 1e3))
     )
   );
   return Number(row?.n ?? 0);
 }
 async function save(conversationId, values) {
-  const [row] = await db2.insert(agentMessages).values({ ...values, conversationId }).returning();
+  const [row] = await db.insert(agentMessages).values({ ...values, conversationId }).returning();
   return row;
 }
 async function history(conversationId) {
-  const rows = (await db2.select().from(agentMessages).where(eq16(agentMessages.conversationId, conversationId)).orderBy(desc5(agentMessages.id)).limit(HISTORY)).reverse();
+  const rows = (await db.select().from(agentMessages).where(eq17(agentMessages.conversationId, conversationId)).orderBy(desc5(agentMessages.id)).limit(HISTORY)).reverse();
   const first = rows.findIndex((m) => m.role === "user");
   return (first < 0 ? [] : rows.slice(first)).map(toChat);
 }
@@ -5816,7 +6463,7 @@ async function runAgent(ctx, conversationId, text3, viaAudio) {
       }
     }
   } catch (error) {
-    await db2.delete(agentMessages).where(and13(eq16(agentMessages.conversationId, conversationId), gte3(agentMessages.id, userMessage.id)));
+    await db.delete(agentMessages).where(and12(eq17(agentMessages.conversationId, conversationId), gte4(agentMessages.id, userMessage.id)));
     throw error;
   }
   reply ??= await save(conversationId, {
@@ -5824,11 +6471,11 @@ async function runAgent(ctx, conversationId, text3, viaAudio) {
     content: "N\xE3o consegui concluir esse pedido. Pode tentar de um jeito mais simples?",
     actionId
   });
-  await db2.update(agentConversations).set({ updatedAt: /* @__PURE__ */ new Date() }).where(eq16(agentConversations.id, conversationId));
+  await db.update(agentConversations).set({ updatedAt: /* @__PURE__ */ new Date() }).where(eq17(agentConversations.id, conversationId));
   return { userMessage, reply };
 }
 async function visibleMessages(conversationId) {
-  const rows = await db2.select().from(agentMessages).where(eq16(agentMessages.conversationId, conversationId)).orderBy(asc2(agentMessages.id));
+  const rows = await db.select().from(agentMessages).where(eq17(agentMessages.conversationId, conversationId)).orderBy(asc2(agentMessages.id));
   return rows.filter(
     (m) => m.role === "user" || m.role === "assistant" && m.content.trim() && !m.toolCalls?.length
   );
@@ -5854,10 +6501,9 @@ var upload2 = multer4({
   limits: { fileSize: 4 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => cb(null, AUDIO_TYPES.includes(file.mimetype.split(";")[0]))
 });
-var enabled = () => !!process.env.GROQ_API_KEY;
 async function present(messages) {
   const ids = Array.from(new Set(messages.map((m) => m.actionId).filter((id) => !!id)));
-  const actions = ids.length ? await db2.select().from(agentActions).where(inArray3(agentActions.id, ids)) : [];
+  const actions = ids.length ? await db.select().from(agentActions).where(inArray3(agentActions.id, ids)) : [];
   const byId = new Map(actions.map((a) => [a.id, presentAction(a)]));
   return messages.map((m) => ({
     id: m.id,
@@ -5874,9 +6520,10 @@ function aiError(res, error, context) {
   console.error(context, error);
   return res.status(500).json({ message: "Erro no assistente. Tente de novo." });
 }
-router10.get("/status", (_req, res) => {
-  res.json({ enabled: enabled() });
+router10.get("/status", (req, res) => {
+  res.json({ enabled: aiAllowed(req) });
 });
+router10.use(requireAi);
 router10.get("/conversation", async (req, res) => {
   try {
     const ctx = await agentContext(req);
@@ -5894,12 +6541,12 @@ router10.post("/conversation/new", async (req, res) => {
     aiError(res, error, "POST /api/agent/conversation/new:");
   }
 });
-var messageSchema = z8.object({
-  text: z8.string().trim().min(1, "Escreva uma mensagem.").max(2e3, "Mensagem muito longa (m\xE1ximo de 2000 caracteres)."),
-  viaAudio: z8.boolean().optional()
+var messageSchema = z9.object({
+  text: z9.string().trim().min(1, "Escreva uma mensagem.").max(2e3, "Mensagem muito longa (m\xE1ximo de 2000 caracteres)."),
+  viaAudio: z9.boolean().optional()
 });
 router10.post("/messages", async (req, res) => {
-  if (!enabled()) return res.status(503).json({ message: "O assistente n\xE3o est\xE1 configurado." });
+  if (!process.env.GROQ_API_KEY) return res.status(503).json({ message: "O assistente n\xE3o est\xE1 configurado." });
   const parsed = messageSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0].message });
   try {
@@ -5916,7 +6563,7 @@ router10.post("/messages", async (req, res) => {
   }
 });
 router10.post("/transcribe", (req, res) => {
-  if (!enabled()) return res.status(503).json({ message: "O assistente n\xE3o est\xE1 configurado." });
+  if (!process.env.GROQ_API_KEY) return res.status(503).json({ message: "O assistente n\xE3o est\xE1 configurado." });
   upload2.single("audio")(req, res, async (err) => {
     if (err) {
       const tooBig = err instanceof multer4.MulterError && err.code === "LIMIT_FILE_SIZE";
@@ -5967,23 +6614,494 @@ for (const verb of ["confirm", "cancel"]) {
 }
 var agent_default = router10;
 
-// server/routes/care-templates.ts
+// server/routes/whatsapp.ts
 import { Router as Router11 } from "express";
-import { eq as eq17, or as or2, isNull as isNull5, and as and14, count as count2 } from "drizzle-orm";
-import { z as z9 } from "zod";
+import { z as z10 } from "zod";
+import { and as and14, eq as eq20, ne as ne4 } from "drizzle-orm";
+
+// shared/whatsapp-message.ts
+var MESSAGE_KEYS = ["appointment_reminder"];
+var MESSAGE_MAX_LENGTH = 2e3;
+var DEFAULT_MESSAGES = {
+  appointment_reminder: [
+    "Ol\xE1, {paciente}! \u{1F60A}",
+    "",
+    "Passando para lembrar da sua consulta com *{psicologa}*:",
+    "",
+    "\u{1F4C5} *{dia_semana}, {data}*",
+    "\u{1F550} *{horario}*",
+    "\u{1F4CD} {sala}",
+    "",
+    "Pode confirmar sua presen\xE7a respondendo esta mensagem?",
+    "",
+    "_{clinica}_"
+  ].join("\n")
+};
+function fillMessage(body, vars) {
+  return body.replace(/\{([a-z_]+)\}/g, (m, name) => name in vars ? vars[name] : m);
+}
+
+// server/lib/patient-phone.ts
+import { eq as eq18 } from "drizzle-orm";
+var normalizeName = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+async function patientIndex(companyId) {
+  const rows = await db.select({ id: patients.id, fullName: patients.fullName, phone: patients.phone, psychologistId: patients.psychologistId }).from(patients).where(eq18(patients.companyId, companyId));
+  const byName = /* @__PURE__ */ new Map();
+  for (const p of rows) {
+    const k = normalizeName(p.fullName);
+    byName.set(k, [...byName.get(k) ?? [], p]);
+  }
+  return byName;
+}
+function findPhone(appt, byName) {
+  let found = byName.get(normalizeName(appt.patientName)) ?? [];
+  if (found.length === 0) return { patientId: null, phone: null, issue: "not_found" };
+  if (found.length > 1) {
+    const own = found.filter((p) => p.psychologistId === appt.psychologistId);
+    if (own.length > 0) found = own;
+  }
+  const phones = Array.from(new Set(found.map((p) => formatPhoneNumber(p.phone ?? "")).filter((p) => !!p)));
+  const patientId = found.length === 1 ? found[0].id : null;
+  if (phones.length === 1) return { patientId: found[0].id, phone: phones[0], issue: null };
+  if (phones.length > 1) return { patientId, phone: null, issue: "ambiguous" };
+  return { patientId, phone: null, issue: found.some((p) => p.phone?.trim()) ? "invalid" : "no_phone" };
+}
+var PHONE_ISSUE_TEXT = {
+  not_found: "Paciente n\xE3o encontrado no cadastro de pacientes",
+  no_phone: "Cadastro do paciente sem telefone",
+  invalid: "Telefone do cadastro incompleto",
+  ambiguous: "Mais de um paciente com esse nome e telefones diferentes"
+};
+
+// server/lib/auto-reminders.ts
+import { and as and13, eq as eq19, gte as gte5, isNull as isNull5, lte as lte4, notInArray, or as or2, sql as sql9 } from "drizzle-orm";
+
+// server/services/twilio.ts
+import { createHmac as createHmac2, timingSafeEqual as timingSafeEqual2 } from "crypto";
+var API = "https://api.twilio.com/2010-04-01";
+var isTwilioConfigured = () => !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM);
+async function sendWhatsApp(p) {
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  const form = new URLSearchParams({ To: `whatsapp:+${p.to}`, From: process.env.TWILIO_WHATSAPP_FROM });
+  if (p.contentSid) {
+    form.set("ContentSid", p.contentSid);
+    form.set("ContentVariables", JSON.stringify(p.contentVariables ?? {}));
+  } else {
+    form.set("Body", p.body ?? "");
+  }
+  if (p.statusCallback) form.set("StatusCallback", p.statusCallback);
+  try {
+    const res = await fetch(`${API}/Accounts/${sid}/Messages.json`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${sid}:${token}`).toString("base64")}`,
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: form
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.sid) return { ok: false, error: `${data.code ?? res.status}: ${data.message ?? res.statusText}` };
+    return { ok: true, sid: data.sid, status: data.status ?? "queued" };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+}
+function isValidTwilioSignature(url, params, signature) {
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  if (!token || !signature) return false;
+  const data = Object.keys(params).sort().reduce((acc, key) => acc + key + params[key], url);
+  const expected = createHmac2("sha1", token).update(data).digest("base64");
+  const a = Buffer.from(expected);
+  const b = Buffer.from(signature);
+  return a.length === b.length && timingSafeEqual2(a, b);
+}
+
+// server/lib/auto-reminders.ts
+var REMINDER_KIND = "appointment_reminder";
+var LEAD_HOURS = [24, 12, 2];
+var MAX_PER_RUN = 40;
+var SKIP_STATUSES = ["canceled", "completed"];
+var startsAt = (date3, time3) => /* @__PURE__ */ new Date(`${date3}T${time3.slice(0, 5)}:00-03:00`);
+var spDate = (d) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(d);
+async function runAutoReminders(now = /* @__PURE__ */ new Date()) {
+  const summary = { configured: isTwilioConfigured(), clinics: 0, sent: 0, skipped: 0, failed: 0 };
+  if (!summary.configured) return summary;
+  const today = spDate(now);
+  const clinics = await db.select({ id: companies.id, name: companies.name, leadHours: companies.reminderLeadHours }).from(companies).where(
+    and13(
+      eq19(companies.whatsappAutoReminders, true),
+      eq19(companies.status, "active"),
+      or2(isNull5(companies.accessValidUntil), gte5(companies.accessValidUntil, today))
+    )
+  );
+  summary.clinics = clinics.length;
+  let budget = MAX_PER_RUN;
+  for (const clinic of clinics) {
+    if (budget <= 0) break;
+    const lead = clinic.leadHours * 36e5;
+    const until = spDate(new Date(now.getTime() + lead));
+    const rows = await db.select({
+      id: appointments.id,
+      patientName: appointments.patientName,
+      psychologistId: appointments.psychologistId,
+      date: appointments.date,
+      startTime: appointments.startTime
+    }).from(appointments).leftJoin(
+      whatsappMessages,
+      and13(eq19(whatsappMessages.appointmentId, appointments.id), eq19(whatsappMessages.kind, REMINDER_KIND))
+    ).where(
+      and13(
+        eq19(appointments.companyId, clinic.id),
+        gte5(appointments.date, today),
+        lte4(appointments.date, until),
+        notInArray(appointments.status, SKIP_STATUSES),
+        or2(isNull5(whatsappMessages.id), eq19(whatsappMessages.status, "skipped"))
+      )
+    ).orderBy(appointments.date, appointments.startTime);
+    const due = rows.filter((a) => {
+      const ms = startsAt(String(a.date).slice(0, 10), String(a.startTime)).getTime() - now.getTime();
+      return ms > 0 && ms <= lead;
+    });
+    if (due.length === 0) continue;
+    const byName = await patientIndex(clinic.id);
+    const [custom] = await db.select({ body: messageTemplates.body }).from(messageTemplates).where(and13(eq19(messageTemplates.companyId, clinic.id), eq19(messageTemplates.key, REMINDER_KIND)));
+    const freeText = custom?.body ?? DEFAULT_MESSAGES.appointment_reminder;
+    for (const a of due) {
+      if (budget <= 0) break;
+      const { phone, issue } = findPhone(a, byName);
+      const [claimed] = await db.insert(whatsappMessages).values({ companyId: clinic.id, appointmentId: a.id, kind: REMINDER_KIND, toPhone: phone, status: "sending" }).onConflictDoUpdate({
+        target: [whatsappMessages.appointmentId, whatsappMessages.kind],
+        set: { status: "sending", toPhone: phone, error: null, updatedAt: /* @__PURE__ */ new Date() },
+        where: eq19(whatsappMessages.status, "skipped")
+      }).returning({ id: whatsappMessages.id });
+      if (!claimed) continue;
+      if (!phone) {
+        await db.update(whatsappMessages).set({ status: "skipped", error: PHONE_ISSUE_TEXT[issue ?? "no_phone"], updatedAt: /* @__PURE__ */ new Date() }).where(eq19(whatsappMessages.id, claimed.id));
+        summary.skipped++;
+        continue;
+      }
+      budget--;
+      const date3 = String(a.date).slice(0, 10);
+      const noon = /* @__PURE__ */ new Date(`${date3}T12:00:00Z`);
+      const firstName = a.patientName.trim().split(/\s+/)[0] ?? "";
+      const day2 = `${noon.toLocaleDateString("pt-BR", { weekday: "long", timeZone: "UTC" })}, ${noon.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "UTC" })}`;
+      const time3 = String(a.startTime).slice(0, 5);
+      const contentSid = process.env.TWILIO_REMINDER_CONTENT_SID || void 0;
+      const result = await sendWhatsApp({
+        to: phone,
+        // Approved template (production): {{1}} first name, {{2}} clinic, {{3}} day, {{4}} time
+        contentSid,
+        contentVariables: { "1": firstName, "2": clinic.name, "3": day2, "4": time3 },
+        // Without a template (Sandbox): the clinic's own reminder text
+        body: contentSid ? void 0 : fillMessage(freeText, {
+          paciente: firstName,
+          paciente_nome_completo: a.patientName.trim(),
+          psicologa: "",
+          data: noon.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "UTC" }),
+          dia_semana: noon.toLocaleDateString("pt-BR", { weekday: "long", timeZone: "UTC" }),
+          horario: time3,
+          horario_fim: "",
+          sala: "",
+          clinica: clinic.name,
+          quem_envia: clinic.name
+        }),
+        statusCallback: `${getAppUrl()}/api/twilio/status`
+      });
+      await db.update(whatsappMessages).set(
+        result.ok ? { status: "sent", twilioSid: result.sid, error: null, updatedAt: /* @__PURE__ */ new Date() } : { status: "failed", error: result.error.slice(0, 500), updatedAt: /* @__PURE__ */ new Date() }
+      ).where(eq19(whatsappMessages.id, claimed.id));
+      if (result.ok) summary.sent++;
+      else summary.failed++;
+    }
+  }
+  return summary;
+}
+async function updateMessageStatus(sid, status, errorCode) {
+  const known = ["sent", "delivered", "read", "failed", "undelivered"];
+  if (!known.includes(status)) return;
+  const order = sql9`array_position(ARRAY['sending','sent','delivered','read']::text[], ${whatsappMessages.status})`;
+  await db.update(whatsappMessages).set({ status, error: errorCode ? `Twilio ${errorCode}` : null, updatedAt: /* @__PURE__ */ new Date() }).where(
+    and13(
+      eq19(whatsappMessages.twilioSid, sid),
+      ["failed", "undelivered"].includes(status) ? void 0 : or2(
+        sql9`${order} IS NULL`,
+        sql9`${order} < array_position(ARRAY['sending','sent','delivered','read']::text[], ${status})`
+      )
+    )
+  );
+}
+
+// server/routes/whatsapp.ts
 var router11 = Router11();
+router11.use(requireAuth, requireCompany);
+var STAFF = ["admin", "receptionist"];
+var TZ2 = "America/Sao_Paulo";
+var dateKey = (d) => new Intl.DateTimeFormat("en-CA", { timeZone: TZ2 }).format(d);
+function tomorrowKey() {
+  const d = /* @__PURE__ */ new Date(`${dateKey(/* @__PURE__ */ new Date())}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+var displayPhone = (digits) => {
+  const local = digits.startsWith("55") ? digits.slice(2) : digits;
+  const m = local.match(/^(\d{2})(\d{4,5})(\d{4})$/);
+  return m ? `(${m[1]}) ${m[2]}-${m[3]}` : `+${digits}`;
+};
+async function ownPsychologistId(req) {
+  const user = req.user;
+  if (STAFF.includes(user.role)) return null;
+  const profile = await storage.getPsychologistByUserId(req.companyId, user.id);
+  return profile?.id ?? -1;
+}
+async function templateBody(companyId, key) {
+  const [row] = await db.select({ body: messageTemplates.body }).from(messageTemplates).where(and14(eq20(messageTemplates.companyId, companyId), eq20(messageTemplates.key, key)));
+  return row?.body ?? null;
+}
+var appointmentColumns = {
+  id: appointments.id,
+  patientName: appointments.patientName,
+  psychologistId: appointments.psychologistId,
+  roomId: appointments.roomId,
+  date: appointments.date,
+  startTime: appointments.startTime,
+  endTime: appointments.endTime,
+  status: appointments.status,
+  psychologistName: users.fullName,
+  roomName: rooms.name,
+  reminderSentAt: appointmentReminders.sentAt,
+  reminderSentBy: appointmentReminders.sentBy,
+  autoStatus: whatsappMessages.status,
+  autoError: whatsappMessages.error,
+  autoAt: whatsappMessages.updatedAt
+};
+function appointmentQuery(companyId) {
+  return db.select(appointmentColumns).from(appointments).leftJoin(psychologists, eq20(psychologists.id, appointments.psychologistId)).leftJoin(users, eq20(users.id, psychologists.userId)).leftJoin(rooms, and14(eq20(rooms.id, appointments.roomId), eq20(rooms.companyId, companyId))).leftJoin(appointmentReminders, eq20(appointmentReminders.appointmentId, appointments.id)).leftJoin(whatsappMessages, and14(eq20(whatsappMessages.appointmentId, appointments.id), eq20(whatsappMessages.kind, REMINDER_KIND))).$dynamic();
+}
+async function buildItems(req, rows) {
+  const companyId = req.companyId;
+  const user = req.user;
+  if (rows.length === 0) return [];
+  const [company] = await db.select({ name: companies.name }).from(companies).where(eq20(companies.id, companyId));
+  const body = await templateBody(companyId, "appointment_reminder") ?? DEFAULT_MESSAGES.appointment_reminder;
+  const byName = await patientIndex(companyId);
+  const senderIds = Array.from(new Set(rows.map((r) => r.reminderSentBy).filter((id) => !!id)));
+  const senders = /* @__PURE__ */ new Map();
+  for (const id of senderIds) {
+    const u = await storage.getUser(id);
+    if (u) senders.set(id, u.fullName);
+  }
+  return rows.map((a) => {
+    const date3 = String(a.date).slice(0, 10);
+    const noon = /* @__PURE__ */ new Date(`${date3}T12:00:00Z`);
+    const room = a.roomId === 0 ? "Online" : a.roomName ?? "";
+    const vars = {
+      paciente: a.patientName.trim().split(/\s+/)[0] ?? "",
+      paciente_nome_completo: a.patientName.trim(),
+      psicologa: a.psychologistName ?? "",
+      data: noon.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "UTC" }),
+      dia_semana: noon.toLocaleDateString("pt-BR", { weekday: "long", timeZone: "UTC" }),
+      horario: String(a.startTime).slice(0, 5),
+      horario_fim: String(a.endTime).slice(0, 5),
+      sala: room,
+      clinica: company?.name ?? "",
+      quem_envia: user.fullName
+    };
+    const { patientId, phone, issue } = findPhone(a, byName);
+    return {
+      appointmentId: a.id,
+      patientId,
+      patientName: a.patientName,
+      psychologistId: a.psychologistId,
+      psychologistName: a.psychologistName,
+      roomName: room || null,
+      date: date3,
+      startTime: vars.horario,
+      endTime: vars.horario_fim,
+      status: a.status,
+      phone,
+      phoneDisplay: phone ? displayPhone(phone) : null,
+      phoneIssue: issue,
+      message: fillMessage(body, vars),
+      reminderSentAt: a.reminderSentAt,
+      reminderSentByName: a.reminderSentBy ? senders.get(a.reminderSentBy) ?? null : null,
+      // Automatic reminder (Twilio): sending, sent, delivered, read, failed, undelivered, skipped
+      autoStatus: a.autoStatus ?? null,
+      autoError: a.autoError ?? null,
+      autoAt: a.autoAt ?? null
+    };
+  });
+}
+router11.get("/reminders", async (req, res) => {
+  try {
+    const date3 = typeof req.query.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? req.query.date : tomorrowKey();
+    const own = await ownPsychologistId(req);
+    const rows = await appointmentQuery(req.companyId).where(
+      and14(
+        eq20(appointments.companyId, req.companyId),
+        eq20(appointments.date, date3),
+        ne4(appointments.status, "canceled"),
+        own === null ? void 0 : eq20(appointments.psychologistId, own)
+      )
+    ).orderBy(appointments.startTime, appointments.patientName);
+    res.json({ date: date3, tomorrow: tomorrowKey(), items: await buildItems(req, rows) });
+  } catch (error) {
+    console.error("whatsapp reminders error:", error);
+    res.status(500).json({ message: "N\xE3o foi poss\xEDvel carregar os lembretes." });
+  }
+});
+async function findAppointment(req) {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return null;
+  const own = await ownPsychologistId(req);
+  const [row] = await appointmentQuery(req.companyId).where(
+    and14(
+      eq20(appointments.id, id),
+      eq20(appointments.companyId, req.companyId),
+      own === null ? void 0 : eq20(appointments.psychologistId, own)
+    )
+  );
+  return row ?? null;
+}
+router11.get("/appointments/:id/reminder", async (req, res) => {
+  try {
+    const row = await findAppointment(req);
+    if (!row) return res.status(404).json({ message: "Consulta n\xE3o encontrada." });
+    const [item] = await buildItems(req, [row]);
+    res.json(item);
+  } catch (error) {
+    console.error("whatsapp reminder error:", error);
+    res.status(500).json({ message: "N\xE3o foi poss\xEDvel montar o lembrete." });
+  }
+});
+router11.post("/appointments/:id/reminder-sent", async (req, res) => {
+  try {
+    const row = await findAppointment(req);
+    if (!row) return res.status(404).json({ message: "Consulta n\xE3o encontrada." });
+    const user = req.user;
+    const sentAt = /* @__PURE__ */ new Date();
+    await db.insert(appointmentReminders).values({ appointmentId: row.id, companyId: req.companyId, sentBy: user.id, sentAt }).onConflictDoUpdate({ target: appointmentReminders.appointmentId, set: { sentBy: user.id, sentAt } });
+    res.json({ reminderSentAt: sentAt, reminderSentByName: user.fullName });
+  } catch (error) {
+    console.error("whatsapp reminder-sent error:", error);
+    res.status(500).json({ message: "N\xE3o foi poss\xEDvel registrar o lembrete." });
+  }
+});
+router11.get("/auto-settings", async (req, res) => {
+  const [row] = await db.select({ enabled: companies.whatsappAutoReminders, leadHours: companies.reminderLeadHours }).from(companies).where(eq20(companies.id, req.companyId));
+  res.json({
+    enabled: !!row?.enabled,
+    leadHours: row?.leadHours ?? 24,
+    leadOptions: LEAD_HOURS,
+    twilioConfigured: isTwilioConfigured(),
+    approvedTemplate: !!process.env.TWILIO_REMINDER_CONTENT_SID
+  });
+});
+var autoSettingsSchema = z10.object({
+  enabled: z10.boolean(),
+  leadHours: z10.number().refine((h) => LEAD_HOURS.includes(h), "Anteced\xEAncia inv\xE1lida.")
+});
+router11.put("/auto-settings", requireAdmin, async (req, res) => {
+  const parsed = autoSettingsSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0].message });
+  try {
+    await db.update(companies).set({ whatsappAutoReminders: parsed.data.enabled, reminderLeadHours: parsed.data.leadHours }).where(eq20(companies.id, req.companyId));
+    res.json({ ...parsed.data, leadOptions: LEAD_HOURS, twilioConfigured: isTwilioConfigured(), approvedTemplate: !!process.env.TWILIO_REMINDER_CONTENT_SID });
+  } catch (error) {
+    console.error("whatsapp auto-settings error:", error);
+    res.status(500).json({ message: "N\xE3o foi poss\xEDvel salvar a configura\xE7\xE3o." });
+  }
+});
+var isKey = (k) => MESSAGE_KEYS.includes(k);
+router11.get("/templates/:key", async (req, res) => {
+  const key = req.params.key;
+  if (!isKey(key)) return res.status(404).json({ message: "Modelo n\xE3o encontrado." });
+  const body = await templateBody(req.companyId, key);
+  res.json({ key, body: body ?? DEFAULT_MESSAGES[key], isDefault: body === null, defaultBody: DEFAULT_MESSAGES[key] });
+});
+var templateSchema = z10.object({ body: z10.string().max(MESSAGE_MAX_LENGTH, `Use no m\xE1ximo ${MESSAGE_MAX_LENGTH} caracteres.`) });
+router11.put("/templates/:key", requireAdmin, async (req, res) => {
+  const key = req.params.key;
+  if (!isKey(key)) return res.status(404).json({ message: "Modelo n\xE3o encontrado." });
+  const parsed = templateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0].message });
+  const companyId = req.companyId;
+  const body = parsed.data.body.replace(/\r\n/g, "\n").trim();
+  try {
+    if (!body || body === DEFAULT_MESSAGES[key]) {
+      await db.delete(messageTemplates).where(and14(eq20(messageTemplates.companyId, companyId), eq20(messageTemplates.key, key)));
+      return res.json({ key, body: DEFAULT_MESSAGES[key], isDefault: true, defaultBody: DEFAULT_MESSAGES[key] });
+    }
+    const updatedBy = req.user.id;
+    await db.insert(messageTemplates).values({ companyId, key, body, updatedBy }).onConflictDoUpdate({ target: [messageTemplates.companyId, messageTemplates.key], set: { body, updatedBy, updatedAt: /* @__PURE__ */ new Date() } });
+    res.json({ key, body, isDefault: false, defaultBody: DEFAULT_MESSAGES[key] });
+  } catch (error) {
+    console.error("whatsapp template error:", error);
+    res.status(500).json({ message: "N\xE3o foi poss\xEDvel salvar o modelo." });
+  }
+});
+var whatsapp_default = router11;
+
+// server/routes/twilio.ts
+import { Router as Router12 } from "express";
+import { timingSafeEqual as timingSafeEqual3 } from "crypto";
+var router12 = Router12();
+function hasCronSecret(req) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+  const header = req.headers.authorization?.replace(/^Bearer\s+/i, "");
+  const given = header || (typeof req.query.key === "string" ? req.query.key : "");
+  const a = Buffer.from(given);
+  const b = Buffer.from(secret);
+  return a.length === b.length && timingSafeEqual3(a, b);
+}
+var runReminders = async (req, res) => {
+  if (!hasCronSecret(req)) return res.status(401).json({ message: "N\xE3o autorizado" });
+  try {
+    const summary = await runAutoReminders();
+    res.json(summary);
+  } catch (error) {
+    console.error("cron whatsapp-reminders error:", error);
+    res.status(500).json({ message: "Falha ao enviar lembretes" });
+  }
+};
+router12.get("/cron/whatsapp-reminders", runReminders);
+router12.post("/cron/whatsapp-reminders", runReminders);
+router12.post("/twilio/status", async (req, res) => {
+  const params = Object.fromEntries(Object.entries(req.body ?? {}).map(([k, v]) => [k, String(v)]));
+  const url = `${getAppUrl()}/api/twilio/status`;
+  if (!isValidTwilioSignature(url, params, req.header("X-Twilio-Signature"))) {
+    return res.status(403).send("invalid signature");
+  }
+  try {
+    if (params.MessageSid && params.MessageStatus) {
+      await updateMessageStatus(params.MessageSid, params.MessageStatus, params.ErrorCode || void 0);
+    }
+    res.status(204).end();
+  } catch (error) {
+    console.error("twilio status error:", error);
+    res.status(500).end();
+  }
+});
+var twilio_default = router12;
+
+// server/routes/care-templates.ts
+import { Router as Router13 } from "express";
+import { eq as eq21, or as or3, isNull as isNull6, and as and15, count as count2 } from "drizzle-orm";
+import { z as z11 } from "zod";
+var router13 = Router13();
 var checkAuth2 = (req, res, next) => {
   if (!req.isAuthenticated()) return res.status(401).json({ message: "N\xE3o autenticado" });
   next();
 };
-router11.use(checkAuth2);
-var ownTemplate = (req) => and14(eq17(careTemplates.psychologistId, req.user.id), eq17(careTemplates.companyId, req.companyId));
-router11.get("/", async (req, res) => {
+router13.use(checkAuth2);
+var ownTemplate = (req) => and15(eq21(careTemplates.psychologistId, req.user.id), eq21(careTemplates.companyId, req.companyId));
+router13.get("/", async (req, res) => {
   try {
-    const templates = await db2.select().from(careTemplates).where(or2(ownTemplate(req), isNull5(careTemplates.psychologistId)));
+    const templates = await db.select().from(careTemplates).where(or3(ownTemplate(req), isNull6(careTemplates.psychologistId)));
     const result = await Promise.all(
       templates.map(async (t) => {
-        const questions = await db2.select().from(careTemplateQuestions).where(eq17(careTemplateQuestions.templateId, t.id)).orderBy(careTemplateQuestions.orderIndex);
+        const questions = await db.select().from(careTemplateQuestions).where(eq21(careTemplateQuestions.templateId, t.id)).orderBy(careTemplateQuestions.orderIndex);
         return { ...t, questions, questionCount: questions.length };
       })
     );
@@ -5993,7 +7111,7 @@ router11.get("/", async (req, res) => {
     res.status(500).json({ message: "Erro ao listar templates" });
   }
 });
-router11.post("/", async (req, res) => {
+router13.post("/", async (req, res) => {
   try {
     const userId = req.user.id;
     const { questions = [], ...body } = req.body;
@@ -6002,86 +7120,86 @@ router11.post("/", async (req, res) => {
       psychologistId: userId,
       isDefault: false
     });
-    const [template] = await db2.insert(careTemplates).values({ ...templateData, companyId: req.companyId }).returning();
+    const [template] = await db.insert(careTemplates).values({ ...templateData, companyId: req.companyId }).returning();
     if (Array.isArray(questions) && questions.length > 0) {
       const qs = questions.map(
         (q, i) => insertCareTemplateQuestionSchema.parse({ ...q, templateId: template.id, orderIndex: q.orderIndex ?? i })
       );
-      await db2.insert(careTemplateQuestions).values(qs);
+      await db.insert(careTemplateQuestions).values(qs);
     }
-    const allQuestions = await db2.select().from(careTemplateQuestions).where(eq17(careTemplateQuestions.templateId, template.id)).orderBy(careTemplateQuestions.orderIndex);
+    const allQuestions = await db.select().from(careTemplateQuestions).where(eq21(careTemplateQuestions.templateId, template.id)).orderBy(careTemplateQuestions.orderIndex);
     res.status(201).json({ ...template, questions: allQuestions });
   } catch (e) {
-    if (e instanceof z9.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z11.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao criar template" });
   }
 });
-router11.get("/:id", async (req, res) => {
+router13.get("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(
-      and14(
-        eq17(careTemplates.id, id),
-        or2(ownTemplate(req), isNull5(careTemplates.psychologistId))
+    const [template] = await db.select().from(careTemplates).where(
+      and15(
+        eq21(careTemplates.id, id),
+        or3(ownTemplate(req), isNull6(careTemplates.psychologistId))
       )
     );
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const questions = await db2.select().from(careTemplateQuestions).where(eq17(careTemplateQuestions.templateId, id)).orderBy(careTemplateQuestions.orderIndex);
+    const questions = await db.select().from(careTemplateQuestions).where(eq21(careTemplateQuestions.templateId, id)).orderBy(careTemplateQuestions.orderIndex);
     res.json({ ...template, questions });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: "Erro ao buscar template" });
   }
 });
-router11.patch("/:id", async (req, res) => {
+router13.patch("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(and14(eq17(careTemplates.id, id), ownTemplate(req)));
+    const [template] = await db.select().from(careTemplates).where(and15(eq21(careTemplates.id, id), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const editableSchema = z9.object({
-      title: z9.string().min(1).max(100).optional(),
-      description: z9.string().max(500).optional()
+    const editableSchema = z11.object({
+      title: z11.string().min(1).max(100).optional(),
+      description: z11.string().max(500).optional()
     });
     const updateData = editableSchema.parse(req.body);
-    const [updated] = await db2.update(careTemplates).set({ ...updateData, updatedAt: /* @__PURE__ */ new Date() }).where(eq17(careTemplates.id, id)).returning();
+    const [updated] = await db.update(careTemplates).set({ ...updateData, updatedAt: /* @__PURE__ */ new Date() }).where(eq21(careTemplates.id, id)).returning();
     res.json(updated);
   } catch (e) {
-    if (e instanceof z9.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z11.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao atualizar template" });
   }
 });
-router11.delete("/:id", async (req, res) => {
+router13.delete("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(and14(eq17(careTemplates.id, id), ownTemplate(req)));
+    const [template] = await db.select().from(careTemplates).where(and15(eq21(careTemplates.id, id), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const [{ value: dispatchCount }] = await db2.select({ value: count2() }).from(careDispatches).where(eq17(careDispatches.templateId, id));
+    const [{ value: dispatchCount }] = await db.select({ value: count2() }).from(careDispatches).where(eq21(careDispatches.templateId, id));
     if (Number(dispatchCount) > 0) {
       return res.status(409).json({
         message: "N\xE3o \xE9 poss\xEDvel excluir este template pois ele possui envios vinculados."
       });
     }
-    await db2.delete(careTemplates).where(eq17(careTemplates.id, id));
+    await db.delete(careTemplates).where(eq21(careTemplates.id, id));
     res.sendStatus(204);
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: "Erro ao excluir template" });
   }
 });
-router11.put("/:id/questions", async (req, res) => {
+router13.put("/:id/questions", async (req, res) => {
   try {
     const templateId = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(and14(eq17(careTemplates.id, templateId), ownTemplate(req)));
+    const [template] = await db.select().from(careTemplates).where(and15(eq21(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const questionsSchema = z9.array(
-      insertCareTemplateQuestionSchema.omit({ templateId: true }).extend({ orderIndex: z9.number().int() })
+    const questionsSchema = z11.array(
+      insertCareTemplateQuestionSchema.omit({ templateId: true }).extend({ orderIndex: z11.number().int() })
     );
     const questions = questionsSchema.parse(req.body);
-    await db2.delete(careTemplateQuestions).where(eq17(careTemplateQuestions.templateId, templateId));
+    await db.delete(careTemplateQuestions).where(eq21(careTemplateQuestions.templateId, templateId));
     if (questions.length > 0) {
-      await db2.insert(careTemplateQuestions).values(
+      await db.insert(careTemplateQuestions).values(
         questions.map((q, i) => ({
           ...q,
           templateId,
@@ -6089,63 +7207,63 @@ router11.put("/:id/questions", async (req, res) => {
         }))
       );
     }
-    const saved = await db2.select().from(careTemplateQuestions).where(eq17(careTemplateQuestions.templateId, templateId)).orderBy(careTemplateQuestions.orderIndex);
+    const saved = await db.select().from(careTemplateQuestions).where(eq21(careTemplateQuestions.templateId, templateId)).orderBy(careTemplateQuestions.orderIndex);
     res.json(saved);
   } catch (e) {
-    if (e instanceof z9.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z11.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao salvar perguntas do template" });
   }
 });
-router11.post("/:id/questions", async (req, res) => {
+router13.post("/:id/questions", async (req, res) => {
   try {
     const templateId = parseInt(req.params.id);
-    const [template] = await db2.select().from(careTemplates).where(and14(eq17(careTemplates.id, templateId), ownTemplate(req)));
+    const [template] = await db.select().from(careTemplates).where(and15(eq21(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
     const data = insertCareTemplateQuestionSchema.parse({ ...req.body, templateId });
-    const [q] = await db2.insert(careTemplateQuestions).values(data).returning();
+    const [q] = await db.insert(careTemplateQuestions).values(data).returning();
     res.status(201).json(q);
   } catch (e) {
-    if (e instanceof z9.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z11.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao adicionar pergunta" });
   }
 });
-router11.patch("/:id/questions/:qId", async (req, res) => {
+router13.patch("/:id/questions/:qId", async (req, res) => {
   try {
     const templateId = parseInt(req.params.id);
     const qId = parseInt(req.params.qId);
-    const [template] = await db2.select().from(careTemplates).where(and14(eq17(careTemplates.id, templateId), ownTemplate(req)));
+    const [template] = await db.select().from(careTemplates).where(and15(eq21(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
     const editableQuestionSchema = insertCareTemplateQuestionSchema.omit({ templateId: true }).partial();
     const data = editableQuestionSchema.parse(req.body);
-    const [updated] = await db2.update(careTemplateQuestions).set(data).where(and14(eq17(careTemplateQuestions.id, qId), eq17(careTemplateQuestions.templateId, templateId))).returning();
+    const [updated] = await db.update(careTemplateQuestions).set(data).where(and15(eq21(careTemplateQuestions.id, qId), eq21(careTemplateQuestions.templateId, templateId))).returning();
     if (!updated) return res.status(404).json({ message: "Pergunta n\xE3o encontrada" });
     res.json(updated);
   } catch (e) {
-    if (e instanceof z9.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z11.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao atualizar pergunta" });
   }
 });
-router11.delete("/:id/questions/:qId", async (req, res) => {
+router13.delete("/:id/questions/:qId", async (req, res) => {
   try {
     const templateId = parseInt(req.params.id);
     const qId = parseInt(req.params.qId);
-    const [template] = await db2.select().from(careTemplates).where(and14(eq17(careTemplates.id, templateId), ownTemplate(req)));
+    const [template] = await db.select().from(careTemplates).where(and15(eq21(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    await db2.delete(careTemplateQuestions).where(and14(eq17(careTemplateQuestions.id, qId), eq17(careTemplateQuestions.templateId, templateId)));
+    await db.delete(careTemplateQuestions).where(and15(eq21(careTemplateQuestions.id, qId), eq21(careTemplateQuestions.templateId, templateId)));
     res.sendStatus(204);
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: "Erro ao remover pergunta" });
   }
 });
-var care_templates_default = router11;
+var care_templates_default = router13;
 
 // server/routes/care-dispatch.ts
-import { Router as Router12 } from "express";
-import { eq as eq18, desc as desc6, count as count3, and as and15, or as or3, isNull as isNull6 } from "drizzle-orm";
+import { Router as Router14 } from "express";
+import { eq as eq22, desc as desc6, count as count3, and as and16, or as or4, isNull as isNull7 } from "drizzle-orm";
 
 // server/lib/validate-email.ts
 function isValidEmail(email) {
@@ -6163,11 +7281,6 @@ function generateResponseToken() {
 // server/lib/send-care-email.ts
 async function sendCareFormEmail(params) {
   try {
-    const gmail = await getGmailClient(params.psychologistUserId);
-    if (!gmail) {
-      console.warn("sendCareFormEmail: no Gmail client \u2014 user not connected to Google");
-      return false;
-    }
     const clinicName = params.clinicName;
     const firstName = params.patientName.split(" ")[0];
     const expiryStr = params.tokenExpiresAt.toLocaleDateString("pt-BR", {
@@ -6251,37 +7364,27 @@ async function sendCareFormEmail(params) {
 
 </body>
 </html>`;
-    const subjectEncoded = Buffer.from(params.subject).toString("base64");
-    const rawMessage = [
-      `To: ${params.patientEmail}`,
-      `From: ${params.psychologistName} <${params.psychologistEmail}>`,
-      `Subject: =?utf-8?B?${subjectEncoded}?=`,
-      "MIME-Version: 1.0",
-      "Content-Type: text/html; charset=utf-8",
-      "",
-      bodyHtml
-    ].join("\r\n");
-    const encodedMessage = Buffer.from(rawMessage).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    await gmail.users.messages.send({
-      userId: "me",
-      requestBody: { raw: encodedMessage }
+    return await sendAppEmail({
+      to: params.patientEmail,
+      subject: params.subject,
+      html: bodyHtml,
+      fromName: params.psychologistName,
+      replyTo: params.psychologistEmail || void 0
     });
-    return true;
   } catch (error) {
-    if (isGoogleTokenExpired(error)) throw error;
     console.error("sendCareFormEmail error:", error);
     return false;
   }
 }
 
 // server/routes/care-dispatch.ts
-import { z as z10 } from "zod";
-var router12 = Router12();
+import { z as z12 } from "zod";
+var router14 = Router14();
 var checkAuth3 = (req, res, next) => {
   if (!req.isAuthenticated()) return res.status(401).json({ message: "N\xE3o autenticado" });
   next();
 };
-router12.use(checkAuth3);
+router14.use(checkAuth3);
 function substituteVariables(text3, patientName, psychologistName2) {
   const firstName = patientName.split(" ")[0];
   return text3.replace(/\{patient_name\}/g, firstName).replace(/\{patient_full_name\}/g, patientName).replace(/\{psychologist_name\}/g, psychologistName2);
@@ -6290,14 +7393,14 @@ async function canAccessPatient(req, patientRow) {
   const user = req.user;
   if (user.role === "admin") return true;
   if (user.role === "psychologist") {
-    const [psychRow] = await db2.select().from(psychologists).where(and15(eq18(psychologists.userId, user.id), eq18(psychologists.companyId, req.companyId)));
+    const [psychRow] = await db.select().from(psychologists).where(and16(eq22(psychologists.userId, user.id), eq22(psychologists.companyId, req.companyId)));
     const psychId = psychRow?.id ?? -1;
     return patientRow.psychologistId === psychId || patientRow.createdBy === user.id;
   }
   return false;
 }
 async function findPatient(companyId, patientId) {
-  const [patient] = await db2.select().from(patients).where(and15(eq18(patients.id, patientId), eq18(patients.companyId, companyId)));
+  const [patient] = await db.select().from(patients).where(and16(eq22(patients.id, patientId), eq22(patients.companyId, companyId)));
   return patient;
 }
 function canAccessDispatch(req, dispatch) {
@@ -6305,7 +7408,7 @@ function canAccessDispatch(req, dispatch) {
   if (req.user.role === "admin") return true;
   return dispatch.psychologistId === req.user.id;
 }
-router12.post("/patients/:patientId/dispatch", async (req, res) => {
+router14.post("/patients/:patientId/dispatch", async (req, res) => {
   try {
     const user = req.user;
     const patientId = parseInt(req.params.patientId);
@@ -6326,27 +7429,27 @@ router12.post("/patients/:patientId/dispatch", async (req, res) => {
         message: "O paciente n\xE3o possui e-mail v\xE1lido cadastrado. Atualize o perfil antes de enviar."
       });
     }
-    const [psychUser] = await db2.select().from(users).where(eq18(users.id, user.id));
+    const [psychUser] = await db.select().from(users).where(eq22(users.id, user.id));
     if (!psychUser) return res.status(400).json({ message: "Usu\xE1rio n\xE3o encontrado" });
-    const [template] = await db2.select().from(careTemplates).where(
-      and15(
-        eq18(careTemplates.id, parseInt(template_id)),
-        or3(
-          and15(eq18(careTemplates.psychologistId, user.id), eq18(careTemplates.companyId, req.companyId)),
-          isNull6(careTemplates.psychologistId)
+    const [template] = await db.select().from(careTemplates).where(
+      and16(
+        eq22(careTemplates.id, parseInt(template_id)),
+        or4(
+          and16(eq22(careTemplates.psychologistId, user.id), eq22(careTemplates.companyId, req.companyId)),
+          isNull7(careTemplates.psychologistId)
         )
       )
     );
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const templateQuestions = await db2.select().from(careTemplateQuestions).where(eq18(careTemplateQuestions.templateId, template.id)).orderBy(careTemplateQuestions.orderIndex);
+    const templateQuestions = await db.select().from(careTemplateQuestions).where(eq22(careTemplateQuestions.templateId, template.id)).orderBy(careTemplateQuestions.orderIndex);
     const psychName = psychUser.fullName || psychUser.username;
-    const overrideSchema = z10.array(
-      z10.object({
-        questionText: z10.string().min(1),
-        questionType: z10.string(),
-        options: z10.array(z10.string()).nullable().optional(),
-        isRequired: z10.boolean(),
-        orderIndex: z10.number().int()
+    const overrideSchema = z12.array(
+      z12.object({
+        questionText: z12.string().min(1),
+        questionType: z12.string(),
+        options: z12.array(z12.string()).nullable().optional(),
+        isRequired: z12.boolean(),
+        orderIndex: z12.number().int()
       })
     );
     let renderedQuestions;
@@ -6367,7 +7470,7 @@ router12.post("/patients/:patientId/dispatch", async (req, res) => {
     const tokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1e3);
     const firstName = patient.fullName.split(" ")[0];
     const finalSubject = subject?.trim() || `Check-in \u2014 ${firstName}`;
-    const [dispatch] = await db2.insert(careDispatches).values({
+    const [dispatch] = await db.insert(careDispatches).values({
       companyId: req.companyId,
       psychologistId: user.id,
       patientId,
@@ -6380,7 +7483,7 @@ router12.post("/patients/:patientId/dispatch", async (req, res) => {
       status: "sent"
     }).returning();
     if (renderedQuestions.length > 0) {
-      await db2.insert(careDispatchQuestions).values(
+      await db.insert(careDispatchQuestions).values(
         renderedQuestions.map((q, i) => ({
           dispatchId: dispatch.id,
           questionText: q.questionText,
@@ -6391,8 +7494,7 @@ router12.post("/patients/:patientId/dispatch", async (req, res) => {
         }))
       );
     }
-    const appUrl = process.env.APP_URL || `https://${process.env.REPLIT_DEV_DOMAIN}`;
-    const responseUrl = `${appUrl}/responder/${responseToken}`;
+    const responseUrl = `${getAppUrl()}/responder/${responseToken}`;
     const emailSent = await sendCareFormEmail({
       psychologistUserId: user.id,
       patientName: patient.fullName,
@@ -6410,7 +7512,7 @@ router12.post("/patients/:patientId/dispatch", async (req, res) => {
       return res.json({
         success: true,
         dispatch,
-        warning: "O formul\xE1rio foi salvo mas o e-mail n\xE3o p\xF4de ser enviado (Google n\xE3o conectado). Compartilhe o link manualmente.",
+        warning: "O formul\xE1rio foi salvo, mas o e-mail n\xE3o p\xF4de ser enviado. Compartilhe o link com a paciente.",
         responseUrl
       });
     }
@@ -6423,7 +7525,7 @@ router12.post("/patients/:patientId/dispatch", async (req, res) => {
     res.status(500).json({ message: "Erro ao enviar formul\xE1rio" });
   }
 });
-router12.get("/patients/:patientId/dispatches", async (req, res) => {
+router14.get("/patients/:patientId/dispatches", async (req, res) => {
   try {
     const patientId = parseInt(req.params.patientId);
     const patient = await findPatient(req.companyId, patientId);
@@ -6435,15 +7537,15 @@ router12.get("/patients/:patientId/dispatches", async (req, res) => {
         code: "FORBIDDEN"
       });
     }
-    const dispatches = await db2.select().from(careDispatches).where(and15(eq18(careDispatches.patientId, patientId), eq18(careDispatches.companyId, req.companyId))).orderBy(desc6(careDispatches.sentAt));
+    const dispatches = await db.select().from(careDispatches).where(and16(eq22(careDispatches.patientId, patientId), eq22(careDispatches.companyId, req.companyId))).orderBy(desc6(careDispatches.sentAt));
     const now = /* @__PURE__ */ new Date();
     const result = await Promise.all(
       dispatches.map(async (d) => {
         if (d.status !== "answered" && d.tokenExpiresAt < now) {
-          await db2.update(careDispatches).set({ status: "expired" }).where(eq18(careDispatches.id, d.id));
+          await db.update(careDispatches).set({ status: "expired" }).where(eq22(careDispatches.id, d.id));
           d = { ...d, status: "expired" };
         }
-        const [{ value: responseCount }] = await db2.select({ value: count3() }).from(careResponses).where(eq18(careResponses.dispatchId, d.id));
+        const [{ value: responseCount }] = await db.select({ value: count3() }).from(careResponses).where(eq22(careResponses.dispatchId, d.id));
         return { ...d, responseCount: Number(responseCount) };
       })
     );
@@ -6453,10 +7555,10 @@ router12.get("/patients/:patientId/dispatches", async (req, res) => {
     res.status(500).json({ message: "Erro ao listar hist\xF3rico de envios" });
   }
 });
-router12.get("/dispatches/:dispatchId/responses", async (req, res) => {
+router14.get("/dispatches/:dispatchId/responses", async (req, res) => {
   try {
     const dispatchId = parseInt(req.params.dispatchId);
-    const [dispatch] = await db2.select().from(careDispatches).where(eq18(careDispatches.id, dispatchId));
+    const [dispatch] = await db.select().from(careDispatches).where(eq22(careDispatches.id, dispatchId));
     if (!dispatch) return res.status(404).json({ message: "Envio n\xE3o encontrado" });
     if (!canAccessDispatch(req, dispatch)) {
       return res.status(403).json({
@@ -6464,8 +7566,8 @@ router12.get("/dispatches/:dispatchId/responses", async (req, res) => {
         code: "FORBIDDEN"
       });
     }
-    const questions = await db2.select().from(careDispatchQuestions).where(eq18(careDispatchQuestions.dispatchId, dispatchId)).orderBy(careDispatchQuestions.orderIndex);
-    const responses = await db2.select().from(careResponses).where(eq18(careResponses.dispatchId, dispatchId));
+    const questions = await db.select().from(careDispatchQuestions).where(eq22(careDispatchQuestions.dispatchId, dispatchId)).orderBy(careDispatchQuestions.orderIndex);
+    const responses = await db.select().from(careResponses).where(eq22(careResponses.dispatchId, dispatchId));
     const merged = questions.map((q) => ({
       ...q,
       response: responses.find((r) => r.dispatchQuestionId === q.id) ?? null
@@ -6476,23 +7578,23 @@ router12.get("/dispatches/:dispatchId/responses", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar respostas" });
   }
 });
-var care_dispatch_default = router12;
+var care_dispatch_default = router14;
 
 // server/routes/care-public.ts
-import { Router as Router13 } from "express";
-import { eq as eq19 } from "drizzle-orm";
-import { z as z11 } from "zod";
-var router13 = Router13();
-router13.get("/respond/:token", async (req, res) => {
+import { Router as Router15 } from "express";
+import { eq as eq23 } from "drizzle-orm";
+import { z as z13 } from "zod";
+var router15 = Router15();
+router15.get("/respond/:token", async (req, res) => {
   try {
     const { token } = req.params;
-    const [dispatch] = await db2.select().from(careDispatches).where(eq19(careDispatches.responseToken, token));
+    const [dispatch] = await db.select().from(careDispatches).where(eq23(careDispatches.responseToken, token));
     if (!dispatch) {
       return res.status(404).json({ error: "not_found", message: "Formul\xE1rio n\xE3o encontrado." });
     }
     if (/* @__PURE__ */ new Date() > dispatch.tokenExpiresAt) {
       if (dispatch.status !== "expired" && dispatch.status !== "answered") {
-        await db2.update(careDispatches).set({ status: "expired" }).where(eq19(careDispatches.id, dispatch.id));
+        await db.update(careDispatches).set({ status: "expired" }).where(eq23(careDispatches.id, dispatch.id));
       }
       return res.status(410).json({
         error: "expired",
@@ -6506,11 +7608,11 @@ router13.get("/respond/:token", async (req, res) => {
       });
     }
     if (dispatch.status === "sent") {
-      await db2.update(careDispatches).set({ status: "opened", openedAt: /* @__PURE__ */ new Date() }).where(eq19(careDispatches.id, dispatch.id));
+      await db.update(careDispatches).set({ status: "opened", openedAt: /* @__PURE__ */ new Date() }).where(eq23(careDispatches.id, dispatch.id));
     }
-    const questions = await db2.select().from(careDispatchQuestions).where(eq19(careDispatchQuestions.dispatchId, dispatch.id)).orderBy(careDispatchQuestions.orderIndex);
-    const [patient] = await db2.select({ firstName: patients.fullName }).from(patients).where(eq19(patients.id, dispatch.patientId));
-    const [psychUser] = await db2.select({ fullName: users.fullName, username: users.username }).from(users).where(eq19(users.id, dispatch.psychologistId));
+    const questions = await db.select().from(careDispatchQuestions).where(eq23(careDispatchQuestions.dispatchId, dispatch.id)).orderBy(careDispatchQuestions.orderIndex);
+    const [patient] = await db.select({ firstName: patients.fullName }).from(patients).where(eq23(patients.id, dispatch.patientId));
+    const [psychUser] = await db.select({ fullName: users.fullName, username: users.username }).from(users).where(eq23(users.id, dispatch.psychologistId));
     const clinic = await publicClinic(dispatch.companyId);
     const patientFirstName = patient?.firstName?.split(" ")[0] ?? "Paciente";
     const psychologistName2 = psychUser?.fullName || psychUser?.username || "sua psic\xF3loga";
@@ -6528,26 +7630,26 @@ router13.get("/respond/:token", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar formul\xE1rio" });
   }
 });
-var answerSchema = z11.object({
-  answers: z11.array(
-    z11.object({
-      dispatch_question_id: z11.number().int().positive(),
-      answer_text: z11.string().optional().nullable(),
-      answer_choice: z11.string().optional().nullable(),
-      answer_scale: z11.number().int().min(1).max(10).optional().nullable()
+var answerSchema = z13.object({
+  answers: z13.array(
+    z13.object({
+      dispatch_question_id: z13.number().int().positive(),
+      answer_text: z13.string().optional().nullable(),
+      answer_choice: z13.string().optional().nullable(),
+      answer_scale: z13.number().int().min(1).max(10).optional().nullable()
     })
   )
 });
-router13.post("/respond/:token", async (req, res) => {
+router15.post("/respond/:token", async (req, res) => {
   try {
     const { token } = req.params;
-    const [dispatch] = await db2.select().from(careDispatches).where(eq19(careDispatches.responseToken, token));
+    const [dispatch] = await db.select().from(careDispatches).where(eq23(careDispatches.responseToken, token));
     if (!dispatch) {
       return res.status(404).json({ error: "not_found", message: "Formul\xE1rio n\xE3o encontrado." });
     }
     if (/* @__PURE__ */ new Date() > dispatch.tokenExpiresAt) {
       if (dispatch.status !== "expired") {
-        await db2.update(careDispatches).set({ status: "expired" }).where(eq19(careDispatches.id, dispatch.id));
+        await db.update(careDispatches).set({ status: "expired" }).where(eq23(careDispatches.id, dispatch.id));
       }
       return res.status(410).json({
         error: "expired",
@@ -6562,7 +7664,7 @@ router13.post("/respond/:token", async (req, res) => {
     }
     const parsed = answerSchema.parse(req.body);
     const { answers } = parsed;
-    const questions = await db2.select().from(careDispatchQuestions).where(eq19(careDispatchQuestions.dispatchId, dispatch.id));
+    const questions = await db.select().from(careDispatchQuestions).where(eq23(careDispatchQuestions.dispatchId, dispatch.id));
     const validQuestionIds = new Set(questions.map((q) => q.id));
     for (const a of answers) {
       if (!validQuestionIds.has(a.dispatch_question_id)) {
@@ -6583,7 +7685,7 @@ router13.post("/respond/:token", async (req, res) => {
       }
     }
     if (answers.length > 0) {
-      await db2.insert(careResponses).values(
+      await db.insert(careResponses).values(
         answers.map((a) => ({
           dispatchId: dispatch.id,
           dispatchQuestionId: a.dispatch_question_id,
@@ -6593,35 +7695,35 @@ router13.post("/respond/:token", async (req, res) => {
         }))
       );
     }
-    await db2.update(careDispatches).set({ status: "answered", answeredAt: /* @__PURE__ */ new Date() }).where(eq19(careDispatches.id, dispatch.id));
+    await db.update(careDispatches).set({ status: "answered", answeredAt: /* @__PURE__ */ new Date() }).where(eq23(careDispatches.id, dispatch.id));
     return res.json({ success: true, message: "Respostas enviadas com sucesso!" });
   } catch (e) {
-    if (e instanceof z11.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z13.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error("care respond POST error:", e);
     res.status(500).json({ message: "Erro ao salvar respostas" });
   }
 });
-var care_public_default = router13;
+var care_public_default = router15;
 
 // server/routes/commissions.ts
-import { Router as Router14 } from "express";
-import { eq as eq20, and as and16, gte as gte4, lte as lte3 } from "drizzle-orm";
-import { z as z12 } from "zod";
-var router14 = Router14();
+import { Router as Router16 } from "express";
+import { eq as eq24, and as and17, gte as gte6, lte as lte5 } from "drizzle-orm";
+import { z as z14 } from "zod";
+var router16 = Router16();
 function adminOnly(req, res, next) {
   if (!req.user || req.user.role !== "admin") {
     return res.status(403).json({ message: "Acesso negado. Somente administradores." });
   }
   next();
 }
-router14.use(adminOnly);
+router16.use(adminOnly);
 function hoursFromTime(start, end) {
   const [sh, sm] = start.split(":").map(Number);
   const [eh, em] = end.split(":").map(Number);
   return Math.max(0, (eh * 60 + em - (sh * 60 + sm)) / 60);
 }
 async function calcCommissionPreview(companyId, psychologistId, periodStart, periodEnd) {
-  const bookings = await db2.select({
+  const bookings = await db.select({
     id: roomBookings.id,
     date: roomBookings.date,
     startTime: roomBookings.startTime,
@@ -6629,12 +7731,12 @@ async function calcCommissionPreview(companyId, psychologistId, periodStart, per
     roomId: roomBookings.roomId,
     roomName: rooms.name,
     roomHourlyRate: rooms.hourlyRate
-  }).from(roomBookings).leftJoin(rooms, eq20(roomBookings.roomId, rooms.id)).where(
-    and16(
-      eq20(roomBookings.companyId, companyId),
-      eq20(roomBookings.psychologistId, psychologistId),
-      gte4(roomBookings.date, periodStart),
-      lte3(roomBookings.date, periodEnd)
+  }).from(roomBookings).leftJoin(rooms, eq24(roomBookings.roomId, rooms.id)).where(
+    and17(
+      eq24(roomBookings.companyId, companyId),
+      eq24(roomBookings.psychologistId, psychologistId),
+      gte6(roomBookings.date, periodStart),
+      lte5(roomBookings.date, periodEnd)
     )
   );
   const allConfigs = await storage.listCommissionPayoutConfigs(companyId, psychologistId);
@@ -6669,7 +7771,7 @@ async function calcCommissionPreview(companyId, psychologistId, periodStart, per
   const totalRepasse = items.reduce((acc, i) => acc + i.repasseValue, 0);
   return { items, totalRoomsValue, totalRepasse, totalBookings: items.length };
 }
-router14.get("/dashboard", async (req, res) => {
+router16.get("/dashboard", async (req, res) => {
   try {
     const month = req.query.month || (/* @__PURE__ */ new Date()).toISOString().slice(0, 7);
     const data = await storage.getCommissionDashboard(req.companyId, month);
@@ -6678,7 +7780,7 @@ router14.get("/dashboard", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar dashboard" });
   }
 });
-router14.get("/", async (req, res) => {
+router16.get("/", async (req, res) => {
   try {
     const { psychologistId, status, periodStart, periodEnd } = req.query;
     const list = await storage.listCommissions(req.companyId, {
@@ -6699,7 +7801,7 @@ router14.get("/", async (req, res) => {
     res.status(500).json({ message: "Erro ao listar comissionamentos" });
   }
 });
-router14.get("/preview", async (req, res) => {
+router16.get("/preview", async (req, res) => {
   try {
     const { psychologistId, periodStart, periodEnd } = req.query;
     if (!psychologistId || !periodStart || !periodEnd) {
@@ -6716,7 +7818,7 @@ router14.get("/preview", async (req, res) => {
     res.status(500).json({ message: "Erro ao calcular preview" });
   }
 });
-router14.get("/:id", async (req, res) => {
+router16.get("/:id", async (req, res) => {
   try {
     const c = await storage.getCommission(req.companyId, parseInt(req.params.id));
     if (!c) return res.status(404).json({ message: "Comissionamento n\xE3o encontrado" });
@@ -6727,7 +7829,7 @@ router14.get("/:id", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar comissionamento" });
   }
 });
-router14.get("/:id/items", async (req, res) => {
+router16.get("/:id/items", async (req, res) => {
   try {
     const c = await storage.getCommission(req.companyId, parseInt(req.params.id));
     if (!c) return res.status(404).json({ message: "Comissionamento n\xE3o encontrado" });
@@ -6737,12 +7839,12 @@ router14.get("/:id/items", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar itens" });
   }
 });
-router14.post("/generate", async (req, res) => {
+router16.post("/generate", async (req, res) => {
   try {
-    const schema = z12.object({
-      psychologistId: z12.number(),
-      periodStart: z12.string(),
-      periodEnd: z12.string()
+    const schema = z14.object({
+      psychologistId: z14.number(),
+      periodStart: z14.string(),
+      periodEnd: z14.string()
     });
     const { psychologistId, periodStart, periodEnd } = schema.parse(req.body);
     if (!await storage.getPsychologist(req.companyId, psychologistId)) {
@@ -6786,16 +7888,16 @@ router14.post("/generate", async (req, res) => {
     );
     res.status(201).json(commission);
   } catch (e) {
-    if (e instanceof z12.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z14.ZodError) return res.status(400).json({ message: e.errors[0].message });
     res.status(500).json({ message: "Erro ao gerar comissionamento" });
   }
 });
-router14.patch("/:id/pay", async (req, res) => {
+router16.patch("/:id/pay", async (req, res) => {
   try {
-    const schema = z12.object({
-      paymentDate: z12.string(),
-      paymentMethod: z12.string().min(1, "Informe o m\xE9todo de pagamento"),
-      paymentNotes: z12.string().optional()
+    const schema = z14.object({
+      paymentDate: z14.string(),
+      paymentMethod: z14.string().min(1, "Informe o m\xE9todo de pagamento"),
+      paymentNotes: z14.string().optional()
     });
     const data = schema.parse(req.body);
     const c = await storage.getCommission(req.companyId, parseInt(req.params.id));
@@ -6804,11 +7906,11 @@ router14.patch("/:id/pay", async (req, res) => {
     const updated = await storage.updateCommission(req.companyId, c.id, { ...data, status: "paid" });
     res.json(updated);
   } catch (e) {
-    if (e instanceof z12.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z14.ZodError) return res.status(400).json({ message: e.errors[0].message });
     res.status(500).json({ message: "Erro ao registrar pagamento" });
   }
 });
-router14.patch("/:id/cancel", async (req, res) => {
+router16.patch("/:id/cancel", async (req, res) => {
   try {
     const c = await storage.getCommission(req.companyId, parseInt(req.params.id));
     if (!c) return res.status(404).json({ message: "Comissionamento n\xE3o encontrado" });
@@ -6819,8 +7921,8 @@ router14.patch("/:id/cancel", async (req, res) => {
     res.status(500).json({ message: "Erro ao cancelar comissionamento" });
   }
 });
-var commissions_default = router14;
-var commissionConfigsRouter = Router14();
+var commissions_default = router16;
+var commissionConfigsRouter = Router16();
 commissionConfigsRouter.use(adminOnly);
 commissionConfigsRouter.get("/", async (req, res) => {
   try {
@@ -6843,12 +7945,12 @@ commissionConfigsRouter.get("/", async (req, res) => {
 });
 commissionConfigsRouter.post("/", async (req, res) => {
   try {
-    const schema = z12.object({
-      psychologistId: z12.number(),
-      payoutType: z12.enum(["percentual", "fixed"]),
-      payoutValue: z12.union([z12.string().transform(parseFloat), z12.number()]),
-      validFrom: z12.string(),
-      validUntil: z12.string().nullable().optional()
+    const schema = z14.object({
+      psychologistId: z14.number(),
+      payoutType: z14.enum(["percentual", "fixed"]),
+      payoutValue: z14.union([z14.string().transform(parseFloat), z14.number()]),
+      validFrom: z14.string(),
+      validUntil: z14.string().nullable().optional()
     });
     const data = schema.parse(req.body);
     if (!await storage.getPsychologist(req.companyId, data.psychologistId)) {
@@ -6860,17 +7962,17 @@ commissionConfigsRouter.post("/", async (req, res) => {
     });
     res.status(201).json(config);
   } catch (e) {
-    if (e instanceof z12.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z14.ZodError) return res.status(400).json({ message: e.errors[0].message });
     res.status(500).json({ message: "Erro ao criar configura\xE7\xE3o" });
   }
 });
 commissionConfigsRouter.put("/:id", async (req, res) => {
   try {
-    const schema = z12.object({
-      payoutType: z12.enum(["percentual", "fixed"]).optional(),
-      payoutValue: z12.union([z12.string().transform(parseFloat), z12.number()]).optional(),
-      validFrom: z12.string().optional(),
-      validUntil: z12.string().nullable().optional()
+    const schema = z14.object({
+      payoutType: z14.enum(["percentual", "fixed"]).optional(),
+      payoutValue: z14.union([z14.string().transform(parseFloat), z14.number()]).optional(),
+      validFrom: z14.string().optional(),
+      validUntil: z14.string().nullable().optional()
     });
     const parsed = schema.parse(req.body);
     const updateData = {
@@ -6883,7 +7985,7 @@ commissionConfigsRouter.put("/:id", async (req, res) => {
     if (!updated) return res.status(404).json({ message: "Configura\xE7\xE3o n\xE3o encontrada" });
     res.json(updated);
   } catch (e) {
-    if (e instanceof z12.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z14.ZodError) return res.status(400).json({ message: e.errors[0].message });
     res.status(500).json({ message: "Erro ao atualizar configura\xE7\xE3o" });
   }
 });
@@ -6924,22 +8026,48 @@ async function registerRoutes(app) {
     // platform admin, guarded by requirePlatformAdmin (may have no company)
     { path: /^\/api\/care\/respond\// },
     // patient form link (scoped by its token)
-    { method: "GET", path: /^\/api\/google-calendar\/auth\/callback$/ }
+    { method: "GET", path: /^\/api\/google-calendar\/auth\/callback$/ },
     // OAuth redirect
+    { path: /^\/api\/cron\/whatsapp-reminders$/ },
+    // scheduler, guarded by CRON_SECRET
+    { method: "POST", path: /^\/api\/twilio\/status$/ }
+    // Twilio callback, guarded by its signature
   ]));
   const handleZodError = (error) => {
     if (error instanceof ZodError) {
       const validationError = fromZodError(error);
-      return { message: validationError.message };
+      return { message: validationError.message, field: error.issues[0]?.path[0] };
     }
     return { message: "An unexpected error occurred" };
   };
-  async function foreignReference(companyId, refs) {
-    if (refs.roomId !== void 0 && !await storage.getRoom(companyId, Number(refs.roomId))) {
+  const ONLINE_ROOM_ID = 0;
+  async function foreignReference(companyId, refs, { allowOnline = false } = {}) {
+    const online = allowOnline && Number(refs.roomId) === ONLINE_ROOM_ID;
+    if (refs.roomId !== void 0 && !online && !await storage.getRoom(companyId, Number(refs.roomId))) {
       return "Sala n\xE3o encontrada.";
     }
     if (refs.psychologistId !== void 0 && !await storage.getPsychologist(companyId, Number(refs.psychologistId))) {
       return "Psic\xF3loga n\xE3o encontrada.";
+    }
+    return null;
+  }
+  async function appointmentProblem(companyId, data) {
+    if (!data.patientName.trim()) return { field: "patientName", message: "Informe o nome do paciente." };
+    if (!data.psychologistId) return { field: "psychologistId", message: "Selecione uma psic\xF3loga." };
+    if (!await storage.getPsychologist(companyId, data.psychologistId)) {
+      return { field: "psychologistId", message: "Psic\xF3loga n\xE3o encontrada nesta cl\xEDnica." };
+    }
+    if (data.roomId !== ONLINE_ROOM_ID && !await storage.getRoom(companyId, data.roomId)) {
+      return { field: "roomId", message: "Sala n\xE3o encontrada nesta cl\xEDnica." };
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data.date) || Number.isNaN(new Date(data.date).getTime())) {
+      return { field: "date", message: "Data inv\xE1lida." };
+    }
+    const time3 = /^\d{2}:\d{2}(:\d{2})?$/;
+    if (!time3.test(data.startTime)) return { field: "startTime", message: "Hor\xE1rio de in\xEDcio inv\xE1lido." };
+    if (!time3.test(data.endTime)) return { field: "endTime", message: "Hor\xE1rio de t\xE9rmino inv\xE1lido." };
+    if (timeToMinutes(data.endTime) <= timeToMinutes(data.startTime)) {
+      return { field: "endTime", message: "O t\xE9rmino precisa ser depois do in\xEDcio." };
     }
     return null;
   }
@@ -6997,6 +8125,11 @@ async function registerRoutes(app) {
   app.post("/api/psychologists", requireStaff, async (req, res) => {
     try {
       const data = insertPsychologistSchema.parse(req.body);
+      const member = (await storage.getAllUsers(req.companyId)).some((u) => u.id === data.userId);
+      if (!member) return res.status(400).json({ field: "userId", message: "Este usu\xE1rio n\xE3o faz parte desta cl\xEDnica." });
+      if (await storage.getPsychologistByUserId(req.companyId, data.userId)) {
+        return res.status(409).json({ field: "userId", message: "Este usu\xE1rio j\xE1 tem um perfil de psic\xF3loga nesta cl\xEDnica." });
+      }
       const psychologist = await storage.createPsychologist(req.companyId, data);
       res.status(201).json(psychologist);
     } catch (error) {
@@ -7293,33 +8426,42 @@ async function registerRoutes(app) {
         body.psychologistId = psychProfile.id;
       }
       const data = insertAppointmentSchema.parse(body);
-      const foreign = await foreignReference(req.companyId, data);
-      if (foreign) return res.status(400).json({ message: foreign });
-      const isRoomAvailable = await storage.checkRoomAvailability(
-        req.companyId,
-        data.roomId,
-        new Date(data.date),
-        data.startTime,
-        data.endTime
-      );
-      if (!isRoomAvailable) {
-        return res.status(409).json({ message: "Room is not available for the specified time" });
+      const problem = await appointmentProblem(req.companyId, data);
+      if (problem) return res.status(400).json(problem);
+      const online = data.roomId === ONLINE_ROOM_ID;
+      if (!online) {
+        const isRoomAvailable = await storage.checkRoomAvailability(
+          req.companyId,
+          data.roomId,
+          new Date(data.date),
+          data.startTime,
+          data.endTime
+        );
+        if (!isRoomAvailable) {
+          return res.status(409).json({
+            field: "roomId",
+            message: "Esta sala j\xE1 est\xE1 ocupada neste hor\xE1rio. Escolha outra sala ou outro hor\xE1rio."
+          });
+        }
       }
       const appointment = await storage.createAppointment(req.companyId, data);
-      await storage.createRoomBooking(req.companyId, {
-        roomId: data.roomId,
-        psychologistId: data.psychologistId,
-        date: data.date,
-        startTime: data.startTime,
-        endTime: data.endTime,
-        purpose: `Appointment with ${data.patientName}`
-      });
-      res.status(201).json(appointment);
+      if (!online) {
+        await storage.createRoomBooking(req.companyId, {
+          roomId: data.roomId,
+          psychologistId: data.psychologistId,
+          date: data.date,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          purpose: `Appointment with ${data.patientName}`
+        });
+      }
+      const googleCalendar = await syncAppointmentToCalendar(req.companyId, appointment);
+      res.status(201).json({ ...appointment, googleCalendar });
     } catch (error) {
       if (error instanceof ZodError) {
         return res.status(400).json(handleZodError(error));
       }
-      res.status(500).json({ message: "Error creating appointment" });
+      res.status(500).json({ message: "N\xE3o foi poss\xEDvel criar o agendamento. Tente novamente." });
     }
   });
   function timeToMinutes(timeStr) {
@@ -7387,6 +8529,7 @@ async function registerRoutes(app) {
         endTime: appointmentData.endTime,
         purpose: `Agendamento online com ${appointmentData.patientName}`
       });
+      await syncAppointmentToCalendar(companyId, appointment);
       res.status(201).json({
         success: true,
         message: "Agendamento enviado com sucesso",
@@ -7400,13 +8543,14 @@ async function registerRoutes(app) {
   app.put("/api/appointments/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const foreign = await foreignReference(req.companyId, req.body);
+      const foreign = await foreignReference(req.companyId, req.body, { allowOnline: true });
       if (foreign) return res.status(400).json({ message: foreign });
       const updatedAppointment = await storage.updateAppointment(req.companyId, id, req.body);
       if (!updatedAppointment) {
         return res.status(404).json({ message: "Appointment not found" });
       }
-      res.json(updatedAppointment);
+      const googleCalendar = await syncAppointmentToCalendar(req.companyId, updatedAppointment);
+      res.json({ ...updatedAppointment, googleCalendar });
     } catch (error) {
       res.status(500).json({ message: "Error updating appointment" });
     }
@@ -7414,6 +8558,10 @@ async function registerRoutes(app) {
   app.delete("/api/appointments/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      if (!await storage.getAppointment(req.companyId, id)) {
+        return res.status(404).json({ message: "Appointment not found" });
+      }
+      await removeAppointmentFromCalendar(id);
       const result = await storage.deleteAppointment(req.companyId, id);
       if (!result) {
         return res.status(404).json({ message: "Appointment not found" });
@@ -7752,7 +8900,8 @@ async function registerRoutes(app) {
     try {
       const data = insertRoomBookingSchema.parse(req.body);
       const booking = await createRoomBookingChecked(req.companyId, data);
-      res.status(201).json(booking);
+      const googleCalendar = await syncRoomBookingToCalendar(req.companyId, booking);
+      res.status(201).json({ ...booking, googleCalendar });
     } catch (error) {
       if (error instanceof ZodError) {
         return res.status(400).json(handleZodError(error));
@@ -7770,7 +8919,8 @@ async function registerRoutes(app) {
       if (!updatedBooking) {
         return res.status(404).json({ message: "Room booking not found" });
       }
-      res.json(updatedBooking);
+      const googleCalendar = await syncRoomBookingToCalendar(req.companyId, updatedBooking);
+      res.json({ ...updatedBooking, googleCalendar });
     } catch (error) {
       res.status(500).json({ message: "Error updating room booking" });
     }
@@ -7778,6 +8928,10 @@ async function registerRoutes(app) {
   app.delete("/api/room-bookings/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
+      if (!await storage.getRoomBooking(req.companyId, id)) {
+        return res.status(404).json({ message: "Room booking not found" });
+      }
+      await removeRoomBookingFromCalendar(id);
       const result = await storage.deleteRoomBooking(req.companyId, id);
       if (!result) {
         return res.status(404).json({ message: "Room booking not found" });
@@ -8171,12 +9325,14 @@ async function registerRoutes(app) {
   app.use("/api/companies", companies_default);
   app.use("/api/platform", platform_default);
   app.use("/api/agent", agent_default);
+  app.use("/api/whatsapp", whatsapp_default);
+  app.use("/api", twilio_default);
   app.use("/api/care", care_public_default);
   app.use("/api/care/templates", care_templates_default);
   app.use("/api/care", care_dispatch_default);
   app.use("/api/admin/commissions", commissions_default);
   app.use("/api/admin/commission-configs", commissionConfigsRouter);
-  app.post("/api/invoices/analyze-image", async (req, res) => {
+  app.post("/api/invoices/analyze-image", requireAi, async (req, res) => {
     try {
       if (!req.isAuthenticated()) {
         return res.status(401).json({ message: "N\xE3o autenticado" });
@@ -8713,7 +9869,7 @@ function getDayOfWeek(date3) {
 }
 
 // server/seed-specializations.ts
-import { sql as sql8 } from "drizzle-orm";
+import { sql as sql10 } from "drizzle-orm";
 var PREDEFINED_AREAS = [
   // Transtornos Clínicos (10)
   { name: "Ansiedade", category: "Transtornos Cl\xEDnicos" },
@@ -8762,10 +9918,10 @@ var PREDEFINED_AREAS = [
 ];
 async function seedSpecializationAreas() {
   try {
-    const [{ count: count4 }] = await db2.select({ count: sql8`count(*)` }).from(specializationAreas);
+    const [{ count: count4 }] = await db.select({ count: sql10`count(*)` }).from(specializationAreas);
     if (Number(count4) >= PREDEFINED_AREAS.length) return;
     for (const area of PREDEFINED_AREAS) {
-      await db2.insert(specializationAreas).values({ name: area.name, category: area.category, isCustom: false }).onConflictDoNothing();
+      await db.insert(specializationAreas).values({ name: area.name, category: area.category, isCustom: false }).onConflictDoNothing();
     }
     console.log(`Seeded ${PREDEFINED_AREAS.length} specialization areas.`);
   } catch (e) {
@@ -8774,18 +9930,18 @@ async function seedSpecializationAreas() {
 }
 
 // server/seed-care.ts
-import { sql as sql9 } from "drizzle-orm";
+import { sql as sql11 } from "drizzle-orm";
 async function seedCareTemplates() {
   try {
-    const [{ count: count4 }] = await db2.select({ count: sql9`count(*)` }).from(careTemplates);
+    const [{ count: count4 }] = await db.select({ count: sql11`count(*)` }).from(careTemplates);
     if (Number(count4) > 0) return;
-    const [template] = await db2.insert(careTemplates).values({
+    const [template] = await db.insert(careTemplates).values({
       psychologistId: null,
       title: "Check-in Semanal",
       description: "Formul\xE1rio padr\xE3o de acompanhamento semanal do paciente.",
       isDefault: true
     }).returning();
-    await db2.insert(careTemplateQuestions).values([
+    await db.insert(careTemplateQuestions).values([
       {
         templateId: template.id,
         questionText: "Como est\xE1 sua semana, {patient_name}?",
@@ -8858,6 +10014,65 @@ async function runStartupMigrations() {
     await pool.query(`ALTER TABLE users ALTER COLUMN created_at SET DEFAULT now()`);
     await migrateCompanies();
     await migrateAgent();
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS calendar_events (
+        id serial PRIMARY KEY,
+        appointment_id integer NOT NULL REFERENCES appointments(id),
+        google_event_id text NOT NULL,
+        user_id integer NOT NULL REFERENCES users(id),
+        last_synced timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS calendar_events_appointment_idx ON calendar_events (appointment_id)`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS room_booking_events (
+        id serial PRIMARY KEY,
+        booking_id integer NOT NULL UNIQUE REFERENCES room_bookings(id) ON DELETE CASCADE,
+        google_event_id text NOT NULL,
+        user_id integer NOT NULL REFERENCES users(id),
+        last_synced timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS message_templates (
+        id serial PRIMARY KEY,
+        company_id integer NOT NULL REFERENCES companies(id),
+        key text NOT NULL,
+        body text NOT NULL,
+        updated_by integer REFERENCES users(id) ON DELETE SET NULL,
+        updated_at timestamp NOT NULL DEFAULT now(),
+        CONSTRAINT message_templates_company_key UNIQUE (company_id, key)
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS appointment_reminders (
+        appointment_id integer PRIMARY KEY REFERENCES appointments(id) ON DELETE CASCADE,
+        company_id integer NOT NULL REFERENCES companies(id),
+        sent_by integer REFERENCES users(id) ON DELETE SET NULL,
+        sent_at timestamp NOT NULL DEFAULT now()
+      )
+    `);
+    await pool.query(`
+      ALTER TABLE companies
+        ADD COLUMN IF NOT EXISTS whatsapp_auto_reminders boolean NOT NULL DEFAULT false,
+        ADD COLUMN IF NOT EXISTS reminder_lead_hours integer NOT NULL DEFAULT 24
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS whatsapp_messages (
+        id serial PRIMARY KEY,
+        company_id integer NOT NULL REFERENCES companies(id),
+        appointment_id integer REFERENCES appointments(id) ON DELETE CASCADE,
+        kind text NOT NULL,
+        to_phone text,
+        status text NOT NULL,
+        twilio_sid text,
+        error text,
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now(),
+        CONSTRAINT whatsapp_messages_appointment_kind UNIQUE (appointment_id, kind)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS whatsapp_messages_twilio_sid_idx ON whatsapp_messages (twilio_sid)`);
   } catch (error) {
     log(`startup migration failed: ${error.message}`);
     throw error;
@@ -8912,6 +10127,50 @@ async function migrateCompanies() {
       ADD COLUMN IF NOT EXISTS logo_data bytea,
       ADD COLUMN IF NOT EXISTS logo_mime_type text
   `);
+  await pool.query(`
+    ALTER TABLE companies
+      ADD COLUMN IF NOT EXISTS access_valid_until date,
+      ADD COLUMN IF NOT EXISTS ai_enabled boolean NOT NULL DEFAULT true
+  `);
+  await pool.query(`
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS last_login_at timestamptz,
+      ADD COLUMN IF NOT EXISTS last_seen_at timestamptz
+  `);
+  await pool.query(`
+    ALTER TABLE companies
+      ADD COLUMN IF NOT EXISTS plan text,
+      ADD COLUMN IF NOT EXISTS monthly_price numeric(10,2),
+      ADD COLUMN IF NOT EXISTS subscription_started_at date
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS subscription_payments (
+      id serial PRIMARY KEY,
+      company_id integer NOT NULL REFERENCES companies(id),
+      amount numeric(10,2) NOT NULL,
+      paid_at date NOT NULL,
+      reference_month text NOT NULL,
+      months_covered integer NOT NULL DEFAULT 1,
+      method text NOT NULL,
+      notes text,
+      valid_until_after date,
+      created_by integer REFERENCES users(id) ON DELETE SET NULL,
+      created_at timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS subscription_payments_company_idx ON subscription_payments (company_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS subscription_payments_paid_at_idx ON subscription_payments (paid_at)`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS subscription_events (
+      id serial PRIMARY KEY,
+      company_id integer NOT NULL REFERENCES companies(id),
+      type text NOT NULL,
+      details jsonb,
+      user_id integer REFERENCES users(id) ON DELETE SET NULL,
+      created_at timestamp NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS subscription_events_company_created_idx ON subscription_events (company_id, created_at)`);
   const { rows: present2 } = await pool.query(
     `SELECT tablename FROM pg_tables WHERE schemaname = current_schema() AND tablename = ANY($1)`,
     [COMPANY_TABLES]
@@ -9053,6 +10312,7 @@ async function runOnce(name, migrate) {
 // server/app.ts
 async function createApp() {
   const app = express();
+  app.use(painelCors());
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: false, limit: "10mb" }));
   app.use((req, res, next) => {
@@ -9083,11 +10343,12 @@ async function createApp() {
   await seedSpecializationAreas();
   await seedCareTemplates();
   const server = await registerRoutes(app);
-  app.use((err, _req, res, _next) => {
+  app.use((err, req, res, _next) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+    console.error(`${req.method} ${req.path} falhou:`, err);
+    if (res.headersSent) return;
+    const message = status >= 500 ? "Erro interno no servidor. Tente novamente em instantes." : err.message || "Erro na requisi\xE7\xE3o";
     res.status(status).json({ message });
-    throw err;
   });
   return { app, server };
 }

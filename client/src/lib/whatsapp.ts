@@ -22,6 +22,10 @@ export type ReminderItem = {
   message: string;
   reminderSentAt: string | null;
   reminderSentByName: string | null;
+  /** Automatic reminder (Twilio): sending, sent, delivered, read, failed, undelivered, skipped */
+  autoStatus: string | null;
+  autoError: string | null;
+  autoAt: string | null;
 };
 
 export type RemindersResponse = { date: string; tomorrow: string; items: ReminderItem[] };
@@ -34,6 +38,19 @@ export const PHONE_ISSUE_TEXT: Record<Exclude<PhoneIssue, null>, string> = {
   no_phone: "O cadastro do paciente está sem telefone.",
   invalid: "O telefone do cadastro do paciente está incompleto.",
   ambiguous: "Há mais de um paciente com esse nome e telefones diferentes.",
+};
+
+/** The automatic (Twilio) reminder already reached the patient's WhatsApp, or is on its way. */
+export const autoSent = (item: Pick<ReminderItem, "autoStatus">) => ["sending", "sent", "delivered", "read"].includes(item.autoStatus ?? "");
+
+export const AUTO_STATUS_TEXT: Record<string, string> = {
+  sending: "Enviando automaticamente",
+  sent: "Enviado automaticamente",
+  delivered: "Entregue automaticamente",
+  read: "Lido pelo paciente",
+  failed: "Falha no envio automático",
+  undelivered: "Não entregue",
+  skipped: "Não enviado automaticamente",
 };
 
 /** "2026-11-04" -> "quarta-feira, 04/11" */

@@ -23,6 +23,7 @@ import companiesRouter from "./routes/companies";
 import platformRouter from "./routes/platform";
 import agentRouter from "./routes/agent";
 import whatsappRouter from "./routes/whatsapp";
+import twilioRouter from "./routes/twilio";
 import { BookingError, createRoomBookingChecked } from "./lib/room-bookings";
 import { removeAppointmentFromCalendar, removeRoomBookingFromCalendar, syncAppointmentToCalendar, syncRoomBookingToCalendar } from "./lib/calendar-sync";
 import { publicClinic } from "./lib/companies";
@@ -72,6 +73,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     { path: /^\/api\/platform\// }, // platform admin, guarded by requirePlatformAdmin (may have no company)
     { path: /^\/api\/care\/respond\// }, // patient form link (scoped by its token)
     { method: "GET", path: /^\/api\/google-calendar\/auth\/callback$/ }, // OAuth redirect
+    { path: /^\/api\/cron\/whatsapp-reminders$/ }, // scheduler, guarded by CRON_SECRET
+    { method: "POST", path: /^\/api\/twilio\/status$/ }, // Twilio callback, guarded by its signature
   ]));
 
   // Error handler for Zod validation errors
@@ -1710,6 +1713,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/agent", agentRouter);
   // WhatsApp reminders through wa.me links (Lembretes de amanhã) and the clinic message texts
   app.use("/api/whatsapp", whatsappRouter);
+  // Automatic WhatsApp reminders (Twilio): scheduler + status callback, no session
+  app.use("/api", twilioRouter);
 
   // Care module — public response routes (no auth required) — MUST be mounted FIRST
   // so that /api/care/respond/:token is reachable before the authenticated dispatch

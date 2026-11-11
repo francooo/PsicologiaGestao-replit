@@ -2,12 +2,13 @@ import { Router, type Request } from "express";
 import { z } from "zod";
 import { and, eq, ne } from "drizzle-orm";
 import { db } from "../db";
-import { appointmentReminders, appointments, companies, messageTemplates, psychologists, rooms, users } from "@shared/schema";
-import { patients } from "@shared/patient-schema";
+import { appointmentReminders, appointments, companies, messageTemplates, psychologists, rooms, users, whatsappMessages } from "@shared/schema";
 import { DEFAULT_MESSAGES, MESSAGE_KEYS, MESSAGE_MAX_LENGTH, fillMessage, type MessageKey } from "@shared/whatsapp-message";
 import { requireAdmin, requireAuth, requireCompany } from "../middleware/auth-guards";
 import { storage } from "../storage";
-import { formatPhoneNumber } from "../services/whatsapp";
+import { findPhone, patientIndex } from "../lib/patient-phone";
+import { LEAD_HOURS, REMINDER_KIND } from "../lib/auto-reminders";
+import { isTwilioConfigured } from "../services/twilio";
 
 // Mounted at /api/whatsapp — reminders sent through wa.me links: the client opens the WhatsApp of
 // whoever is using the system, with the patient's number and the clinic's text already filled.
@@ -18,7 +19,6 @@ const STAFF = ["admin", "receptionist"];
 const TZ = "America/Sao_Paulo";
 
 type User = { id: number; role: string; fullName: string };
-type PhoneIssue = "not_found" | "no_phone" | "invalid" | "ambiguous" | null;
 
 const dateKey = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(d);
 function tomorrowKey() {
@@ -26,9 +26,6 @@ function tomorrowKey() {
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
 }
-
-const normalizeName = (s: string) =>
-  s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 
 const displayPhone = (digits: string) => {
   const local = digits.startsWith("55") ? digits.slice(2) : digits;
@@ -65,6 +62,9 @@ const appointmentColumns = {
   roomName: rooms.name,
   reminderSentAt: appointmentReminders.sentAt,
   reminderSentBy: appointmentReminders.sentBy,
+  autoStatus: whatsappMessages.status,
+  autoError: whatsappMessages.error,
+  autoAt: whatsappMessages.updatedAt,
 };
 
 function appointmentQuery(companyId: number) {
@@ -75,29 +75,11 @@ function appointmentQuery(companyId: number) {
     .leftJoin(users, eq(users.id, psychologists.userId))
     .leftJoin(rooms, and(eq(rooms.id, appointments.roomId), eq(rooms.companyId, companyId)))
     .leftJoin(appointmentReminders, eq(appointmentReminders.appointmentId, appointments.id))
+    .leftJoin(whatsappMessages, and(eq(whatsappMessages.appointmentId, appointments.id), eq(whatsappMessages.kind, REMINDER_KIND)))
     .$dynamic();
 }
 
 type Row = Awaited<ReturnType<ReturnType<typeof appointmentQuery>["execute"]>>[number];
-type PatientRow = { id: number; fullName: string; phone: string; psychologistId: number | null };
-
-/**
- * Appointments only keep the patient's name: the phone comes from the clinic's patient with that
- * name (accents and case ignored). Two patients with the same name and different phones → ambiguous.
- */
-function findPhone(appt: Row, byName: Map<string, PatientRow[]>) {
-  let found = byName.get(normalizeName(appt.patientName)) ?? [];
-  if (found.length === 0) return { patientId: null, phone: null, issue: "not_found" as PhoneIssue };
-  if (found.length > 1) {
-    const own = found.filter((p) => p.psychologistId === appt.psychologistId);
-    if (own.length > 0) found = own;
-  }
-  const phones = Array.from(new Set(found.map((p) => formatPhoneNumber(p.phone ?? "")).filter((p): p is string => !!p)));
-  const patientId = found.length === 1 ? found[0].id : null;
-  if (phones.length === 1) return { patientId: found[0].id, phone: phones[0], issue: null };
-  if (phones.length > 1) return { patientId, phone: null, issue: "ambiguous" as PhoneIssue };
-  return { patientId, phone: null, issue: (found.some((p) => p.phone?.trim()) ? "invalid" : "no_phone") as PhoneIssue };
-}
 
 async function buildItems(req: Request, rows: Row[]) {
   const companyId = req.companyId!;
@@ -106,15 +88,7 @@ async function buildItems(req: Request, rows: Row[]) {
 
   const [company] = await db.select({ name: companies.name }).from(companies).where(eq(companies.id, companyId));
   const body = (await templateBody(companyId, "appointment_reminder")) ?? DEFAULT_MESSAGES.appointment_reminder;
-  const clinicPatients = await db
-    .select({ id: patients.id, fullName: patients.fullName, phone: patients.phone, psychologistId: patients.psychologistId })
-    .from(patients)
-    .where(eq(patients.companyId, companyId));
-  const byName = new Map<string, PatientRow[]>();
-  for (const p of clinicPatients) {
-    const k = normalizeName(p.fullName);
-    byName.set(k, [...(byName.get(k) ?? []), p]);
-  }
+  const byName = await patientIndex(companyId);
   const senderIds = Array.from(new Set(rows.map((r) => r.reminderSentBy).filter((id): id is number => !!id)));
   const senders = new Map<number, string>();
   for (const id of senderIds) {
@@ -156,6 +130,10 @@ async function buildItems(req: Request, rows: Row[]) {
       message: fillMessage(body, vars),
       reminderSentAt: a.reminderSentAt,
       reminderSentByName: a.reminderSentBy ? senders.get(a.reminderSentBy) ?? null : null,
+      // Automatic reminder (Twilio): sending, sent, delivered, read, failed, undelivered, skipped
+      autoStatus: a.autoStatus ?? null,
+      autoError: a.autoError ?? null,
+      autoAt: a.autoAt ?? null,
     };
   });
 }
@@ -225,6 +203,42 @@ router.post("/appointments/:id/reminder-sent", async (req, res) => {
   } catch (error) {
     console.error("whatsapp reminder-sent error:", error);
     res.status(500).json({ message: "Não foi possível registrar o lembrete." });
+  }
+});
+
+// GET /api/whatsapp/auto-settings — the clinic's automatic reminder (Twilio) switch and lead time
+router.get("/auto-settings", async (req, res) => {
+  const [row] = await db
+    .select({ enabled: companies.whatsappAutoReminders, leadHours: companies.reminderLeadHours })
+    .from(companies)
+    .where(eq(companies.id, req.companyId!));
+  res.json({
+    enabled: !!row?.enabled,
+    leadHours: row?.leadHours ?? 24,
+    leadOptions: LEAD_HOURS,
+    twilioConfigured: isTwilioConfigured(),
+    approvedTemplate: !!process.env.TWILIO_REMINDER_CONTENT_SID,
+  });
+});
+
+const autoSettingsSchema = z.object({
+  enabled: z.boolean(),
+  leadHours: z.number().refine((h) => (LEAD_HOURS as readonly number[]).includes(h), "Antecedência inválida."),
+});
+
+// PUT /api/whatsapp/auto-settings — admin turns the automatic reminder on/off and picks the lead time
+router.put("/auto-settings", requireAdmin, async (req, res) => {
+  const parsed = autoSettingsSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0].message });
+  try {
+    await db
+      .update(companies)
+      .set({ whatsappAutoReminders: parsed.data.enabled, reminderLeadHours: parsed.data.leadHours })
+      .where(eq(companies.id, req.companyId!));
+    res.json({ ...parsed.data, leadOptions: LEAD_HOURS, twilioConfigured: isTwilioConfigured(), approvedTemplate: !!process.env.TWILIO_REMINDER_CONTENT_SID });
+  } catch (error) {
+    console.error("whatsapp auto-settings error:", error);
+    res.status(500).json({ message: "Não foi possível salvar a configuração." });
   }
 });
 

@@ -53,6 +53,9 @@ export const companies = pgTable("companies", {
   accessValidUntil: date("access_valid_until"),
   // Groq features (assistant, invoice reading, document summaries) for this clinic
   aiEnabled: boolean("ai_enabled").notNull().default(true),
+  // Automatic WhatsApp reminders sent through Twilio (Configurações), and how early
+  whatsappAutoReminders: boolean("whatsapp_auto_reminders").notNull().default(false),
+  reminderLeadHours: integer("reminder_lead_hours").notNull().default(24), // 24, 12 or 2
   // Subscription (owner panel): plan, agreed monthly price and when it started
   plan: text("plan"), // solo, intermediario, expert (null = not set)
   monthlyPrice: decimal("monthly_price", { precision: 10, scale: 2 }),
@@ -516,6 +519,24 @@ export const appointmentReminders = pgTable("appointment_reminders", {
   sentBy: integer("sent_by").references(() => users.id, { onDelete: "set null" }),
   sentAt: timestamp("sent_at").notNull().defaultNow(),
 });
+
+// WhatsApp messages sent automatically through Twilio. One row per appointment and kind, so a
+// reminder is never sent twice; Twilio's status callback moves it to delivered/read/failed.
+export const whatsappMessages = pgTable("whatsapp_messages", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  appointmentId: integer("appointment_id").references(() => appointments.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(), // appointment_reminder
+  toPhone: text("to_phone"),
+  // sending, sent (accepted by Twilio), delivered, read, failed, undelivered, skipped (no phone)
+  status: text("status").notNull(),
+  twilioSid: text("twilio_sid"),
+  error: text("error"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [unique("whatsapp_messages_appointment_kind").on(t.appointmentId, t.kind)]);
+
+export type WhatsappMessage = typeof whatsappMessages.$inferSelect;
 
 export const calendarEventsRelations = relations(calendarEvents, ({ one }) => ({
   appointment: one(appointments, {
