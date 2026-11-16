@@ -19,7 +19,7 @@ import { TextField } from '@/components/ui/TextField';
 import { api } from '@/api/client';
 import { useAuth } from '@/auth/AuthProvider';
 import { appendFile, pickImage } from '@/utils/files';
-import { formatDate } from '@/utils/format';
+import { formatCpf, formatDate } from '@/utils/format';
 import { monthsAtClinicText } from '@/utils/people';
 import { toast } from '@/utils/toast';
 import { colors } from '@/theme/tokens';
@@ -32,7 +32,7 @@ type Profile = {
   birthDate: string | null;
   status: string;
   age: number | null;
-  psychologist: { id: number; phone: string | null; crpNumber: string | null; bio: string | null; startedAtClinic: string | null } | null;
+  psychologist: { id: number; phone: string | null; crpNumber: string | null; cpf: string | null; bio: string | null; startedAtClinic: string | null } | null;
   specializations: { id: number; name: string; category: string | null }[];
 };
 
@@ -56,7 +56,7 @@ export default function MyProfileScreen() {
   const [editInfo, setEditInfo] = useState(false);
   const [editBio, setEditBio] = useState(false);
   const [editAreas, setEditAreas] = useState(false);
-  const [form, setForm] = useState({ fullName: '', phone: '', birthDate: '', crpNumber: '' });
+  const [form, setForm] = useState({ fullName: '', phone: '', birthDate: '', crpNumber: '', cpf: '' });
   const [bio, setBio] = useState('');
   const [areas, setAreas] = useState<number[]>([]);
 
@@ -67,6 +67,7 @@ export default function MyProfileScreen() {
       phone: data.psychologist?.phone ?? '',
       birthDate: data.birthDate?.slice(0, 10) ?? '',
       crpNumber: data.psychologist?.crpNumber ?? '',
+      cpf: formatCpf(data.psychologist?.cpf),
     });
     setEditInfo(true);
   };
@@ -91,7 +92,7 @@ export default function MyProfileScreen() {
       refreshUser().catch(() => {});
       setEditInfo(false);
     },
-    onError: () => toast.error('Erro ao salvar informações'),
+    onError: (e: Error) => toast.error('Erro ao salvar informações', e.message),
   });
   const saveBio = useMutation({
     mutationFn: () => api('/api/profile', { method: 'PATCH', body: { bio } }),
@@ -163,6 +164,7 @@ export default function MyProfileScreen() {
               <TextField label="Telefone / WhatsApp" placeholder="(11) 91234-5678" keyboardType="phone-pad" value={form.phone} onChangeText={(t) => setForm({ ...form, phone: t })} />
               <DateTimeField label="Data de nascimento" mode="date" value={form.birthDate} onChange={(v) => setForm({ ...form, birthDate: v })} />
               <TextField label="Número do CRP" placeholder="06/12345" value={form.crpNumber} onChangeText={(t) => setForm({ ...form, crpNumber: t })} />
+              <TextField label="CPF" placeholder="000.000.000-00" keyboardType="number-pad" hint="Usado nos recibos do Receita Saúde." value={form.cpf} onChangeText={(t) => setForm({ ...form, cpf: formatCpf(t) })} />
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <Button title="Cancelar" variant="outline" style={{ flex: 1 }} onPress={() => setEditInfo(false)} />
                 <Button title="Salvar" style={{ flex: 1 }} loading={saveInfo.isPending} onPress={() => saveInfo.mutate()} />
@@ -174,6 +176,7 @@ export default function MyProfileScreen() {
               <InfoRow label="Telefone" value={p?.phone} />
               <InfoRow label="Nascimento" value={data.birthDate ? formatDate(data.birthDate.slice(0, 10)) : null} />
               <InfoRow label="CRP" value={p?.crpNumber} />
+              <InfoRow label="CPF" value={p?.cpf ? formatCpf(p.cpf) : null} />
               <InfoRow label="E-mail 🔒" value={data.email} />
               <InfoRow label="Entrada na clínica 🔒" value={p?.startedAtClinic ? formatDate(p.startedAtClinic) : null} last />
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>

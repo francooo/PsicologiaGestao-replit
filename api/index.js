@@ -57,6 +57,7 @@ __export(schema_exports, {
   companyMemberships: () => companyMemberships,
   googleTokens: () => googleTokens,
   googleTokensRelations: () => googleTokensRelations,
+  healthReceipts: () => healthReceipts,
   insertAppointmentSchema: () => insertAppointmentSchema,
   insertCalendarEventSchema: () => insertCalendarEventSchema,
   insertCareDispatchQuestionSchema: () => insertCareDispatchQuestionSchema,
@@ -686,6 +687,8 @@ var psychologists = pgTable2("psychologists", {
   hourlyRate: decimal2("hourly_rate", { precision: 10, scale: 2 }).notNull(),
   phone: text2("phone"),
   crpNumber: text2("crp_number"),
+  cpf: text2("cpf"),
+  // digits only; needed on the Receita Saúde receipt
   startedAtClinic: date2("started_at_clinic")
 });
 var insertPsychologistSchema = createInsertSchema2(psychologists).pick({
@@ -992,6 +995,18 @@ var whatsappMessages = pgTable2("whatsapp_messages", {
   createdAt: timestamp2("created_at").notNull().defaultNow(),
   updatedAt: timestamp2("updated_at").notNull().defaultNow()
 }, (t) => [unique2("whatsapp_messages_appointment_kind").on(t.appointmentId, t.kind)]);
+var healthReceipts = pgTable2("health_receipts", {
+  id: serial2("id").primaryKey(),
+  companyId: integer2("company_id").notNull().references(() => companies.id),
+  appointmentId: integer2("appointment_id").notNull().references(() => appointments.id, { onDelete: "cascade" }),
+  psychologistId: integer2("psychologist_id").notNull(),
+  patientId: integer2("patient_id"),
+  amount: decimal2("amount", { precision: 10, scale: 2 }).notNull(),
+  payerCpf: text2("payer_cpf").notNull(),
+  beneficiaryCpf: text2("beneficiary_cpf"),
+  issuedAt: timestamp2("issued_at", { withTimezone: true }).notNull().defaultNow(),
+  issuedBy: integer2("issued_by").notNull()
+}, (t) => [unique2("health_receipts_appointment").on(t.appointmentId)]);
 var calendarEventsRelations = relations2(calendarEvents, ({ one }) => ({
   appointment: one(appointments, {
     fields: [calendarEvents.appointmentId],
@@ -4592,7 +4607,9 @@ router4.get("/", async (req, res) => {
 router4.patch("/", async (req, res) => {
   try {
     const user = req.user;
-    const { fullName, phone, birthDate, crpNumber, bio } = req.body;
+    const { fullName, phone, birthDate, crpNumber, cpf, bio } = req.body;
+    const cpfDigits = cpf === void 0 ? void 0 : String(cpf ?? "").replace(/\D/g, "");
+    if (cpfDigits && cpfDigits.length !== 11) return res.status(400).json({ message: "CPF deve ter 11 d\xEDgitos.", field: "cpf" });
     const userUpdate = {};
     if (fullName !== void 0) userUpdate.fullName = fullName;
     if (birthDate !== void 0) userUpdate.birthDate = birthDate || null;
@@ -4602,6 +4619,7 @@ router4.patch("/", async (req, res) => {
     const psychUpdate = {};
     if (phone !== void 0) psychUpdate.phone = phone || null;
     if (crpNumber !== void 0) psychUpdate.crpNumber = crpNumber || null;
+    if (cpfDigits !== void 0) psychUpdate.cpf = cpfDigits || null;
     if (bio !== void 0) psychUpdate.bio = bio || null;
     if (Object.keys(psychUpdate).length > 0) {
       const [existing] = await db.select().from(psychologists).where(ownProfile(req.companyId, user.id));
@@ -4842,7 +4860,9 @@ router6.patch("/:id", async (req, res) => {
     const companyId = req.companyId;
     const psych = await findPsych(companyId, id);
     if (!psych) return res.status(404).json({ error: "Psic\xF3loga n\xE3o encontrada." });
-    const { fullName, email, birthDate, status, phone, crpNumber, bio, startedAtClinic } = req.body;
+    const { fullName, email, birthDate, status, phone, crpNumber, cpf, bio, startedAtClinic } = req.body;
+    const cpfDigits = cpf === void 0 ? void 0 : String(cpf ?? "").replace(/\D/g, "");
+    if (cpfDigits && cpfDigits.length !== 11) return res.status(400).json({ message: "CPF deve ter 11 d\xEDgitos.", field: "cpf" });
     const userUpdate = {};
     if (fullName !== void 0) userUpdate.fullName = fullName;
     if (email !== void 0) userUpdate.email = email;
@@ -4861,6 +4881,7 @@ router6.patch("/:id", async (req, res) => {
     const psychUpdate = {};
     if (phone !== void 0) psychUpdate.phone = phone || null;
     if (crpNumber !== void 0) psychUpdate.crpNumber = crpNumber || null;
+    if (cpfDigits !== void 0) psychUpdate.cpf = cpfDigits || null;
     if (bio !== void 0) psychUpdate.bio = bio || null;
     if (startedAtClinic !== void 0) psychUpdate.startedAtClinic = startedAtClinic || null;
     if (Object.keys(psychUpdate).length > 0) {
@@ -6645,13 +6666,32 @@ function fillMessage(body, vars) {
 import { eq as eq18 } from "drizzle-orm";
 var normalizeName = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 async function patientIndex(companyId) {
-  const rows = await db.select({ id: patients.id, fullName: patients.fullName, phone: patients.phone, psychologistId: patients.psychologistId }).from(patients).where(eq18(patients.companyId, companyId));
+  const rows = await db.select({
+    id: patients.id,
+    fullName: patients.fullName,
+    phone: patients.phone,
+    psychologistId: patients.psychologistId,
+    cpf: patients.cpf,
+    birthDate: patients.birthDate,
+    legalGuardianName: patients.legalGuardianName,
+    legalGuardianCpf: patients.legalGuardianCpf
+  }).from(patients).where(eq18(patients.companyId, companyId));
   const byName = /* @__PURE__ */ new Map();
   for (const p of rows) {
     const k = normalizeName(p.fullName);
     byName.set(k, [...byName.get(k) ?? [], p]);
   }
   return byName;
+}
+function findPatient(appt, byName) {
+  let found = byName.get(normalizeName(appt.patientName)) ?? [];
+  if (found.length > 1) {
+    const own = found.filter((p) => p.psychologistId === appt.psychologistId);
+    if (own.length > 0) found = own;
+  }
+  if (found.length === 0) return { patient: null, issue: "not_found" };
+  if (found.length > 1) return { patient: null, issue: "ambiguous" };
+  return { patient: found[0], issue: null };
 }
 function findPhone(appt, byName) {
   let found = byName.get(normalizeName(appt.patientName)) ?? [];
@@ -6666,13 +6706,13 @@ function findPhone(appt, byName) {
   if (phones.length > 1) return { patientId, phone: null, issue: "ambiguous" };
   return { patientId, phone: null, issue: found.some((p) => p.phone?.trim()) ? "invalid" : "no_phone" };
 }
-function toWhatsAppNumber(digits) {
-  const m = digits.match(/^55(\d{2})(\d{8,9})$/);
-  if (!m) return digits;
+function toWhatsAppNumber(digits2) {
+  const m = digits2.match(/^55(\d{2})(\d{8,9})$/);
+  if (!m) return digits2;
   const ddd = Number(m[1]);
   let local = m[2];
   if (local.length === 8 && /^[6-9]/.test(local)) local = `9${local}`;
-  if (local.length !== 9 || !local.startsWith("9")) return digits;
+  if (local.length !== 9 || !local.startsWith("9")) return digits2;
   return ddd >= 31 ? `55${m[1]}${local.slice(1)}` : `55${m[1]}${local}`;
 }
 var PHONE_ISSUE_TEXT = {
@@ -6858,10 +6898,10 @@ function tomorrowKey() {
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
 }
-var displayPhone = (digits) => {
-  const local = digits.startsWith("55") ? digits.slice(2) : digits;
+var displayPhone = (digits2) => {
+  const local = digits2.startsWith("55") ? digits2.slice(2) : digits2;
   const m = local.match(/^(\d{2})(\d{4,5})(\d{4})$/);
-  return m ? `(${m[1]}) ${m[2]}-${m[3]}` : `+${digits}`;
+  return m ? `(${m[1]}) ${m[2]}-${m[3]}` : `+${digits2}`;
 };
 async function ownPsychologistId(req) {
   const user = req.user;
@@ -7100,23 +7140,195 @@ router12.post("/twilio/status", async (req, res) => {
 });
 var twilio_default = router12;
 
-// server/routes/care-templates.ts
+// server/routes/health-receipts.ts
 import { Router as Router13 } from "express";
-import { eq as eq21, or as or3, isNull as isNull6, and as and15, count as count2 } from "drizzle-orm";
 import { z as z11 } from "zod";
+import { and as and15, asc as asc3, eq as eq21, gte as gte6, lte as lte5 } from "drizzle-orm";
 var router13 = Router13();
+router13.use(requireAuth, requireCompany);
+var STAFF2 = ["admin", "receptionist"];
+var digits = (s) => (s ?? "").replace(/\D/g, "");
+var validCpf = (s) => digits(s).length === 11;
+async function ownPsychologistId2(req) {
+  const user = req.user;
+  if (STAFF2.includes(user.role)) return null;
+  const profile = await storage.getPsychologistByUserId(req.companyId, user.id);
+  return profile?.id ?? -1;
+}
+function ageOn(birthDate, on) {
+  if (!birthDate) return null;
+  const [by, bm, bd] = birthDate.split("-").map(Number);
+  const [y, m, d] = on.split("-").map(Number);
+  return y - by - (m < bm || m === bm && d < bd ? 1 : 0);
+}
+function parties(p, sessionDate) {
+  const age = ageOn(p.birthDate, sessionDate);
+  const guardianPays = !!p.legalGuardianName?.trim() && (age === null || age < 18);
+  const beneficiary = { name: p.fullName, cpf: digits(p.cpf) || null };
+  const payer = guardianPays ? { name: p.legalGuardianName.trim(), cpf: digits(p.legalGuardianCpf) || null, isGuardian: true } : { ...beneficiary, isGuardian: false };
+  return { payer, beneficiary, minor: age !== null && age < 18 };
+}
+var monthSchema = z11.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
+function monthRange(month) {
+  const [y, m] = month.split("-").map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return { from: `${month}-01`, to: `${month}-${String(last).padStart(2, "0")}` };
+}
+async function loadSessions(companyId, from, to, psychologistId, appointmentId) {
+  const conds = [
+    eq21(appointments.companyId, companyId),
+    eq21(appointments.status, "completed"),
+    gte6(appointments.date, from),
+    lte5(appointments.date, to)
+  ];
+  if (psychologistId !== null) conds.push(eq21(appointments.psychologistId, psychologistId));
+  if (appointmentId !== void 0) conds.push(eq21(appointments.id, appointmentId));
+  return db.select({
+    id: appointments.id,
+    date: appointments.date,
+    startTime: appointments.startTime,
+    patientName: appointments.patientName,
+    psychologistId: appointments.psychologistId,
+    psychologistName: users.fullName,
+    crp: psychologists.crpNumber,
+    psychologistCpf: psychologists.cpf,
+    sessionRate: psychologists.hourlyRate,
+    receiptId: healthReceipts.id,
+    receiptAmount: healthReceipts.amount,
+    receiptPayerCpf: healthReceipts.payerCpf,
+    issuedAt: healthReceipts.issuedAt
+  }).from(appointments).leftJoin(psychologists, eq21(psychologists.id, appointments.psychologistId)).leftJoin(users, eq21(users.id, psychologists.userId)).leftJoin(healthReceipts, eq21(healthReceipts.appointmentId, appointments.id)).where(and15(...conds)).orderBy(asc3(appointments.date), asc3(appointments.startTime));
+}
+function buildItem(s, byName) {
+  const { patient, issue } = findPatient(s, byName);
+  const issues = [];
+  if (issue === "not_found") issues.push("patient_not_found");
+  if (issue === "ambiguous") issues.push("ambiguous");
+  const p = patient ? parties(patient, s.date) : null;
+  if (p) {
+    if (!validCpf(p.beneficiary.cpf)) issues.push("no_patient_cpf");
+    if (p.payer.isGuardian && !validCpf(p.payer.cpf)) issues.push("no_payer_cpf");
+  }
+  if (!validCpf(s.psychologistCpf)) issues.push("no_psychologist_cpf");
+  if (!s.crp?.trim()) issues.push("no_crp");
+  return {
+    appointmentId: s.id,
+    date: s.date,
+    startTime: s.startTime.slice(0, 5),
+    patientName: s.patientName,
+    patientId: patient?.id ?? null,
+    beneficiary: p?.beneficiary ?? null,
+    payer: p ? { name: p.payer.name, cpf: p.payer.cpf, isGuardian: p.payer.isGuardian } : null,
+    psychologist: {
+      id: s.psychologistId,
+      name: s.psychologistName ?? "",
+      crp: s.crp ?? null,
+      cpf: digits(s.psychologistCpf) || null
+    },
+    suggestedAmount: s.sessionRate ? Number(s.sessionRate) : null,
+    receipt: s.receiptId ? { amount: Number(s.receiptAmount), payerCpf: s.receiptPayerCpf, issuedAt: s.issuedAt } : null,
+    issues
+  };
+}
+router13.get("/", async (req, res) => {
+  const month = monthSchema.safeParse(req.query.month);
+  if (!month.success) return res.status(400).json({ message: "M\xEAs inv\xE1lido (use AAAA-MM)" });
+  try {
+    const companyId = req.companyId;
+    const own = await ownPsychologistId2(req);
+    const filter = own ?? (req.query.psychologistId ? Number(req.query.psychologistId) || null : null);
+    const { from, to } = monthRange(month.data);
+    const [sessions, byName] = await Promise.all([loadSessions(companyId, from, to, filter), patientIndex(companyId)]);
+    const items = sessions.map((s) => buildItem(s, byName));
+    const blocked = (i) => !i.receipt && i.issues.length > 0;
+    res.json({
+      month: month.data,
+      items,
+      summary: {
+        total: items.length,
+        issued: items.filter((i) => i.receipt).length,
+        pending: items.filter((i) => !i.receipt).length,
+        withIssues: items.filter(blocked).length,
+        issuedAmount: items.reduce((sum, i) => sum + (i.receipt?.amount ?? 0), 0)
+      }
+    });
+  } catch (error) {
+    console.error("health-receipts list error:", error);
+    res.status(500).json({ message: "Erro ao carregar os recibos" });
+  }
+});
+var markSchema = z11.object({
+  appointmentId: z11.number().int().positive(),
+  amount: z11.number().positive().max(1e5)
+});
+async function reachableSession(req, appointmentId) {
+  const own = await ownPsychologistId2(req);
+  const [appt] = await db.select({ date: appointments.date }).from(appointments).where(and15(eq21(appointments.companyId, req.companyId), eq21(appointments.id, appointmentId)));
+  if (!appt) return null;
+  const [s] = await loadSessions(req.companyId, appt.date, appt.date, own, appointmentId);
+  return s ?? null;
+}
+router13.post("/", async (req, res) => {
+  const body = markSchema.safeParse(req.body);
+  if (!body.success) return res.status(400).json({ message: "Dados inv\xE1lidos" });
+  try {
+    const s = await reachableSession(req, body.data.appointmentId);
+    if (!s) return res.status(404).json({ message: "Sess\xE3o n\xE3o encontrada ou n\xE3o conclu\xEDda" });
+    const item = buildItem(s, await patientIndex(req.companyId));
+    if (!item.payer || !validCpf(item.payer.cpf)) {
+      return res.status(400).json({ message: "Cadastre o CPF de quem pagou a sess\xE3o antes de marcar o recibo" });
+    }
+    const [saved] = await db.insert(healthReceipts).values({
+      companyId: req.companyId,
+      appointmentId: s.id,
+      psychologistId: s.psychologistId,
+      patientId: item.patientId,
+      amount: body.data.amount.toFixed(2),
+      payerCpf: item.payer.cpf,
+      beneficiaryCpf: item.beneficiary?.cpf ?? null,
+      issuedBy: req.user.id
+    }).onConflictDoNothing({ target: healthReceipts.appointmentId }).returning();
+    if (!saved) return res.status(409).json({ message: "Esse recibo j\xE1 est\xE1 marcado como emitido" });
+    res.status(201).json(saved);
+  } catch (error) {
+    console.error("health-receipts mark error:", error);
+    res.status(500).json({ message: "Erro ao marcar o recibo" });
+  }
+});
+router13.delete("/:appointmentId", async (req, res) => {
+  const appointmentId = Number(req.params.appointmentId);
+  if (!Number.isInteger(appointmentId) || appointmentId <= 0) return res.status(400).json({ message: "Sess\xE3o inv\xE1lida" });
+  try {
+    const own = await ownPsychologistId2(req);
+    const conds = [eq21(healthReceipts.companyId, req.companyId), eq21(healthReceipts.appointmentId, appointmentId)];
+    if (own !== null) conds.push(eq21(healthReceipts.psychologistId, own));
+    const deleted = await db.delete(healthReceipts).where(and15(...conds)).returning({ id: healthReceipts.id });
+    if (deleted.length === 0) return res.status(404).json({ message: "Recibo n\xE3o encontrado" });
+    res.status(204).end();
+  } catch (error) {
+    console.error("health-receipts unmark error:", error);
+    res.status(500).json({ message: "Erro ao desfazer o recibo" });
+  }
+});
+var health_receipts_default = router13;
+
+// server/routes/care-templates.ts
+import { Router as Router14 } from "express";
+import { eq as eq22, or as or3, isNull as isNull6, and as and16, count as count2 } from "drizzle-orm";
+import { z as z12 } from "zod";
+var router14 = Router14();
 var checkAuth2 = (req, res, next) => {
   if (!req.isAuthenticated()) return res.status(401).json({ message: "N\xE3o autenticado" });
   next();
 };
-router13.use(checkAuth2);
-var ownTemplate = (req) => and15(eq21(careTemplates.psychologistId, req.user.id), eq21(careTemplates.companyId, req.companyId));
-router13.get("/", async (req, res) => {
+router14.use(checkAuth2);
+var ownTemplate = (req) => and16(eq22(careTemplates.psychologistId, req.user.id), eq22(careTemplates.companyId, req.companyId));
+router14.get("/", async (req, res) => {
   try {
     const templates = await db.select().from(careTemplates).where(or3(ownTemplate(req), isNull6(careTemplates.psychologistId)));
     const result = await Promise.all(
       templates.map(async (t) => {
-        const questions = await db.select().from(careTemplateQuestions).where(eq21(careTemplateQuestions.templateId, t.id)).orderBy(careTemplateQuestions.orderIndex);
+        const questions = await db.select().from(careTemplateQuestions).where(eq22(careTemplateQuestions.templateId, t.id)).orderBy(careTemplateQuestions.orderIndex);
         return { ...t, questions, questionCount: questions.length };
       })
     );
@@ -7126,7 +7338,7 @@ router13.get("/", async (req, res) => {
     res.status(500).json({ message: "Erro ao listar templates" });
   }
 });
-router13.post("/", async (req, res) => {
+router14.post("/", async (req, res) => {
   try {
     const userId = req.user.id;
     const { questions = [], ...body } = req.body;
@@ -7142,77 +7354,77 @@ router13.post("/", async (req, res) => {
       );
       await db.insert(careTemplateQuestions).values(qs);
     }
-    const allQuestions = await db.select().from(careTemplateQuestions).where(eq21(careTemplateQuestions.templateId, template.id)).orderBy(careTemplateQuestions.orderIndex);
+    const allQuestions = await db.select().from(careTemplateQuestions).where(eq22(careTemplateQuestions.templateId, template.id)).orderBy(careTemplateQuestions.orderIndex);
     res.status(201).json({ ...template, questions: allQuestions });
   } catch (e) {
-    if (e instanceof z11.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z12.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao criar template" });
   }
 });
-router13.get("/:id", async (req, res) => {
+router14.get("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const [template] = await db.select().from(careTemplates).where(
-      and15(
-        eq21(careTemplates.id, id),
+      and16(
+        eq22(careTemplates.id, id),
         or3(ownTemplate(req), isNull6(careTemplates.psychologistId))
       )
     );
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const questions = await db.select().from(careTemplateQuestions).where(eq21(careTemplateQuestions.templateId, id)).orderBy(careTemplateQuestions.orderIndex);
+    const questions = await db.select().from(careTemplateQuestions).where(eq22(careTemplateQuestions.templateId, id)).orderBy(careTemplateQuestions.orderIndex);
     res.json({ ...template, questions });
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: "Erro ao buscar template" });
   }
 });
-router13.patch("/:id", async (req, res) => {
+router14.patch("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [template] = await db.select().from(careTemplates).where(and15(eq21(careTemplates.id, id), ownTemplate(req)));
+    const [template] = await db.select().from(careTemplates).where(and16(eq22(careTemplates.id, id), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const editableSchema = z11.object({
-      title: z11.string().min(1).max(100).optional(),
-      description: z11.string().max(500).optional()
+    const editableSchema = z12.object({
+      title: z12.string().min(1).max(100).optional(),
+      description: z12.string().max(500).optional()
     });
     const updateData = editableSchema.parse(req.body);
-    const [updated] = await db.update(careTemplates).set({ ...updateData, updatedAt: /* @__PURE__ */ new Date() }).where(eq21(careTemplates.id, id)).returning();
+    const [updated] = await db.update(careTemplates).set({ ...updateData, updatedAt: /* @__PURE__ */ new Date() }).where(eq22(careTemplates.id, id)).returning();
     res.json(updated);
   } catch (e) {
-    if (e instanceof z11.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z12.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao atualizar template" });
   }
 });
-router13.delete("/:id", async (req, res) => {
+router14.delete("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [template] = await db.select().from(careTemplates).where(and15(eq21(careTemplates.id, id), ownTemplate(req)));
+    const [template] = await db.select().from(careTemplates).where(and16(eq22(careTemplates.id, id), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const [{ value: dispatchCount }] = await db.select({ value: count2() }).from(careDispatches).where(eq21(careDispatches.templateId, id));
+    const [{ value: dispatchCount }] = await db.select({ value: count2() }).from(careDispatches).where(eq22(careDispatches.templateId, id));
     if (Number(dispatchCount) > 0) {
       return res.status(409).json({
         message: "N\xE3o \xE9 poss\xEDvel excluir este template pois ele possui envios vinculados."
       });
     }
-    await db.delete(careTemplates).where(eq21(careTemplates.id, id));
+    await db.delete(careTemplates).where(eq22(careTemplates.id, id));
     res.sendStatus(204);
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: "Erro ao excluir template" });
   }
 });
-router13.put("/:id/questions", async (req, res) => {
+router14.put("/:id/questions", async (req, res) => {
   try {
     const templateId = parseInt(req.params.id);
-    const [template] = await db.select().from(careTemplates).where(and15(eq21(careTemplates.id, templateId), ownTemplate(req)));
+    const [template] = await db.select().from(careTemplates).where(and16(eq22(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const questionsSchema = z11.array(
-      insertCareTemplateQuestionSchema.omit({ templateId: true }).extend({ orderIndex: z11.number().int() })
+    const questionsSchema = z12.array(
+      insertCareTemplateQuestionSchema.omit({ templateId: true }).extend({ orderIndex: z12.number().int() })
     );
     const questions = questionsSchema.parse(req.body);
-    await db.delete(careTemplateQuestions).where(eq21(careTemplateQuestions.templateId, templateId));
+    await db.delete(careTemplateQuestions).where(eq22(careTemplateQuestions.templateId, templateId));
     if (questions.length > 0) {
       await db.insert(careTemplateQuestions).values(
         questions.map((q, i) => ({
@@ -7222,63 +7434,63 @@ router13.put("/:id/questions", async (req, res) => {
         }))
       );
     }
-    const saved = await db.select().from(careTemplateQuestions).where(eq21(careTemplateQuestions.templateId, templateId)).orderBy(careTemplateQuestions.orderIndex);
+    const saved = await db.select().from(careTemplateQuestions).where(eq22(careTemplateQuestions.templateId, templateId)).orderBy(careTemplateQuestions.orderIndex);
     res.json(saved);
   } catch (e) {
-    if (e instanceof z11.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z12.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao salvar perguntas do template" });
   }
 });
-router13.post("/:id/questions", async (req, res) => {
+router14.post("/:id/questions", async (req, res) => {
   try {
     const templateId = parseInt(req.params.id);
-    const [template] = await db.select().from(careTemplates).where(and15(eq21(careTemplates.id, templateId), ownTemplate(req)));
+    const [template] = await db.select().from(careTemplates).where(and16(eq22(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
     const data = insertCareTemplateQuestionSchema.parse({ ...req.body, templateId });
     const [q] = await db.insert(careTemplateQuestions).values(data).returning();
     res.status(201).json(q);
   } catch (e) {
-    if (e instanceof z11.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z12.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao adicionar pergunta" });
   }
 });
-router13.patch("/:id/questions/:qId", async (req, res) => {
+router14.patch("/:id/questions/:qId", async (req, res) => {
   try {
     const templateId = parseInt(req.params.id);
     const qId = parseInt(req.params.qId);
-    const [template] = await db.select().from(careTemplates).where(and15(eq21(careTemplates.id, templateId), ownTemplate(req)));
+    const [template] = await db.select().from(careTemplates).where(and16(eq22(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
     const editableQuestionSchema = insertCareTemplateQuestionSchema.omit({ templateId: true }).partial();
     const data = editableQuestionSchema.parse(req.body);
-    const [updated] = await db.update(careTemplateQuestions).set(data).where(and15(eq21(careTemplateQuestions.id, qId), eq21(careTemplateQuestions.templateId, templateId))).returning();
+    const [updated] = await db.update(careTemplateQuestions).set(data).where(and16(eq22(careTemplateQuestions.id, qId), eq22(careTemplateQuestions.templateId, templateId))).returning();
     if (!updated) return res.status(404).json({ message: "Pergunta n\xE3o encontrada" });
     res.json(updated);
   } catch (e) {
-    if (e instanceof z11.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z12.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error(e);
     res.status(500).json({ message: "Erro ao atualizar pergunta" });
   }
 });
-router13.delete("/:id/questions/:qId", async (req, res) => {
+router14.delete("/:id/questions/:qId", async (req, res) => {
   try {
     const templateId = parseInt(req.params.id);
     const qId = parseInt(req.params.qId);
-    const [template] = await db.select().from(careTemplates).where(and15(eq21(careTemplates.id, templateId), ownTemplate(req)));
+    const [template] = await db.select().from(careTemplates).where(and16(eq22(careTemplates.id, templateId), ownTemplate(req)));
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    await db.delete(careTemplateQuestions).where(and15(eq21(careTemplateQuestions.id, qId), eq21(careTemplateQuestions.templateId, templateId)));
+    await db.delete(careTemplateQuestions).where(and16(eq22(careTemplateQuestions.id, qId), eq22(careTemplateQuestions.templateId, templateId)));
     res.sendStatus(204);
   } catch (e) {
     console.error(e);
     res.status(500).json({ message: "Erro ao remover pergunta" });
   }
 });
-var care_templates_default = router13;
+var care_templates_default = router14;
 
 // server/routes/care-dispatch.ts
-import { Router as Router14 } from "express";
-import { eq as eq22, desc as desc6, count as count3, and as and16, or as or4, isNull as isNull7 } from "drizzle-orm";
+import { Router as Router15 } from "express";
+import { eq as eq23, desc as desc6, count as count3, and as and17, or as or4, isNull as isNull7 } from "drizzle-orm";
 
 // server/lib/validate-email.ts
 function isValidEmail(email) {
@@ -7393,13 +7605,13 @@ async function sendCareFormEmail(params) {
 }
 
 // server/routes/care-dispatch.ts
-import { z as z12 } from "zod";
-var router14 = Router14();
+import { z as z13 } from "zod";
+var router15 = Router15();
 var checkAuth3 = (req, res, next) => {
   if (!req.isAuthenticated()) return res.status(401).json({ message: "N\xE3o autenticado" });
   next();
 };
-router14.use(checkAuth3);
+router15.use(checkAuth3);
 function substituteVariables(text3, patientName, psychologistName2) {
   const firstName = patientName.split(" ")[0];
   return text3.replace(/\{patient_name\}/g, firstName).replace(/\{patient_full_name\}/g, patientName).replace(/\{psychologist_name\}/g, psychologistName2);
@@ -7408,14 +7620,14 @@ async function canAccessPatient(req, patientRow) {
   const user = req.user;
   if (user.role === "admin") return true;
   if (user.role === "psychologist") {
-    const [psychRow] = await db.select().from(psychologists).where(and16(eq22(psychologists.userId, user.id), eq22(psychologists.companyId, req.companyId)));
+    const [psychRow] = await db.select().from(psychologists).where(and17(eq23(psychologists.userId, user.id), eq23(psychologists.companyId, req.companyId)));
     const psychId = psychRow?.id ?? -1;
     return patientRow.psychologistId === psychId || patientRow.createdBy === user.id;
   }
   return false;
 }
-async function findPatient(companyId, patientId) {
-  const [patient] = await db.select().from(patients).where(and16(eq22(patients.id, patientId), eq22(patients.companyId, companyId)));
+async function findPatient2(companyId, patientId) {
+  const [patient] = await db.select().from(patients).where(and17(eq23(patients.id, patientId), eq23(patients.companyId, companyId)));
   return patient;
 }
 function canAccessDispatch(req, dispatch) {
@@ -7423,13 +7635,13 @@ function canAccessDispatch(req, dispatch) {
   if (req.user.role === "admin") return true;
   return dispatch.psychologistId === req.user.id;
 }
-router14.post("/patients/:patientId/dispatch", async (req, res) => {
+router15.post("/patients/:patientId/dispatch", async (req, res) => {
   try {
     const user = req.user;
     const patientId = parseInt(req.params.patientId);
     const { template_id, subject, custom_message, override_questions } = req.body;
     if (!template_id) return res.status(400).json({ message: "template_id \xE9 obrigat\xF3rio" });
-    const patient = await findPatient(req.companyId, patientId);
+    const patient = await findPatient2(req.companyId, patientId);
     if (!patient) return res.status(404).json({ message: "Paciente n\xE3o encontrado" });
     const authorized = await canAccessPatient(req, patient);
     if (!authorized) {
@@ -7444,27 +7656,27 @@ router14.post("/patients/:patientId/dispatch", async (req, res) => {
         message: "O paciente n\xE3o possui e-mail v\xE1lido cadastrado. Atualize o perfil antes de enviar."
       });
     }
-    const [psychUser] = await db.select().from(users).where(eq22(users.id, user.id));
+    const [psychUser] = await db.select().from(users).where(eq23(users.id, user.id));
     if (!psychUser) return res.status(400).json({ message: "Usu\xE1rio n\xE3o encontrado" });
     const [template] = await db.select().from(careTemplates).where(
-      and16(
-        eq22(careTemplates.id, parseInt(template_id)),
+      and17(
+        eq23(careTemplates.id, parseInt(template_id)),
         or4(
-          and16(eq22(careTemplates.psychologistId, user.id), eq22(careTemplates.companyId, req.companyId)),
+          and17(eq23(careTemplates.psychologistId, user.id), eq23(careTemplates.companyId, req.companyId)),
           isNull7(careTemplates.psychologistId)
         )
       )
     );
     if (!template) return res.status(404).json({ message: "Template n\xE3o encontrado" });
-    const templateQuestions = await db.select().from(careTemplateQuestions).where(eq22(careTemplateQuestions.templateId, template.id)).orderBy(careTemplateQuestions.orderIndex);
+    const templateQuestions = await db.select().from(careTemplateQuestions).where(eq23(careTemplateQuestions.templateId, template.id)).orderBy(careTemplateQuestions.orderIndex);
     const psychName = psychUser.fullName || psychUser.username;
-    const overrideSchema = z12.array(
-      z12.object({
-        questionText: z12.string().min(1),
-        questionType: z12.string(),
-        options: z12.array(z12.string()).nullable().optional(),
-        isRequired: z12.boolean(),
-        orderIndex: z12.number().int()
+    const overrideSchema = z13.array(
+      z13.object({
+        questionText: z13.string().min(1),
+        questionType: z13.string(),
+        options: z13.array(z13.string()).nullable().optional(),
+        isRequired: z13.boolean(),
+        orderIndex: z13.number().int()
       })
     );
     let renderedQuestions;
@@ -7540,10 +7752,10 @@ router14.post("/patients/:patientId/dispatch", async (req, res) => {
     res.status(500).json({ message: "Erro ao enviar formul\xE1rio" });
   }
 });
-router14.get("/patients/:patientId/dispatches", async (req, res) => {
+router15.get("/patients/:patientId/dispatches", async (req, res) => {
   try {
     const patientId = parseInt(req.params.patientId);
-    const patient = await findPatient(req.companyId, patientId);
+    const patient = await findPatient2(req.companyId, patientId);
     if (!patient) return res.status(404).json({ message: "Paciente n\xE3o encontrado" });
     const authorized = await canAccessPatient(req, patient);
     if (!authorized) {
@@ -7552,15 +7764,15 @@ router14.get("/patients/:patientId/dispatches", async (req, res) => {
         code: "FORBIDDEN"
       });
     }
-    const dispatches = await db.select().from(careDispatches).where(and16(eq22(careDispatches.patientId, patientId), eq22(careDispatches.companyId, req.companyId))).orderBy(desc6(careDispatches.sentAt));
+    const dispatches = await db.select().from(careDispatches).where(and17(eq23(careDispatches.patientId, patientId), eq23(careDispatches.companyId, req.companyId))).orderBy(desc6(careDispatches.sentAt));
     const now = /* @__PURE__ */ new Date();
     const result = await Promise.all(
       dispatches.map(async (d) => {
         if (d.status !== "answered" && d.tokenExpiresAt < now) {
-          await db.update(careDispatches).set({ status: "expired" }).where(eq22(careDispatches.id, d.id));
+          await db.update(careDispatches).set({ status: "expired" }).where(eq23(careDispatches.id, d.id));
           d = { ...d, status: "expired" };
         }
-        const [{ value: responseCount }] = await db.select({ value: count3() }).from(careResponses).where(eq22(careResponses.dispatchId, d.id));
+        const [{ value: responseCount }] = await db.select({ value: count3() }).from(careResponses).where(eq23(careResponses.dispatchId, d.id));
         return { ...d, responseCount: Number(responseCount) };
       })
     );
@@ -7570,10 +7782,10 @@ router14.get("/patients/:patientId/dispatches", async (req, res) => {
     res.status(500).json({ message: "Erro ao listar hist\xF3rico de envios" });
   }
 });
-router14.get("/dispatches/:dispatchId/responses", async (req, res) => {
+router15.get("/dispatches/:dispatchId/responses", async (req, res) => {
   try {
     const dispatchId = parseInt(req.params.dispatchId);
-    const [dispatch] = await db.select().from(careDispatches).where(eq22(careDispatches.id, dispatchId));
+    const [dispatch] = await db.select().from(careDispatches).where(eq23(careDispatches.id, dispatchId));
     if (!dispatch) return res.status(404).json({ message: "Envio n\xE3o encontrado" });
     if (!canAccessDispatch(req, dispatch)) {
       return res.status(403).json({
@@ -7581,8 +7793,8 @@ router14.get("/dispatches/:dispatchId/responses", async (req, res) => {
         code: "FORBIDDEN"
       });
     }
-    const questions = await db.select().from(careDispatchQuestions).where(eq22(careDispatchQuestions.dispatchId, dispatchId)).orderBy(careDispatchQuestions.orderIndex);
-    const responses = await db.select().from(careResponses).where(eq22(careResponses.dispatchId, dispatchId));
+    const questions = await db.select().from(careDispatchQuestions).where(eq23(careDispatchQuestions.dispatchId, dispatchId)).orderBy(careDispatchQuestions.orderIndex);
+    const responses = await db.select().from(careResponses).where(eq23(careResponses.dispatchId, dispatchId));
     const merged = questions.map((q) => ({
       ...q,
       response: responses.find((r) => r.dispatchQuestionId === q.id) ?? null
@@ -7593,23 +7805,23 @@ router14.get("/dispatches/:dispatchId/responses", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar respostas" });
   }
 });
-var care_dispatch_default = router14;
+var care_dispatch_default = router15;
 
 // server/routes/care-public.ts
-import { Router as Router15 } from "express";
-import { eq as eq23 } from "drizzle-orm";
-import { z as z13 } from "zod";
-var router15 = Router15();
-router15.get("/respond/:token", async (req, res) => {
+import { Router as Router16 } from "express";
+import { eq as eq24 } from "drizzle-orm";
+import { z as z14 } from "zod";
+var router16 = Router16();
+router16.get("/respond/:token", async (req, res) => {
   try {
     const { token } = req.params;
-    const [dispatch] = await db.select().from(careDispatches).where(eq23(careDispatches.responseToken, token));
+    const [dispatch] = await db.select().from(careDispatches).where(eq24(careDispatches.responseToken, token));
     if (!dispatch) {
       return res.status(404).json({ error: "not_found", message: "Formul\xE1rio n\xE3o encontrado." });
     }
     if (/* @__PURE__ */ new Date() > dispatch.tokenExpiresAt) {
       if (dispatch.status !== "expired" && dispatch.status !== "answered") {
-        await db.update(careDispatches).set({ status: "expired" }).where(eq23(careDispatches.id, dispatch.id));
+        await db.update(careDispatches).set({ status: "expired" }).where(eq24(careDispatches.id, dispatch.id));
       }
       return res.status(410).json({
         error: "expired",
@@ -7623,11 +7835,11 @@ router15.get("/respond/:token", async (req, res) => {
       });
     }
     if (dispatch.status === "sent") {
-      await db.update(careDispatches).set({ status: "opened", openedAt: /* @__PURE__ */ new Date() }).where(eq23(careDispatches.id, dispatch.id));
+      await db.update(careDispatches).set({ status: "opened", openedAt: /* @__PURE__ */ new Date() }).where(eq24(careDispatches.id, dispatch.id));
     }
-    const questions = await db.select().from(careDispatchQuestions).where(eq23(careDispatchQuestions.dispatchId, dispatch.id)).orderBy(careDispatchQuestions.orderIndex);
-    const [patient] = await db.select({ firstName: patients.fullName }).from(patients).where(eq23(patients.id, dispatch.patientId));
-    const [psychUser] = await db.select({ fullName: users.fullName, username: users.username }).from(users).where(eq23(users.id, dispatch.psychologistId));
+    const questions = await db.select().from(careDispatchQuestions).where(eq24(careDispatchQuestions.dispatchId, dispatch.id)).orderBy(careDispatchQuestions.orderIndex);
+    const [patient] = await db.select({ firstName: patients.fullName }).from(patients).where(eq24(patients.id, dispatch.patientId));
+    const [psychUser] = await db.select({ fullName: users.fullName, username: users.username }).from(users).where(eq24(users.id, dispatch.psychologistId));
     const clinic = await publicClinic(dispatch.companyId);
     const patientFirstName = patient?.firstName?.split(" ")[0] ?? "Paciente";
     const psychologistName2 = psychUser?.fullName || psychUser?.username || "sua psic\xF3loga";
@@ -7645,26 +7857,26 @@ router15.get("/respond/:token", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar formul\xE1rio" });
   }
 });
-var answerSchema = z13.object({
-  answers: z13.array(
-    z13.object({
-      dispatch_question_id: z13.number().int().positive(),
-      answer_text: z13.string().optional().nullable(),
-      answer_choice: z13.string().optional().nullable(),
-      answer_scale: z13.number().int().min(1).max(10).optional().nullable()
+var answerSchema = z14.object({
+  answers: z14.array(
+    z14.object({
+      dispatch_question_id: z14.number().int().positive(),
+      answer_text: z14.string().optional().nullable(),
+      answer_choice: z14.string().optional().nullable(),
+      answer_scale: z14.number().int().min(1).max(10).optional().nullable()
     })
   )
 });
-router15.post("/respond/:token", async (req, res) => {
+router16.post("/respond/:token", async (req, res) => {
   try {
     const { token } = req.params;
-    const [dispatch] = await db.select().from(careDispatches).where(eq23(careDispatches.responseToken, token));
+    const [dispatch] = await db.select().from(careDispatches).where(eq24(careDispatches.responseToken, token));
     if (!dispatch) {
       return res.status(404).json({ error: "not_found", message: "Formul\xE1rio n\xE3o encontrado." });
     }
     if (/* @__PURE__ */ new Date() > dispatch.tokenExpiresAt) {
       if (dispatch.status !== "expired") {
-        await db.update(careDispatches).set({ status: "expired" }).where(eq23(careDispatches.id, dispatch.id));
+        await db.update(careDispatches).set({ status: "expired" }).where(eq24(careDispatches.id, dispatch.id));
       }
       return res.status(410).json({
         error: "expired",
@@ -7679,7 +7891,7 @@ router15.post("/respond/:token", async (req, res) => {
     }
     const parsed = answerSchema.parse(req.body);
     const { answers } = parsed;
-    const questions = await db.select().from(careDispatchQuestions).where(eq23(careDispatchQuestions.dispatchId, dispatch.id));
+    const questions = await db.select().from(careDispatchQuestions).where(eq24(careDispatchQuestions.dispatchId, dispatch.id));
     const validQuestionIds = new Set(questions.map((q) => q.id));
     for (const a of answers) {
       if (!validQuestionIds.has(a.dispatch_question_id)) {
@@ -7710,28 +7922,28 @@ router15.post("/respond/:token", async (req, res) => {
         }))
       );
     }
-    await db.update(careDispatches).set({ status: "answered", answeredAt: /* @__PURE__ */ new Date() }).where(eq23(careDispatches.id, dispatch.id));
+    await db.update(careDispatches).set({ status: "answered", answeredAt: /* @__PURE__ */ new Date() }).where(eq24(careDispatches.id, dispatch.id));
     return res.json({ success: true, message: "Respostas enviadas com sucesso!" });
   } catch (e) {
-    if (e instanceof z13.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z14.ZodError) return res.status(400).json({ message: e.errors[0].message });
     console.error("care respond POST error:", e);
     res.status(500).json({ message: "Erro ao salvar respostas" });
   }
 });
-var care_public_default = router15;
+var care_public_default = router16;
 
 // server/routes/commissions.ts
-import { Router as Router16 } from "express";
-import { eq as eq24, and as and17, gte as gte6, lte as lte5 } from "drizzle-orm";
-import { z as z14 } from "zod";
-var router16 = Router16();
+import { Router as Router17 } from "express";
+import { eq as eq25, and as and18, gte as gte7, lte as lte6 } from "drizzle-orm";
+import { z as z15 } from "zod";
+var router17 = Router17();
 function adminOnly(req, res, next) {
   if (!req.user || req.user.role !== "admin") {
     return res.status(403).json({ message: "Acesso negado. Somente administradores." });
   }
   next();
 }
-router16.use(adminOnly);
+router17.use(adminOnly);
 function hoursFromTime(start, end) {
   const [sh, sm] = start.split(":").map(Number);
   const [eh, em] = end.split(":").map(Number);
@@ -7746,12 +7958,12 @@ async function calcCommissionPreview(companyId, psychologistId, periodStart, per
     roomId: roomBookings.roomId,
     roomName: rooms.name,
     roomHourlyRate: rooms.hourlyRate
-  }).from(roomBookings).leftJoin(rooms, eq24(roomBookings.roomId, rooms.id)).where(
-    and17(
-      eq24(roomBookings.companyId, companyId),
-      eq24(roomBookings.psychologistId, psychologistId),
-      gte6(roomBookings.date, periodStart),
-      lte5(roomBookings.date, periodEnd)
+  }).from(roomBookings).leftJoin(rooms, eq25(roomBookings.roomId, rooms.id)).where(
+    and18(
+      eq25(roomBookings.companyId, companyId),
+      eq25(roomBookings.psychologistId, psychologistId),
+      gte7(roomBookings.date, periodStart),
+      lte6(roomBookings.date, periodEnd)
     )
   );
   const allConfigs = await storage.listCommissionPayoutConfigs(companyId, psychologistId);
@@ -7786,7 +7998,7 @@ async function calcCommissionPreview(companyId, psychologistId, periodStart, per
   const totalRepasse = items.reduce((acc, i) => acc + i.repasseValue, 0);
   return { items, totalRoomsValue, totalRepasse, totalBookings: items.length };
 }
-router16.get("/dashboard", async (req, res) => {
+router17.get("/dashboard", async (req, res) => {
   try {
     const month = req.query.month || (/* @__PURE__ */ new Date()).toISOString().slice(0, 7);
     const data = await storage.getCommissionDashboard(req.companyId, month);
@@ -7795,7 +8007,7 @@ router16.get("/dashboard", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar dashboard" });
   }
 });
-router16.get("/", async (req, res) => {
+router17.get("/", async (req, res) => {
   try {
     const { psychologistId, status, periodStart, periodEnd } = req.query;
     const list = await storage.listCommissions(req.companyId, {
@@ -7816,7 +8028,7 @@ router16.get("/", async (req, res) => {
     res.status(500).json({ message: "Erro ao listar comissionamentos" });
   }
 });
-router16.get("/preview", async (req, res) => {
+router17.get("/preview", async (req, res) => {
   try {
     const { psychologistId, periodStart, periodEnd } = req.query;
     if (!psychologistId || !periodStart || !periodEnd) {
@@ -7833,7 +8045,7 @@ router16.get("/preview", async (req, res) => {
     res.status(500).json({ message: "Erro ao calcular preview" });
   }
 });
-router16.get("/:id", async (req, res) => {
+router17.get("/:id", async (req, res) => {
   try {
     const c = await storage.getCommission(req.companyId, parseInt(req.params.id));
     if (!c) return res.status(404).json({ message: "Comissionamento n\xE3o encontrado" });
@@ -7844,7 +8056,7 @@ router16.get("/:id", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar comissionamento" });
   }
 });
-router16.get("/:id/items", async (req, res) => {
+router17.get("/:id/items", async (req, res) => {
   try {
     const c = await storage.getCommission(req.companyId, parseInt(req.params.id));
     if (!c) return res.status(404).json({ message: "Comissionamento n\xE3o encontrado" });
@@ -7854,12 +8066,12 @@ router16.get("/:id/items", async (req, res) => {
     res.status(500).json({ message: "Erro ao buscar itens" });
   }
 });
-router16.post("/generate", async (req, res) => {
+router17.post("/generate", async (req, res) => {
   try {
-    const schema = z14.object({
-      psychologistId: z14.number(),
-      periodStart: z14.string(),
-      periodEnd: z14.string()
+    const schema = z15.object({
+      psychologistId: z15.number(),
+      periodStart: z15.string(),
+      periodEnd: z15.string()
     });
     const { psychologistId, periodStart, periodEnd } = schema.parse(req.body);
     if (!await storage.getPsychologist(req.companyId, psychologistId)) {
@@ -7903,16 +8115,16 @@ router16.post("/generate", async (req, res) => {
     );
     res.status(201).json(commission);
   } catch (e) {
-    if (e instanceof z14.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z15.ZodError) return res.status(400).json({ message: e.errors[0].message });
     res.status(500).json({ message: "Erro ao gerar comissionamento" });
   }
 });
-router16.patch("/:id/pay", async (req, res) => {
+router17.patch("/:id/pay", async (req, res) => {
   try {
-    const schema = z14.object({
-      paymentDate: z14.string(),
-      paymentMethod: z14.string().min(1, "Informe o m\xE9todo de pagamento"),
-      paymentNotes: z14.string().optional()
+    const schema = z15.object({
+      paymentDate: z15.string(),
+      paymentMethod: z15.string().min(1, "Informe o m\xE9todo de pagamento"),
+      paymentNotes: z15.string().optional()
     });
     const data = schema.parse(req.body);
     const c = await storage.getCommission(req.companyId, parseInt(req.params.id));
@@ -7921,11 +8133,11 @@ router16.patch("/:id/pay", async (req, res) => {
     const updated = await storage.updateCommission(req.companyId, c.id, { ...data, status: "paid" });
     res.json(updated);
   } catch (e) {
-    if (e instanceof z14.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z15.ZodError) return res.status(400).json({ message: e.errors[0].message });
     res.status(500).json({ message: "Erro ao registrar pagamento" });
   }
 });
-router16.patch("/:id/cancel", async (req, res) => {
+router17.patch("/:id/cancel", async (req, res) => {
   try {
     const c = await storage.getCommission(req.companyId, parseInt(req.params.id));
     if (!c) return res.status(404).json({ message: "Comissionamento n\xE3o encontrado" });
@@ -7936,8 +8148,8 @@ router16.patch("/:id/cancel", async (req, res) => {
     res.status(500).json({ message: "Erro ao cancelar comissionamento" });
   }
 });
-var commissions_default = router16;
-var commissionConfigsRouter = Router16();
+var commissions_default = router17;
+var commissionConfigsRouter = Router17();
 commissionConfigsRouter.use(adminOnly);
 commissionConfigsRouter.get("/", async (req, res) => {
   try {
@@ -7960,12 +8172,12 @@ commissionConfigsRouter.get("/", async (req, res) => {
 });
 commissionConfigsRouter.post("/", async (req, res) => {
   try {
-    const schema = z14.object({
-      psychologistId: z14.number(),
-      payoutType: z14.enum(["percentual", "fixed"]),
-      payoutValue: z14.union([z14.string().transform(parseFloat), z14.number()]),
-      validFrom: z14.string(),
-      validUntil: z14.string().nullable().optional()
+    const schema = z15.object({
+      psychologistId: z15.number(),
+      payoutType: z15.enum(["percentual", "fixed"]),
+      payoutValue: z15.union([z15.string().transform(parseFloat), z15.number()]),
+      validFrom: z15.string(),
+      validUntil: z15.string().nullable().optional()
     });
     const data = schema.parse(req.body);
     if (!await storage.getPsychologist(req.companyId, data.psychologistId)) {
@@ -7977,17 +8189,17 @@ commissionConfigsRouter.post("/", async (req, res) => {
     });
     res.status(201).json(config);
   } catch (e) {
-    if (e instanceof z14.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z15.ZodError) return res.status(400).json({ message: e.errors[0].message });
     res.status(500).json({ message: "Erro ao criar configura\xE7\xE3o" });
   }
 });
 commissionConfigsRouter.put("/:id", async (req, res) => {
   try {
-    const schema = z14.object({
-      payoutType: z14.enum(["percentual", "fixed"]).optional(),
-      payoutValue: z14.union([z14.string().transform(parseFloat), z14.number()]).optional(),
-      validFrom: z14.string().optional(),
-      validUntil: z14.string().nullable().optional()
+    const schema = z15.object({
+      payoutType: z15.enum(["percentual", "fixed"]).optional(),
+      payoutValue: z15.union([z15.string().transform(parseFloat), z15.number()]).optional(),
+      validFrom: z15.string().optional(),
+      validUntil: z15.string().nullable().optional()
     });
     const parsed = schema.parse(req.body);
     const updateData = {
@@ -8000,7 +8212,7 @@ commissionConfigsRouter.put("/:id", async (req, res) => {
     if (!updated) return res.status(404).json({ message: "Configura\xE7\xE3o n\xE3o encontrada" });
     res.json(updated);
   } catch (e) {
-    if (e instanceof z14.ZodError) return res.status(400).json({ message: e.errors[0].message });
+    if (e instanceof z15.ZodError) return res.status(400).json({ message: e.errors[0].message });
     res.status(500).json({ message: "Erro ao atualizar configura\xE7\xE3o" });
   }
 });
@@ -8091,7 +8303,7 @@ async function registerRoutes(app) {
       const psychologists2 = await storage.getAllPsychologists(req.companyId);
       const members = new Map((await storage.getAllUsers(req.companyId)).map((u) => [u.id, u]));
       const result = await Promise.all(
-        psychologists2.map(async (psych) => {
+        psychologists2.map(async ({ cpf: _cpf, ...psych }) => {
           const user = members.get(psych.userId) ?? await storage.getUser(psych.userId);
           return {
             ...psych,
@@ -8120,8 +8332,9 @@ async function registerRoutes(app) {
         return res.status(404).json({ message: "Psychologist not found" });
       }
       const user = await storage.getUser(psychologist.userId);
+      const { cpf: _cpf, ...publicFields } = psychologist;
       res.json({
-        ...psychologist,
+        ...publicFields,
         clinic: await publicClinic(psychologist.companyId),
         user: user ? {
           id: user.id,
@@ -9342,6 +9555,7 @@ async function registerRoutes(app) {
   app.use("/api/agent", agent_default);
   app.use("/api/whatsapp", whatsapp_default);
   app.use("/api", twilio_default);
+  app.use("/api/health-receipts", health_receipts_default);
   app.use("/api/care", care_public_default);
   app.use("/api/care/templates", care_templates_default);
   app.use("/api/care", care_dispatch_default);
@@ -10088,6 +10302,23 @@ async function runStartupMigrations() {
       )
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS whatsapp_messages_twilio_sid_idx ON whatsapp_messages (twilio_sid)`);
+    await pool.query(`ALTER TABLE psychologists ADD COLUMN IF NOT EXISTS cpf text`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS health_receipts (
+        id serial PRIMARY KEY,
+        company_id integer NOT NULL REFERENCES companies(id),
+        appointment_id integer NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
+        psychologist_id integer NOT NULL,
+        patient_id integer,
+        amount numeric(10,2) NOT NULL,
+        payer_cpf text NOT NULL,
+        beneficiary_cpf text,
+        issued_at timestamptz NOT NULL DEFAULT now(),
+        issued_by integer NOT NULL,
+        CONSTRAINT health_receipts_appointment UNIQUE (appointment_id)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS health_receipts_company_idx ON health_receipts (company_id)`);
   } catch (error) {
     log(`startup migration failed: ${error.message}`);
     throw error;

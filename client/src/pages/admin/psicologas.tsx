@@ -65,6 +65,8 @@ import { apiRequest } from "@/lib/queryClient";
 import Sidebar from "@/components/sidebar";
 import SpecializationChipSelector from "@/components/specialization-chip-selector";
 import { cn } from "@/lib/utils";
+import { formatCpf } from "@/lib/cpf";
+import { errorMessage } from "@/lib/api-error";
 
 interface Specialization { id: number; name: string; category: string | null }
 
@@ -73,6 +75,7 @@ interface Psychologist {
   userId: number;
   phone: string | null;
   crpNumber: string | null;
+  cpf: string | null;
   bio: string | null;
   startedAtClinic: string | null;
   hourlyRate: string;
@@ -97,6 +100,7 @@ interface EditFormState {
   birthDate: string;
   phone: string;
   crpNumber: string;
+  cpf: string;
   bio: string;
   startedAtClinic: string;
   status: string;
@@ -224,6 +228,7 @@ export default function AdminPsicologasPage() {
       birthDate: p.user.birthDate || "",
       phone: p.phone || "",
       crpNumber: p.crpNumber || "",
+      cpf: formatCpf(p.cpf),
       bio: p.bio || "",
       startedAtClinic: p.startedAtClinic || "",
       status: p.user.status,
@@ -244,7 +249,7 @@ export default function AdminPsicologasPage() {
       setEditingPsych(null);
       toast({ title: "Perfil atualizado com sucesso!" });
     },
-    onError: () => toast({ title: "Erro ao salvar", variant: "destructive" }),
+    onError: (e) => toast({ title: "Erro ao salvar", description: errorMessage(e), variant: "destructive" }),
   });
 
   const toggleActiveMutation = useMutation({
@@ -439,6 +444,7 @@ export default function AdminPsicologasPage() {
                       { icon: Phone, label: "Telefone", value: viewingPsych.phone || "—" },
                       { icon: Calendar, label: "Nascimento", value: `${formatDate(viewingPsych.user.birthDate)}${viewingPsych.age ? ` (${viewingPsych.age} anos)` : ""}` },
                       { icon: FileText, label: "CRP", value: viewingPsych.crpNumber || "—" },
+                      { icon: FileText, label: "CPF", value: viewingPsych.cpf ? formatCpf(viewingPsych.cpf) : "—" },
                     ].map(({ icon: Icon, label, value }) => (
                       <div key={label} className="flex items-start gap-3">
                         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cp-hover text-cp-ink">
@@ -595,6 +601,19 @@ export default function AdminPsicologasPage() {
                       className="mt-1"
                       data-testid="input-edit-crpNumber"
                     />
+                  </div>
+
+                  <div>
+                    <Label className="text-[13px] font-semibold text-cp-ink">CPF</Label>
+                    <Input
+                      value={editForm.cpf}
+                      onChange={(e) => setEditForm((f) => f ? { ...f, cpf: formatCpf(e.target.value) } : f)}
+                      placeholder="000.000.000-00"
+                      inputMode="numeric"
+                      className="mt-1"
+                      data-testid="input-edit-cpf"
+                    />
+                    <p className="mt-1 text-xs text-cp-muted">Usado nos recibos do Receita Saúde.</p>
                   </div>
 
                   <div>

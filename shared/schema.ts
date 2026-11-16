@@ -151,6 +151,7 @@ export const psychologists = pgTable("psychologists", {
   hourlyRate: decimal("hourly_rate", { precision: 10, scale: 2 }).notNull(),
   phone: text("phone"),
   crpNumber: text("crp_number"),
+  cpf: text("cpf"), // digits only; needed on the Receita Saúde receipt
   startedAtClinic: date("started_at_clinic"),
 });
 
@@ -537,6 +538,23 @@ export const whatsappMessages = pgTable("whatsapp_messages", {
 }, (t) => [unique("whatsapp_messages_appointment_kind").on(t.appointmentId, t.kind)]);
 
 export type WhatsappMessage = typeof whatsappMessages.$inferSelect;
+
+// Receita Saúde: the receipt itself is issued in the Receita's app (no public API). A row here only
+// records that the psychologist marked the session's receipt as issued, with the values used then.
+export const healthReceipts = pgTable("health_receipts", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id").notNull().references(() => companies.id),
+  appointmentId: integer("appointment_id").notNull().references(() => appointments.id, { onDelete: "cascade" }),
+  psychologistId: integer("psychologist_id").notNull(),
+  patientId: integer("patient_id"),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  payerCpf: text("payer_cpf").notNull(),
+  beneficiaryCpf: text("beneficiary_cpf"),
+  issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
+  issuedBy: integer("issued_by").notNull(),
+}, (t) => [unique("health_receipts_appointment").on(t.appointmentId)]);
+
+export type HealthReceipt = typeof healthReceipts.$inferSelect;
 
 export const calendarEventsRelations = relations(calendarEvents, ({ one }) => ({
   appointment: one(appointments, {

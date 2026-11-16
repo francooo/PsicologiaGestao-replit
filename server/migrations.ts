@@ -102,6 +102,24 @@ export async function runStartupMigrations() {
       )
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS whatsapp_messages_twilio_sid_idx ON whatsapp_messages (twilio_sid)`);
+    // Receita Saúde assistant: psychologist's CPF + which sessions already had the receipt issued
+    await pool.query(`ALTER TABLE psychologists ADD COLUMN IF NOT EXISTS cpf text`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS health_receipts (
+        id serial PRIMARY KEY,
+        company_id integer NOT NULL REFERENCES companies(id),
+        appointment_id integer NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
+        psychologist_id integer NOT NULL,
+        patient_id integer,
+        amount numeric(10,2) NOT NULL,
+        payer_cpf text NOT NULL,
+        beneficiary_cpf text,
+        issued_at timestamptz NOT NULL DEFAULT now(),
+        issued_by integer NOT NULL,
+        CONSTRAINT health_receipts_appointment UNIQUE (appointment_id)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS health_receipts_company_idx ON health_receipts (company_id)`);
   } catch (error) {
     log(`startup migration failed: ${(error as Error).message}`);
     throw error;

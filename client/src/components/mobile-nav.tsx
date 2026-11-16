@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { Menu, X, Home, CalendarDays, Users, DoorOpen, BarChart3, Lock, Settings, LogOut, UserCircle, FileText, ClipboardList, Contact, HandCoins, Building2 } from "lucide-react";
+import { Menu, X, Home, CalendarDays, Users, DoorOpen, BarChart3, Lock, Settings, LogOut, UserCircle, FileText, ClipboardList, Contact, HandCoins, Building2, ReceiptText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function MobileNav() {
@@ -68,6 +68,12 @@ export default function MobileNav() {
       name: "Minhas Notas Fiscais",
       icon: <FileText className="w-5 h-5" />,
       href: "/invoices",
+      allowedRoles: ["admin", "psychologist", "receptionist"]
+    },
+    {
+      name: "Recibos (Receita Saúde)",
+      icon: <ReceiptText className="w-5 h-5" />,
+      href: "/recibos",
       allowedRoles: ["admin", "psychologist", "receptionist"]
     },
     {

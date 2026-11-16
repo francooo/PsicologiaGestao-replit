@@ -23,6 +23,7 @@ import {
   Video,
   HandCoins,
   Building2,
+  ReceiptText,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { BrandLogo } from "@/components/brand/brand-logo";
@@ -110,6 +111,12 @@ export default function Sidebar() {
       name: "Minhas Notas Fiscais",
       icon: <FileText className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />,
       href: "/invoices",
+      roles: ["admin", "psychologist", "receptionist"],
+    },
+    {
+      name: "Recibos (Receita Saúde)",
+      icon: <ReceiptText className="w-5 h-5 mr-3 text-cp-action flex-shrink-0" />,
+      href: "/recibos",
       roles: ["admin", "psychologist", "receptionist"],
     },
     {

@@ -15,6 +15,8 @@ import { PageHeader, cpButton } from "@/components/cp/PageHeader";
 import { CharCountTextarea, IconField } from "@/components/cp/fields";
 import { StatusBadge } from "@/components/cp/StatusBadge";
 import { roleName } from "@/components/cp/status";
+import { formatCpf } from "@/lib/cpf";
+import { errorMessage } from "@/lib/api-error";
 
 interface ProfileData {
   id: number;
@@ -29,6 +31,7 @@ interface ProfileData {
     id: number;
     phone: string | null;
     crpNumber: string | null;
+    cpf: string | null;
     bio: string | null;
     startedAtClinic: string | null;
     hourlyRate: string;
@@ -152,7 +155,7 @@ export default function PerfilPage() {
   const [editingSpecs, setEditingSpecs] = useState(false);
 
   // Draft values for each section
-  const [draftInfo, setDraftInfo] = useState({ fullName: "", phone: "", birthDate: "", crpNumber: "" });
+  const [draftInfo, setDraftInfo] = useState({ fullName: "", phone: "", birthDate: "", crpNumber: "", cpf: "" });
   const [draftBio, setDraftBio] = useState("");
   const [draftSpecIds, setDraftSpecIds] = useState<number[]>([]);
 
@@ -169,6 +172,7 @@ export default function PerfilPage() {
       phone: psych?.phone || "",
       birthDate: profile.birthDate || "",
       crpNumber: psych?.crpNumber || "",
+      cpf: formatCpf(psych?.cpf),
     });
     setEditingInfo(true);
   };
@@ -192,7 +196,7 @@ export default function PerfilPage() {
       setEditingInfo(false);
       toast({ title: "Informações atualizadas!" });
     },
-    onError: () => toast({ title: "Erro ao salvar informações", variant: "destructive" }),
+    onError: (e) => toast({ title: "Erro ao salvar informações", description: errorMessage(e), variant: "destructive" }),
   });
 
   const saveBioMutation = useMutation({
@@ -325,6 +329,7 @@ export default function PerfilPage() {
                     <InfoRow icon={Calendar} label="Nascimento">{formatDate(profile?.birthDate)}</InfoRow>
                     {psych && <InfoRow icon={Phone} label="Telefone">{psych.phone || "—"}</InfoRow>}
                     {psych && <InfoRow icon={FileText} label="CRP">{psych.crpNumber || "—"}</InfoRow>}
+                    {psych && <InfoRow icon={FileText} label="CPF">{psych.cpf ? formatCpf(psych.cpf) : "—"}</InfoRow>}
                     <InfoRow icon={Mail} label="E-mail" locked>{profile?.email || "—"}</InfoRow>
                     {psych && <InfoRow icon={Home} label="Entrada na clínica" locked>{formatDate(psych.startedAtClinic)}</InfoRow>}
                   </dl>
@@ -347,6 +352,11 @@ export default function PerfilPage() {
                         <div>
                           <label className={fieldLabel} htmlFor="pf-crp">Número do CRP</label>
                           <IconField icon={FileText}><Input id="pf-crp" value={draftInfo.crpNumber} onChange={setDraft("crpNumber")} placeholder="06/12345" data-testid="input-crpNumber" /></IconField>
+                        </div>
+                        <div>
+                          <label className={fieldLabel} htmlFor="pf-cpf">CPF</label>
+                          <IconField icon={FileText}><Input id="pf-cpf" inputMode="numeric" value={draftInfo.cpf} onChange={(e) => setDraftInfo((d) => ({ ...d, cpf: formatCpf(e.target.value) }))} placeholder="000.000.000-00" data-testid="input-cpf" /></IconField>
+                          <p className="mt-1 text-xs text-cp-muted">Usado nos recibos do Receita Saúde.</p>
                         </div>
                       </>
                     )}

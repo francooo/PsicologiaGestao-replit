@@ -16,6 +16,7 @@ import { TextField } from '@/components/ui/TextField';
 import { useAdminPsychologists } from '@/api/admin';
 import { api } from '@/api/client';
 import { confirm } from '@/utils/confirm';
+import { formatCpf } from '@/utils/format';
 import { monthsAtClinicText } from '@/utils/people';
 import { toast } from '@/utils/toast';
 import { colors } from '@/theme/tokens';
@@ -40,6 +41,7 @@ function PsychologistEditor({ p }: { p: AdminPsychologist }) {
     phone: p.phone ?? '',
     birthDate: p.user.birthDate?.slice(0, 10) ?? '',
     crpNumber: p.crpNumber ?? '',
+    cpf: formatCpf(p.cpf),
     startedAtClinic: p.startedAtClinic?.slice(0, 10) ?? '',
     bio: p.bio ?? '',
   });
@@ -63,6 +65,7 @@ function PsychologistEditor({ p }: { p: AdminPsychologist }) {
           phone: empty(form.phone),
           birthDate: empty(form.birthDate),
           crpNumber: empty(form.crpNumber),
+          cpf: form.cpf.replace(/\D/g, ''),
           startedAtClinic: empty(form.startedAtClinic),
           bio: empty(form.bio),
         },
@@ -127,6 +130,14 @@ function PsychologistEditor({ p }: { p: AdminPsychologist }) {
           {field('phone', 'Telefone', { keyboardType: 'phone-pad' })}
           <DateTimeField label="Data de nascimento" mode="date" value={form.birthDate} onChange={(v) => setForm({ ...form, birthDate: v })} />
           {field('crpNumber', 'Número do CRP')}
+          <TextField
+            label="CPF"
+            placeholder="000.000.000-00"
+            keyboardType="number-pad"
+            hint="Usado nos recibos do Receita Saúde."
+            value={form.cpf}
+            onChangeText={(t) => setForm({ ...form, cpf: formatCpf(t) })}
+          />
           <DateTimeField
             label="Entrada na clínica"
             mode="date"

@@ -210,7 +210,9 @@ router.patch("/:id", async (req, res) => {
     const psych = await findPsych(companyId, id);
     if (!psych) return res.status(404).json({ error: "Psicóloga não encontrada." });
 
-    const { fullName, email, birthDate, status, phone, crpNumber, bio, startedAtClinic } = req.body;
+    const { fullName, email, birthDate, status, phone, crpNumber, cpf, bio, startedAtClinic } = req.body;
+    const cpfDigits = cpf === undefined ? undefined : String(cpf ?? "").replace(/\D/g, "");
+    if (cpfDigits && cpfDigits.length !== 11) return res.status(400).json({ message: "CPF deve ter 11 dígitos.", field: "cpf" });
 
     // Update users table (the account, shared by every clinic the person is in)
     const userUpdate: Record<string, any> = {};
@@ -233,6 +235,7 @@ router.patch("/:id", async (req, res) => {
     const psychUpdate: Record<string, any> = {};
     if (phone !== undefined) psychUpdate.phone = phone || null;
     if (crpNumber !== undefined) psychUpdate.crpNumber = crpNumber || null;
+    if (cpfDigits !== undefined) psychUpdate.cpf = cpfDigits || null;
     if (bio !== undefined) psychUpdate.bio = bio || null;
     if (startedAtClinic !== undefined) psychUpdate.startedAtClinic = startedAtClinic || null;
     if (Object.keys(psychUpdate).length > 0) {

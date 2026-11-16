@@ -11,6 +11,7 @@ import {
   LogOut,
   MessageCircle,
   Receipt,
+  ReceiptText,
   Settings,
   ShieldCheck,
   UserRound,
@@ -53,6 +54,7 @@ const sections: { title: string; items: Item[] }[] = [
     items: [
       { label: 'Fluxo de caixa', href: '/financeiro/fluxo-caixa', icon: BarChart3 },
       { label: 'Minhas notas fiscais', href: '/notas', icon: Receipt },
+      { label: 'Recibos (Receita Saúde)', href: '/recibos', icon: ReceiptText },
       { label: 'Gestão de notas', href: '/admin/notas', icon: FileCheck2, roles: ['admin'] },
       { label: 'Comissões', href: '/admin/comissoes', icon: HandCoins, roles: ['admin'] },
     ],

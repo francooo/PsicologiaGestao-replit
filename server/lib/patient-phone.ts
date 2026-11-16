@@ -7,7 +7,16 @@ import { formatPhoneNumber } from "../services/whatsapp";
 // name (accents and case ignored). Shared by the wa.me reminders and the automatic ones (Twilio).
 
 export type PhoneIssue = "not_found" | "no_phone" | "invalid" | "ambiguous" | null;
-type PatientRow = { id: number; fullName: string; phone: string; psychologistId: number | null };
+export type PatientRow = {
+  id: number;
+  fullName: string;
+  phone: string;
+  psychologistId: number | null;
+  cpf: string | null;
+  birthDate: string | null;
+  legalGuardianName: string | null;
+  legalGuardianCpf: string | null;
+};
 export type PatientIndex = Map<string, PatientRow[]>;
 
 export const normalizeName = (s: string) =>
@@ -16,7 +25,16 @@ export const normalizeName = (s: string) =>
 /** The clinic's patients grouped by normalized name. */
 export async function patientIndex(companyId: number): Promise<PatientIndex> {
   const rows = await db
-    .select({ id: patients.id, fullName: patients.fullName, phone: patients.phone, psychologistId: patients.psychologistId })
+    .select({
+      id: patients.id,
+      fullName: patients.fullName,
+      phone: patients.phone,
+      psychologistId: patients.psychologistId,
+      cpf: patients.cpf,
+      birthDate: patients.birthDate,
+      legalGuardianName: patients.legalGuardianName,
+      legalGuardianCpf: patients.legalGuardianCpf,
+    })
     .from(patients)
     .where(eq(patients.companyId, companyId));
   const byName: PatientIndex = new Map();
@@ -25,6 +43,18 @@ export async function patientIndex(companyId: number): Promise<PatientIndex> {
     byName.set(k, [...(byName.get(k) ?? []), p]);
   }
   return byName;
+}
+
+/** The appointment's patient record; with homonyms the psychologist's own patient wins. */
+export function findPatient(appt: { patientName: string; psychologistId: number }, byName: PatientIndex) {
+  let found = byName.get(normalizeName(appt.patientName)) ?? [];
+  if (found.length > 1) {
+    const own = found.filter((p) => p.psychologistId === appt.psychologistId);
+    if (own.length > 0) found = own;
+  }
+  if (found.length === 0) return { patient: null, issue: "not_found" as const };
+  if (found.length > 1) return { patient: null, issue: "ambiguous" as const };
+  return { patient: found[0], issue: null };
 }
 
 /** Two patients with the same name and different phones → ambiguous (the psychologist's own wins). */

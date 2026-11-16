@@ -85,7 +85,9 @@ router.get("/", async (req, res) => {
 router.patch("/", async (req, res) => {
   try {
     const user = req.user as { id: number; role: string };
-    const { fullName, phone, birthDate, crpNumber, bio } = req.body;
+    const { fullName, phone, birthDate, crpNumber, cpf, bio } = req.body;
+    const cpfDigits = cpf === undefined ? undefined : String(cpf ?? "").replace(/\D/g, "");
+    if (cpfDigits && cpfDigits.length !== 11) return res.status(400).json({ message: "CPF deve ter 11 dígitos.", field: "cpf" });
 
     // Update users table fields
     const userUpdate: Record<string, any> = {};
@@ -100,6 +102,7 @@ router.patch("/", async (req, res) => {
     const psychUpdate: Record<string, any> = {};
     if (phone !== undefined) psychUpdate.phone = phone || null;
     if (crpNumber !== undefined) psychUpdate.crpNumber = crpNumber || null;
+    if (cpfDigits !== undefined) psychUpdate.cpf = cpfDigits || null;
     if (bio !== undefined) psychUpdate.bio = bio || null;
 
     if (Object.keys(psychUpdate).length > 0) {

@@ -24,6 +24,7 @@ import platformRouter from "./routes/platform";
 import agentRouter from "./routes/agent";
 import whatsappRouter from "./routes/whatsapp";
 import twilioRouter from "./routes/twilio";
+import healthReceiptsRouter from "./routes/health-receipts";
 import { BookingError, createRoomBookingChecked } from "./lib/room-bookings";
 import { removeAppointmentFromCalendar, removeRoomBookingFromCalendar, syncAppointmentToCalendar, syncRoomBookingToCalendar } from "./lib/calendar-sync";
 import { publicClinic } from "./lib/companies";
@@ -146,7 +147,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Get associated user details for each psychologist
       const result = await Promise.all(
-        psychologists.map(async (psych) => {
+        psychologists.map(async ({ cpf: _cpf, ...psych }) => {
           const user = members.get(psych.userId) ?? (await storage.getUser(psych.userId));
           return {
             ...psych,
@@ -181,9 +182,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const user = await storage.getUser(psychologist.userId);
+      // The CPF is only for the psychologist's own receipts; this route is also public (quick booking)
+      const { cpf: _cpf, ...publicFields } = psychologist;
 
       res.json({
-        ...psychologist,
+        ...publicFields,
         clinic: await publicClinic(psychologist.companyId),
         user: user ? {
           id: user.id,
@@ -1715,6 +1718,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api/whatsapp", whatsappRouter);
   // Automatic WhatsApp reminders (Twilio): scheduler + status callback, no session
   app.use("/api", twilioRouter);
+  // Receita Saúde assistant: completed sessions with the receipt data, marked as issued
+  app.use("/api/health-receipts", healthReceiptsRouter);
 
   // Care module — public response routes (no auth required) — MUST be mounted FIRST
   // so that /api/care/respond/:token is reachable before the authenticated dispatch

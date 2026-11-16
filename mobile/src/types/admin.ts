@@ -5,6 +5,7 @@ export interface AdminPsychologist {
   userId: number;
   phone: string | null;
   crpNumber: string | null;
+  cpf: string | null;
   bio: string | null;
   startedAtClinic: string | null;
   hourlyRate: string;

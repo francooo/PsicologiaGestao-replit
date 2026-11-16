@@ -15,6 +15,7 @@ import QuickBooking from "@/pages/quick-booking";
 import PasswordRecovery from "@/pages/password-recovery";
 import ResetPassword from "@/pages/reset-password";
 import Invoices from "@/pages/invoices";
+import Receipts from "@/pages/receipts";
 import AdminInvoices from "@/pages/admin-invoices";
 import PatientsList from "@/pages/patients";
 import PatientRecord from "@/pages/patients/record";
@@ -46,6 +47,7 @@ function Router() {
       <ProtectedRoute path="/financial" component={Financial} />
       <ProtectedRoute path="/cash-flow" component={CashFlow} />
       <ProtectedRoute path="/invoices" component={Invoices} />
+      <ProtectedRoute path="/recibos" component={Receipts} />
       <ProtectedRoute path="/admin/invoices" component={AdminInvoices} roles={ADMIN} />
       <ProtectedRoute path="/permissions" component={Permissions} roles={ADMIN} />
 
